@@ -219,7 +219,7 @@ export default function TicketDetail() {
                   </div>
                 </div>
               </motion.div>
-              <KBSidebar subject={ticket?.subject} description={ticket?.description} />
+              <KBSidebar subject={ticket?.subject} description={ticket?.description} onCopySolution={(content) => { setReply(content); setIsInternal(false); toast.success("Solution copied to draft", {style: { background: "#18181b", color: "#22d3ee", border: "1px solid #0891b2" }}); }} />
             </div>
           ) : (
             <Customer360 customerId={ticket?.customer_id} ticketId={id} />

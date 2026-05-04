@@ -4,7 +4,7 @@ import * as FiIcons from 'react-icons/fi';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useTicketStore } from '../store/useTicketStore';
 
-const { FiCircle, FiCheckCircle, FiClock, FiAlertCircle, FiSearch } = FiIcons;
+const { FiCircle, FiCheckCircle, FiClock, FiAlertCircle, FiSearch, FiCheckSquare, FiSquare } = FiIcons;
 
 const statusStyles = {
   open: { icon: FiCircle, color: 'text-cyan-400', border: 'border-cyan-500/50', bg: 'bg-cyan-500/10' },
@@ -14,7 +14,7 @@ const statusStyles = {
 };
 
 export default function TicketList({ onSelectTicket }) {
-  const { tickets, isLoading, fetchTickets, subscribeToTickets, searchQuery } = useTicketStore();
+  const { tickets, isLoading, fetchTickets, subscribeToTickets, searchQuery, selectedTicketIds, toggleSelectedTicketId } = useTicketStore();
 
   useEffect(() => {
     fetchTickets();
@@ -60,6 +60,7 @@ export default function TicketList({ onSelectTicket }) {
           const style = statusStyles[ticket.status] || statusStyles.open;
           const priorityColor = ticket.priority === 'urgent' ? 'text-rose-500' : ticket.priority === 'high' ? 'text-amber-500' : 'text-zinc-500';
           const customerName = ticket.contacts_ax2024?.name || 'Unknown Contact';
+          const isSelected = selectedTicketIds.includes(ticket.id);
           
           return (
             <motion.div 
@@ -69,14 +70,21 @@ export default function TicketList({ onSelectTicket }) {
               animate={{ opacity: 1, scale: 1 }} 
               exit={{ opacity: 0, scale: 0.95 }}
               transition={{ duration: 0.2 }}
-              onClick={() => onSelectTicket(ticket.id)}
-              className="group flex items-center justify-between p-5 bg-zinc-900/40 border border-zinc-800 hover:border-zinc-600 rounded-2xl transition-all cursor-pointer hover:bg-zinc-800/40"
+              className={`group flex items-center justify-between p-5 border rounded-2xl transition-all cursor-pointer ${
+                  isSelected ? 'bg-fuchsia-500/10 border-fuchsia-500/50' : 'bg-zinc-900/40 border-zinc-800 hover:border-zinc-600 hover:bg-zinc-800/40'
+              }`}
             >
               <div className="flex items-center gap-5">
-                <div className={`w-12 h-12 rounded-xl ${style.bg} border-2 ${style.border} flex items-center justify-center transition-all group-hover:scale-110 shadow-lg shrink-0`}>
+                <button
+                  onClick={(e) => { e.stopPropagation(); toggleSelectedTicketId(ticket.id); }}
+                  className={`p-2 rounded-lg transition-colors ${isSelected ? 'text-fuchsia-400' : 'text-zinc-600 hover:text-zinc-400'}`}
+                >
+                    <SafeIcon icon={isSelected ? FiCheckSquare : FiSquare} className="text-xl" />
+                </button>
+                <div onClick={() => onSelectTicket(ticket.id)} className={`w-12 h-12 rounded-xl ${style.bg} border-2 ${style.border} flex items-center justify-center transition-all group-hover:scale-110 shadow-lg shrink-0`}>
                   <SafeIcon icon={style.icon} className={`text-xl ${style.color}`} />
                 </div>
-                <div>
+                <div onClick={() => onSelectTicket(ticket.id)}>
                   <h4 className="font-bold text-zinc-100 group-hover:text-cyan-400 transition-colors tracking-tight">
                     {ticket.subject}
                   </h4>
@@ -94,7 +102,7 @@ export default function TicketList({ onSelectTicket }) {
                 </div>
               </div>
               
-              <div className={`px-4 py-1.5 rounded-lg border text-[10px] font-black uppercase tracking-[0.15em] shrink-0 ${style.color} ${style.border} ${style.bg}`}>
+              <div onClick={() => onSelectTicket(ticket.id)} className={`px-4 py-1.5 rounded-lg border text-[10px] font-black uppercase tracking-[0.15em] shrink-0 ${style.color} ${style.border} ${style.bg}`}>
                 {ticket.status}
               </div>
             </motion.div>

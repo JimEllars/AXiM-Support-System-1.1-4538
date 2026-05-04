@@ -9,6 +9,13 @@ export const useTicketStore = create((set, get) => ({
   setSelectedTicketId: (id) => set({ selectedTicketId: id }),
   searchQuery: '',
   setSearchQuery: (query) => set({ searchQuery: query }),
+  selectedTicketIds: [], // State for multi-select
+  setSelectedTicketIds: (ids) => set({ selectedTicketIds: ids }),
+  toggleSelectedTicketId: (id) => set((state) => ({
+      selectedTicketIds: state.selectedTicketIds.includes(id)
+          ? state.selectedTicketIds.filter(selectedId => selectedId !== id)
+          : [...state.selectedTicketIds, id]
+  })),
 
   fetchTickets: async () => {
     set({ isLoading: true });
