@@ -24,7 +24,7 @@ export default function MessageThread({ messages }) {
             
             <div className={`flex-1 p-6 rounded-[1.5rem] border transition-all ${
               isAI ? 'bg-fuchsia-950/10 border-fuchsia-500/20 neon-border-fuchsia' :
-              isInternal ? 'bg-amber-950/10 border-amber-500/20' :
+              isInternal ? 'bg-amber-900/20 border-amber-500/30' :
               'bg-zinc-900/40 border-zinc-800 shadow-xl'
             }`}>
               <div className="flex justify-between items-center mb-4">

@@ -7,7 +7,7 @@ import AutoDraftWhisper from '../components/tickets/AutoDraftWhisper';
 import KBSidebar from '../components/tickets/KBSidebar';
 import SafeIcon from '../common/SafeIcon';
 import * as FiIcons from 'react-icons/fi';
-import { motion } from 'framer-motion';
+import { motion, AnimatePresence } from 'framer-motion';
 import { onyxService } from '../services/onyxService';
 import toast from 'react-hot-toast';
 
@@ -23,6 +23,14 @@ export default function TicketDetail() {
   const [isInternal, setIsInternal] = useState(false);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState('intelligence');
+  const [showMentionMenu, setShowMentionMenu] = useState(false);
+  const [mentionQuery, setMentionQuery] = useState('');
+  const [mentionIndex, setMentionIndex] = useState(-1);
+  const [teamMembers, setTeamMembers] = useState([
+    { id: '1', name: 'Ada Lovelace', role: 'admin' },
+    { id: '2', name: 'Alan Turing', role: 'support' },
+    { id: '3', name: 'Grace Hopper', role: 'support' }
+  ]);
 
   useEffect(() => {
     const fetchDetails = async () => {
@@ -153,11 +161,59 @@ export default function TicketDetail() {
               <div className="relative group">
                 <textarea 
                   value={reply}
-                  onChange={(e) => setReply(e.target.value)}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    setReply(val);
+
+                    const cursorPosition = e.target.selectionStart;
+                    const textBeforeCursor = val.slice(0, cursorPosition);
+                    const match = textBeforeCursor.match(/@(\w*)$/);
+
+                    if (match) {
+                        setShowMentionMenu(true);
+                        setMentionQuery(match[1]);
+                        setMentionIndex(cursorPosition - match[0].length);
+                    } else {
+                        setShowMentionMenu(false);
+                    }
+                  }}
                   placeholder={isInternal ? "SYSLOG: Add internal agent perspective..." : "RESPOND: Craft a public resolution message..."}
                   className={`w-full p-8 pb-20 rounded-[2.5rem] border-2 outline-none transition-all font-medium text-lg resize-none ${isInternal ? 'bg-amber-950/10 border-amber-500/20 focus:border-amber-500/50 text-amber-100 placeholder-amber-900/50' : 'bg-zinc-950 border-zinc-800 focus:border-cyan-500/50 text-white placeholder-zinc-800'}`}
                   rows={4}
                 />
+                <AnimatePresence>
+                  {showMentionMenu && (
+                    <motion.div
+                      initial={{ opacity: 0, y: 10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: 10 }}
+                      className="absolute bottom-32 left-8 w-64 bg-zinc-900/80 backdrop-blur-xl border border-zinc-700/50 rounded-2xl shadow-2xl overflow-hidden z-50"
+                    >
+                      {teamMembers
+                        .filter(m => m.name.toLowerCase().includes(mentionQuery.toLowerCase()))
+                        .map(member => (
+                          <button
+                            key={member.id}
+                            onClick={() => {
+                                const newReply = reply.slice(0, mentionIndex) + '@' + member.name + ' ' + reply.slice(mentionIndex + mentionQuery.length + 1);
+                                setReply(newReply);
+                                setShowMentionMenu(false);
+                                setIsInternal(true);
+                            }}
+                            className="w-full text-left px-4 py-3 hover:bg-zinc-800/50 transition-colors flex items-center gap-3 border-b border-zinc-800/50 last:border-0"
+                          >
+                            <div className="w-8 h-8 rounded-full bg-zinc-800 flex items-center justify-center text-xs font-bold text-cyan-400">
+                                {member.name.charAt(0)}
+                            </div>
+                            <div>
+                                <div className="text-sm font-bold text-white">{member.name}</div>
+                                <div className="text-[10px] uppercase font-black tracking-widest text-zinc-500">{member.role}</div>
+                            </div>
+                          </button>
+                        ))}
+                    </motion.div>
+                  )}
+                </AnimatePresence>
                 <div className="absolute bottom-6 right-8 flex items-center gap-6">
                    <button onClick={handleSend} className={`p-6 rounded-2xl text-black transition-all transform active:scale-90 shadow-2xl ${isInternal ? 'bg-amber-500 hover:bg-amber-400' : 'bg-cyan-500 hover:bg-cyan-400'}`}>
                     <SafeIcon icon={FiSend} className="text-xl" />

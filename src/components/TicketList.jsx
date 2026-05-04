@@ -60,6 +60,16 @@ export default function TicketList({ onSelectTicket }) {
           const style = statusStyles[ticket.status] || statusStyles.open;
           const priorityColor = ticket.priority === 'urgent' ? 'text-rose-500' : ticket.priority === 'high' ? 'text-amber-500' : 'text-zinc-500';
           const customerName = ticket.contacts_ax2024?.name || 'Unknown Contact';
+
+          let slaBreaching = false;
+          if (ticket.sla_breach_at && ticket.status !== 'resolved' && ticket.status !== 'closed') {
+              const breachDate = new Date(ticket.sla_breach_at);
+              const oneHourFromNow = new Date();
+              oneHourFromNow.setHours(oneHourFromNow.getHours() + 1);
+              if (breachDate < oneHourFromNow) {
+                  slaBreaching = true;
+              }
+          }
           const isSelected = selectedTicketIds.includes(ticket.id);
           
           return (
@@ -70,7 +80,7 @@ export default function TicketList({ onSelectTicket }) {
               animate={{ opacity: 1, scale: 1 }} 
               exit={{ opacity: 0, scale: 0.95 }}
               transition={{ duration: 0.2 }}
-              className={`group flex items-center justify-between p-5 border rounded-2xl transition-all cursor-pointer ${
+              className={`group flex items-center justify-between p-5 border rounded-2xl transition-all cursor-pointer ${slaBreaching ? 'animate-pulse text-rose-500 border-rose-500/50' : ''} ${
                   isSelected ? 'bg-fuchsia-500/10 border-fuchsia-500/50' : 'bg-zinc-900/40 border-zinc-800 hover:border-zinc-600 hover:bg-zinc-800/40'
               }`}
             >
