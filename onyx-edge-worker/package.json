@@ -1,0 +1,13 @@
+{
+  "name": "onyx-edge-worker",
+  "version": "1.0.0",
+  "main": "src/index.ts",
+  "dependencies": {
+    "@supabase/supabase-js": "^2.39.0"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20230419.0",
+    "@types/node": "^25.6.0",
+    "typescript": "^5.0.4"
+  }
+}
