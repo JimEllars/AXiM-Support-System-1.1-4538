@@ -3,12 +3,16 @@ import SafeIcon from '../common/SafeIcon';
 import * as FiIcons from 'react-icons/fi';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useTicketStore } from '../store/useTicketStore';
+import { onyxService } from '../services/onyxService';
+import { supabase } from '../lib/supabaseClient';
+import toast from 'react-hot-toast';
 
-const { FiTerminal, FiSearch, FiZap, FiChevronRight, FiFilter } = FiIcons;
+const { FiTerminal, FiSearch, FiZap, FiChevronRight, FiFilter, FiCpu } = FiIcons;
 
 export default function OnyxCommandHub() {
   const { searchQuery, setSearchQuery } = useTicketStore();
   const [isFocused, setIsFocused] = useState(false);
+  const [isProcessing, setIsProcessing] = useState(false);
   const inputRef = useRef(null);
 
   // Global CMD+K shortcut
@@ -22,6 +26,53 @@ export default function OnyxCommandHub() {
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, []);
+
+  const handleKeyDown = async (e) => {
+    if (e.key === 'Enter' && searchQuery.trim()) {
+      e.preventDefault();
+      setIsProcessing(true);
+
+      try {
+        const result = await onyxService.parseCommand(searchQuery);
+
+        if (result.intent === 'SYSTEM_ACTION') {
+            if (result.action === 'ASSIGN_TICKET') {
+                const { error } = await supabase.from('support_tickets').update({ assignee_id: result.assignee === 'me' ? 'agent_user' : result.assignee }).eq('id', result.ticketId);
+                if (error) throw error;
+                toast.success(`SYSTEM_EXEC: Ticket #${result.ticketId.slice(0, 8)} assigned.`, {
+                    style: { background: '#18181b', color: '#10b981', border: '1px solid #047857' },
+                    icon: <SafeIcon icon={FiTerminal} />
+                });
+            } else if (result.action === 'UPDATE_PRIORITY') {
+                const { error } = await supabase.from('support_tickets').update({ priority: result.priority }).eq('id', result.ticketId);
+                if (error) throw error;
+                toast.success(`SYSTEM_EXEC: Ticket #${result.ticketId.slice(0, 8)} marked as ${result.priority}.`, {
+                    style: { background: '#18181b', color: '#10b981', border: '1px solid #047857' },
+                    icon: <SafeIcon icon={FiTerminal} />
+                });
+            }
+            setSearchQuery('');
+            inputRef.current?.blur();
+        } else if (result.intent === 'FILTER') {
+            toast.success(`Applying Onyx Intelligence filter...`, {
+                style: { background: '#18181b', color: '#d946ef', border: '1px solid #a21caf' },
+                icon: <SafeIcon icon={FiCpu} />
+            });
+            setSearchQuery(result.value || result.action);
+        } else {
+             toast('Searching knowledge base and cases...', {
+                style: { background: '#18181b', color: '#22d3ee', border: '1px solid #0891b2' }
+            });
+        }
+      } catch (error) {
+        toast.error('Command Execution Failed: ' + error.message, {
+            style: { background: '#18181b', color: '#f43f5e', border: '1px solid #9f1239' }
+        });
+      } finally {
+        setIsProcessing(false);
+      }
+    }
+  };
 
   const handlePresetAction = (presetText) => {
     setSearchQuery(presetText);
@@ -43,9 +94,11 @@ export default function OnyxCommandHub() {
           <input 
             ref={inputRef}
             type="text"
-            placeholder="Invoke command or filter stream..."
-            className="flex-1 bg-transparent outline-none text-zinc-100 placeholder-zinc-700 font-medium mono-font text-lg"
+            placeholder={isProcessing ? "PROCESSING INTENT..." : "Invoke command or filter stream..."}
+            className="flex-1 bg-transparent outline-none text-zinc-100 placeholder-zinc-700 font-medium mono-font text-lg disabled:opacity-50"
             value={searchQuery}
+            disabled={isProcessing}
+            onKeyDown={handleKeyDown}
             onFocus={() => setIsFocused(true)}
             onBlur={() => setTimeout(() => setIsFocused(false), 200)}
             onChange={(e) => setSearchQuery(e.target.value)}
@@ -58,7 +111,7 @@ export default function OnyxCommandHub() {
       </motion.div>
       
       <AnimatePresence>
-        {isFocused && searchQuery.length > 0 && (
+        {isFocused && searchQuery.length > 0 && !isProcessing && (
           <motion.div 
             initial={{ opacity: 0, y: -10 }}
             animate={{ opacity: 1, y: 0 }}
@@ -70,7 +123,7 @@ export default function OnyxCommandHub() {
               <div onClick={() => handlePresetAction(`urgent`)} className="flex items-center justify-between p-3 hover:bg-zinc-800/50 rounded-xl cursor-pointer group transition-all">
                 <div className="flex items-center gap-3">
                   <SafeIcon icon={FiFilter} className="text-zinc-500 group-hover:text-cyan-400" />
-                  <span className="text-sm font-medium text-zinc-300">Show only matches for "<span className="text-cyan-400">{searchQuery}</span>"</span>
+                  <span className="text-sm font-medium text-zinc-300">Execute command for "<span className="text-cyan-400">{searchQuery}</span>"</span>
                 </div>
                 <div className="text-[10px] mono-font text-zinc-600 bg-zinc-950 px-2 py-1 rounded">ENTER</div>
               </div>

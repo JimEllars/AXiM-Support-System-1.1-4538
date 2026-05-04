@@ -2,43 +2,53 @@ import React, { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabaseClient';
 import MessageThread from '../components/tickets/MessageThread';
-import KBSidebar from '../components/tickets/KBSidebar';
-import AutoDraftWhisper from '../components/tickets/AutoDraftWhisper';
 import Customer360 from '../components/tickets/Customer360';
+import AutoDraftWhisper from '../components/tickets/AutoDraftWhisper';
+import KBSidebar from '../components/tickets/KBSidebar';
 import SafeIcon from '../common/SafeIcon';
 import * as FiIcons from 'react-icons/fi';
 import { motion } from 'framer-motion';
+import { onyxService } from '../services/onyxService';
+import toast from 'react-hot-toast';
 
-const { FiArrowLeft, FiCpu, FiActivity, FiLock, FiSend, FiGlobe, FiTerminal, FiLayout } = FiIcons;
+const { FiArrowLeft, FiSend, FiLock, FiGlobe, FiCpu, FiLayout, FiActivity } = FiIcons;
 
 export default function TicketDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
   const [ticket, setTicket] = useState(null);
-  const [telemetry, setTelemetry] = useState(null);
   const [messages, setMessages] = useState([]);
-  const [isInternal, setIsInternal] = useState(false);
+  const [telemetry, setTelemetry] = useState(null);
   const [reply, setReply] = useState('');
+  const [isInternal, setIsInternal] = useState(false);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState('intelligence');
 
-  const fetchFullTicket = async () => {
-    const { data: ticketData } = await supabase.from('support_tickets').select('*').eq('id', id).single();
-    const { data: aiData } = await supabase.from('ticket_ai_telemetry').select('*').eq('ticket_id', id).single();
-    const { data: thread } = await supabase.from('ticket_messages').select('*').eq('ticket_id', id).order('created_at', { ascending: true });
-    
-    setTicket(ticketData);
-    setTelemetry(aiData);
-    setMessages(thread || []);
-    setLoading(false);
-  };
-
   useEffect(() => {
-    fetchFullTicket();
+    const fetchDetails = async () => {
+      setLoading(true);
+      const [ticketRes, msgsRes, telemRes] = await Promise.all([
+        supabase.from('support_tickets').select('*, contacts_ax2024(*)').eq('id', id).single(),
+        supabase.from('ticket_messages').select('*').eq('ticket_id', id).order('created_at', { ascending: true }),
+        supabase.from('ticket_ai_telemetry').select('*').eq('ticket_id', id).single()
+      ]);
 
-    // REAL-TIME SYNC: Subscribe to new messages
-    const channel = supabase
-      .channel(`ticket_channel_${id}`)
+      if (ticketRes.data) setTicket(ticketRes.data);
+      if (msgsRes.data) setMessages(msgsRes.data);
+      if (telemRes.data) {
+          setTelemetry(telemRes.data);
+      } else if (ticketRes.data) {
+          // If no telemetry exists, trigger Onyx draft generation
+          const draftRes = await onyxService.generateAutoDraft(id, ticketRes.data);
+          setTelemetry({ auto_response_draft: draftRes.draft, analyzed_sentiment: 'Processing...', confidence_score: 85 });
+      }
+
+      setLoading(false);
+    };
+
+    fetchDetails();
+
+    const channel = supabase.channel(`ticket_${id}`)
       .on('postgres_changes', { 
         event: 'INSERT', 
         schema: 'public', 
@@ -64,7 +74,16 @@ export default function TicketDetail() {
     };
 
     const { error } = await supabase.from('ticket_messages').insert(newMessage);
-    if (!error) setReply('');
+    if (!error) {
+        setReply('');
+        toast.success(isInternal ? 'Internal note added.' : 'Reply sent to customer.', {
+            style: { background: '#18181b', color: '#10b981', border: '1px solid #047857' }
+        });
+    } else {
+        toast.error('Failed to send message.', {
+            style: { background: '#18181b', color: '#f43f5e', border: '1px solid #9f1239' }
+        });
+    }
   };
 
   const applyDraft = (draftText) => {
@@ -118,7 +137,7 @@ export default function TicketDetail() {
 
             <div className="p-10 bg-zinc-900/40 border-t border-zinc-800">
               <AutoDraftWhisper 
-                draft={telemetry?.auto_response_draft || "Onyx suggests addressing the Core Node authentication timeout by verifying the JWT expiration policy in the customer's tenant configuration."} 
+                draft={telemetry?.auto_response_draft}
                 onApply={applyDraft} 
               />
 
@@ -203,7 +222,7 @@ export default function TicketDetail() {
               <KBSidebar subject={ticket?.subject} description={ticket?.description} />
             </div>
           ) : (
-            <Customer360 customerId={ticket?.customer_id} />
+            <Customer360 customerId={ticket?.customer_id} ticketId={id} />
           )}
         </div>
 

@@ -5,6 +5,7 @@ import '@questlabs/react-sdk/dist/style.css';
 import Dashboard from './pages/Dashboard';
 import TicketDetail from './pages/TicketDetail';
 import AppLayout from './components/layout/AppLayout';
+import { Toaster } from 'react-hot-toast';
 
 const queryClient = new QueryClient();
 
@@ -18,6 +19,7 @@ function App() {
             <Route path="/ticket/:id" element={<TicketDetail />} />
           </Routes>
         </AppLayout>
+        <Toaster position="bottom-right" />
       </BrowserRouter>
     </QueryClientProvider>
   );

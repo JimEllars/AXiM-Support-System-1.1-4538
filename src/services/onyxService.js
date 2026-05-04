@@ -19,6 +19,16 @@ export const onyxService = {
     return response.json();
   },
 
+  async generateAutoDraft(ticketId, ticketData) {
+    // In a real scenario, this would call the Cloudflare worker with the ticket context.
+    // We mock it for the client layer logic simulation.
+    return new Promise(resolve => setTimeout(() => {
+        resolve({
+            draft: `Hello ${ticketData.contacts_ax2024?.name || 'there'},\n\nOnyx has analyzed your issue regarding "${ticketData.subject}". I am looking into this right now and will update you shortly.\n\nBest,\nSupport Team`
+        });
+    }, 1000));
+  },
+
   async getKBSuggestions(subject, description) {
     // Simulated RAG retrieval from AXiM Knowledge Base
     await new Promise(resolve => setTimeout(resolve, 800));
@@ -29,11 +39,31 @@ export const onyxService = {
     ];
   },
 
-  parseCommand(query) {
+  async parseCommand(query) {
+    // In production, this would route to Cloudflare Workers for NLP parsing
     const q = query.toLowerCase();
-    if (q.includes('urgent')) return { action: 'FILTER', value: 'urgent' };
-    if (q.includes('open')) return { action: 'FILTER', value: 'open' };
-    if (q.includes('my')) return { action: 'FILTER', value: 'assigned_to_me' };
-    return { action: 'SEARCH', value: query };
+    return new Promise(resolve => {
+        setTimeout(() => {
+            if (q.includes('assign') && q.includes('ticket') && q.includes('me')) {
+                const match = q.match(/#(\w+-\w+-\w+)/);
+                if (match) {
+                    resolve({ intent: 'SYSTEM_ACTION', action: 'ASSIGN_TICKET', ticketId: match[1], assignee: 'me' });
+                    return;
+                }
+            }
+            if (q.includes('mark') && q.includes('urgent')) {
+                const match = q.match(/#(\w+-\w+-\w+)/);
+                if (match) {
+                    resolve({ intent: 'SYSTEM_ACTION', action: 'UPDATE_PRIORITY', ticketId: match[1], priority: 'urgent' });
+                    return;
+                }
+            }
+            if (q.includes('urgent')) { resolve({ intent: 'FILTER', action: 'FILTER', value: 'urgent' }); return;}
+            if (q.includes('open')) { resolve({ intent: 'FILTER', action: 'FILTER', value: 'open' }); return; }
+            if (q.includes('vip')) { resolve({ intent: 'FILTER', action: 'FILTER_VIP' }); return; }
+
+            resolve({ intent: 'SEARCH', action: 'SEARCH', value: query });
+        }, 300);
+    });
   }
 };

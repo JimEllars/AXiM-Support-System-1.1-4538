@@ -1,5 +1,4 @@
-import React, { useEffect, useState } from 'react';
-import { supabase } from '../lib/supabaseClient';
+import React, { useEffect } from 'react';
 import SafeIcon from '../common/SafeIcon';
 import * as FiIcons from 'react-icons/fi';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -15,42 +14,30 @@ const statusStyles = {
 };
 
 export default function TicketList({ onSelectTicket }) {
-  const [tickets, setTickets] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const searchQuery = useTicketStore((state) => state.searchQuery);
+  const { tickets, isLoading, fetchTickets, subscribeToTickets, searchQuery } = useTicketStore();
 
   useEffect(() => {
-    const fetchTickets = async () => {
-      setLoading(true);
-      const { data, error } = await supabase.from('support_tickets').select('*').order('created_at', { ascending: false });
-      if (!error) {
-        if (data.length === 0 && supabase.mock) {
-          setTickets([
-            { id: 'ax-8271-bf3a', subject: 'Node Authentication Failure', status: 'open', priority: 'urgent', created_at: new Date().toISOString() },
-            { id: 'ax-9920-ca9b', subject: 'API Rate Limit Inconsistency', status: 'pending', priority: 'high', created_at: new Date().toISOString() },
-            { id: 'ax-1044-dd2c', subject: 'Billing Tier Refresh', status: 'resolved', priority: 'medium', created_at: new Date().toISOString() }
-          ]);
-        } else {
-          setTickets(data || []);
-        }
-      }
-      setLoading(false);
-    };
     fetchTickets();
-  }, []);
+    const unsubscribe = subscribeToTickets();
+    return () => {
+      unsubscribe();
+    };
+  }, [fetchTickets, subscribeToTickets]);
 
   const filteredTickets = tickets.filter((ticket) => {
     if (!searchQuery) return true;
     const q = searchQuery.toLowerCase();
+    const customerName = ticket.contacts_ax2024?.name?.toLowerCase() || '';
     return (
       ticket.subject.toLowerCase().includes(q) ||
       ticket.id.toLowerCase().includes(q) ||
       ticket.priority.toLowerCase().includes(q) ||
-      ticket.status.toLowerCase().includes(q)
+      ticket.status.toLowerCase().includes(q) ||
+      customerName.includes(q)
     );
   });
 
-  if (loading) {
+  if (isLoading && tickets.length === 0) {
     return <div className="p-12 text-center text-zinc-700 font-black tracking-widest animate-pulse">SYNCHRONIZING QUEUE...</div>;
   }
 
@@ -69,9 +56,10 @@ export default function TicketList({ onSelectTicket }) {
   return (
     <div className="space-y-3">
       <AnimatePresence>
-        {filteredTickets.map((ticket, idx) => {
+        {filteredTickets.map((ticket) => {
           const style = statusStyles[ticket.status] || statusStyles.open;
           const priorityColor = ticket.priority === 'urgent' ? 'text-rose-500' : ticket.priority === 'high' ? 'text-amber-500' : 'text-zinc-500';
+          const customerName = ticket.contacts_ax2024?.name || 'Unknown Contact';
           
           return (
             <motion.div 
@@ -97,6 +85,10 @@ export default function TicketList({ onSelectTicket }) {
                     <div className="w-1 h-1 rounded-full bg-zinc-800" />
                     <span className={`text-[10px] font-black uppercase tracking-widest ${priorityColor}`}>
                       {ticket.priority}
+                    </span>
+                    <div className="w-1 h-1 rounded-full bg-zinc-800" />
+                    <span className="text-[10px] font-bold text-zinc-500 tracking-wider">
+                      {customerName}
                     </span>
                   </div>
                 </div>
