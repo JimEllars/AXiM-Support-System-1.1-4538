@@ -33,7 +33,22 @@ export default function OnyxCommandHub() {
       setIsProcessing(true);
 
       try {
-        const result = await onyxService.parseCommand(searchQuery);
+
+        const pathParts = window.location.pathname.split('/');
+        const ticketId = pathParts[1] === 'ticket' ? pathParts[2] : null;
+        const result = await onyxService.parseCommand(searchQuery, ticketId);
+
+        if (result && result.intent === 'TOOL_PROPOSAL') {
+            toast.success('Onyx proposed an action. Waiting for approval.', {
+                style: { background: '#18181b', color: '#10b981', border: '1px solid #047857' },
+                icon: <SafeIcon icon={FiZap} />
+            });
+            setSearchQuery('');
+            inputRef.current?.blur();
+            setIsProcessing(false);
+            return;
+        }
+
 
         if (result.intent === 'SYSTEM_ACTION') {
             if (result.action === 'ASSIGN_TICKET') {

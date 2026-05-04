@@ -81,7 +81,22 @@ export const onyxService = {
       }
   },
 
-  async parseCommand(query) {
+  async parseCommand(query, ticketId = null) {
+    if (ticketId && (query.toLowerCase().includes('refund') || query.toLowerCase().includes('password') || query.toLowerCase().includes('beta'))) {
+        try {
+            const response = await fetch(`${ONYX_WORKER_URL}/tool-command`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${ONYX_SECRET}` },
+                body: JSON.stringify({ command: query, ticketId })
+            });
+            const data = await response.json();
+            if (data.action_proposed) {
+                 return { intent: 'TOOL_PROPOSAL', success: true };
+            }
+        } catch (e) {
+            console.error("Tool command failed:", e);
+        }
+    }
     const q = query.toLowerCase();
     return new Promise(resolve => {
         setTimeout(() => {
