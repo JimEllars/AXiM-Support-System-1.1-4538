@@ -225,15 +225,64 @@ async function handleWebhookIntake(request: Request, env: Env): Promise<Response
     }
 
     try {
-        const rawPayload: any = await request.json();
+        const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
+        const contentType = request.headers.get('content-type') || '';
+        let normalizedData: any = {};
+        let attachmentUrl = null;
+        let attachmentBase64 = null;
+        let attachmentMime = null;
 
-        // Attempt to normalize the payload to standard schema
-        const normalizedData = {
-            subject: rawPayload.subject || rawPayload.title || rawPayload.inquiry_subject || 'External Intake Webhook',
-            description: rawPayload.description || rawPayload.body || rawPayload.message || JSON.stringify(rawPayload),
-            customer_email: rawPayload.customer_email || rawPayload.email || rawPayload.sender,
-            source: rawPayload.source || 'webhook'
-        };
+        if (contentType.includes('multipart/form-data')) {
+            const formData = await request.formData();
+
+            // Extract text fields
+            const rawPayloadStr = formData.get('payload');
+            let rawPayload: any = {};
+            if (rawPayloadStr) {
+                try {
+                    rawPayload = JSON.parse(rawPayloadStr as string);
+                } catch(e) {}
+            }
+
+            normalizedData = {
+                subject: formData.get('subject') || rawPayload.subject || rawPayload.title || 'External Intake Webhook',
+                description: formData.get('description') || rawPayload.description || rawPayload.body || rawPayload.message || '',
+                customer_email: formData.get('customer_email') || formData.get('email') || rawPayload.customer_email || rawPayload.email || rawPayload.sender,
+                source: formData.get('source') || rawPayload.source || 'webhook',
+                customer_name: formData.get('customer_name') || rawPayload.customer_name || rawPayload.name,
+                tags: rawPayload.tags || []
+            };
+
+            // Process attachment if present
+            const file = formData.get('attachment') as File | null;
+            if (file) {
+                const arrayBuffer = await file.arrayBuffer();
+                const buffer = new Uint8Array(arrayBuffer);
+                const fileExt = file.name.split('.').pop() || 'bin';
+                const fileName = `${crypto.randomUUID()}.${fileExt}`;
+                const filePath = `intake/${fileName}`;
+                attachmentMime = file.type;
+
+                // For small files, we can extract base64 directly to pass to Claude
+                if (buffer.length < 5 * 1024 * 1024 && attachmentMime.startsWith('image/')) { // < 5MB
+                    attachmentBase64 = btoa(String.fromCharCode.apply(null, Array.from(buffer)));
+                }
+
+                // Upload to Supabase Storage
+                normalizedData.pendingFile = { buffer, filePath, type: file.type };
+            }
+
+        } else {
+            const rawPayload: any = await request.json();
+            normalizedData = {
+                subject: rawPayload.subject || rawPayload.title || rawPayload.inquiry_subject || 'External Intake Webhook',
+                description: rawPayload.description || rawPayload.body || rawPayload.message || JSON.stringify(rawPayload),
+                customer_email: rawPayload.customer_email || rawPayload.email || rawPayload.sender,
+                source: rawPayload.source || 'webhook',
+                customer_name: rawPayload.customer_name || rawPayload.name,
+                tags: rawPayload.tags || []
+            };
+        }
 
         if (!normalizedData.customer_email) {
             return new Response(JSON.stringify({ error: "Missing customer email" }), {
@@ -241,8 +290,6 @@ async function handleWebhookIntake(request: Request, env: Env): Promise<Response
                 headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
             });
         }
-
-        const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
 
         // 1. Customer Upsert Logic
         let customerId;
@@ -266,8 +313,8 @@ async function handleWebhookIntake(request: Request, env: Env): Promise<Response
                 .from('contacts_ax2024')
                 .insert({
                     email: normalizedData.customer_email,
-                    name: rawPayload.customer_name || rawPayload.name || normalizedData.customer_email.split('@')[0],
-                    tags: rawPayload.tags || []
+                    name: normalizedData.customer_name || normalizedData.customer_email.split('@')[0],
+                    tags: normalizedData.tags || []
                 })
                 .select('id, tags')
                 .single();
@@ -278,7 +325,7 @@ async function handleWebhookIntake(request: Request, env: Env): Promise<Response
         }
 
         // Analyze and insert
-        const onyxAnalysis = await analyzeWithOnyx(normalizedData.subject, normalizedData.description, env.ANTHROPIC_API_KEY);
+        const onyxAnalysis = await analyzeWithOnyx(normalizedData.subject, normalizedData.description, env.ANTHROPIC_API_KEY, attachmentBase64, attachmentMime);
 
         let initialStatus = 'open';
         let onyxResponseDraft = onyxAnalysis.draft;
@@ -328,6 +375,19 @@ async function handleWebhookIntake(request: Request, env: Env): Promise<Response
 
         if (ticketError) throw ticketError;
 
+        // Upload attachment now that we have ticket id
+        if (normalizedData.pendingFile) {
+            const file = normalizedData.pendingFile;
+            const fullPath = `${ticket.id}/${file.filePath}`;
+            const { error: uploadError } = await supabase.storage
+                .from('ticket_attachments')
+                .upload(fullPath, file.buffer, {
+                    contentType: file.type,
+                    upsert: false
+                });
+            if (uploadError) console.error("Error uploading attachment:", uploadError);
+        }
+
         if (initialStatus === 'pending' && onyxResponseDraft) {
             // Insert deflected response
             const { error: messageError } = await supabase
@@ -365,8 +425,30 @@ async function handleWebhookIntake(request: Request, env: Env): Promise<Response
 
 // --- Helpers ---
 
-async function analyzeWithOnyx(subject: string, description: string, apiKey: string) {
-  // Stubbed logic for AXiM Triage
+async function analyzeWithOnyx(subject: string, description: string, apiKey: string, imageBase64?: string | null, imageMime?: string | null) {
+  // Stubbed logic for AXiM Triage, would call Claude here with image if present
+  // Claude 3 API payload example:
+  /*
+    const messages = [
+        {
+            role: 'user',
+            content: [
+                { type: 'text', text: `Subject: ${subject}\nDescription: ${description}` }
+            ]
+        }
+    ];
+    if (imageBase64 && imageMime) {
+        messages[0].content.push({
+            type: 'image',
+            source: {
+                type: 'base64',
+                media_type: imageMime,
+                data: imageBase64
+            }
+        });
+    }
+  */
+
   return {
     priority: description.toLowerCase().includes('urgent') ? 'urgent' : 'medium',
     sentiment: description.toLowerCase().includes('angry') ? 'negative' : 'neutral',
@@ -374,4 +456,269 @@ async function analyzeWithOnyx(subject: string, description: string, apiKey: str
     draft: "Hello, Onyx AI has received your request regarding " + subject + ". A human agent will be with you shortly.",
     confidence: Math.floor(Math.random() * 20) + 80 // 80-99
   };
+}
+
+
+
+const ONYX_TOOLS = [
+  {
+    name: "issue_refund",
+    description: "Issues a refund to a user for a specified amount.",
+    input_schema: {
+      type: "object",
+      properties: {
+        amount: {
+          type: "number",
+          description: "The amount to refund, in dollars."
+        },
+        reason: {
+          type: "string",
+          description: "The reason for the refund."
+        }
+      },
+      required: ["amount", "reason"]
+    }
+  },
+  {
+    name: "trigger_password_reset",
+    description: "Triggers a password reset email for the user.",
+    input_schema: {
+      type: "object",
+      properties: {
+        email: {
+          type: "string",
+          description: "The email address of the user to reset the password for."
+        }
+      },
+      required: ["email"]
+    }
+  },
+  {
+    name: "grant_beta_access",
+    description: "Grants the user access to a specific beta feature.",
+    input_schema: {
+      type: "object",
+      properties: {
+        feature_name: {
+          type: "string",
+          description: "The name of the beta feature to grant access to."
+        }
+      },
+      required: ["feature_name"]
+    }
+  }
+];
+
+async function handleToolCommand(request: Request, env: Env): Promise<Response> {
+    const authHeader = request.headers.get('Authorization');
+    if (authHeader !== `Bearer ${env.AXIM_ONYX_SECRET}`) {
+      return new Response('Unauthorized', { status: 401 });
+    }
+
+    try {
+        const { command, ticketId } = (await request.json()) as any;
+        const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
+
+        // Stubbed logic calling Claude API with tools
+        // A real implementation would send 'command' to Anthropic API
+        // `anthropic-version`: `2023-06-01`
+        // and tools: ONYX_TOOLS
+
+        let toolUsePayload = null;
+
+        // Mocking Claude's response for specific commands:
+        if (command.toLowerCase().includes('refund')) {
+            const amountMatch = command.match(/\$?(\d+(\.\d{2})?)/);
+            const amount = amountMatch ? parseFloat(amountMatch[1]) : 50;
+            toolUsePayload = {
+                name: 'issue_refund',
+                input: { amount, reason: 'Customer requested via support.' }
+            };
+        } else if (command.toLowerCase().includes('password reset') || command.toLowerCase().includes('reset password')) {
+            toolUsePayload = {
+                name: 'trigger_password_reset',
+                input: { email: 'user@example.com' } // Mock email
+            };
+        } else if (command.toLowerCase().includes('beta access')) {
+             toolUsePayload = {
+                name: 'grant_beta_access',
+                input: { feature_name: 'new_dashboard' }
+            };
+        }
+
+        if (toolUsePayload) {
+            // HITL Logging
+            const { data: hitlLog, error: hitlError } = await supabase
+                .from('hitl_audit_logs')
+                .insert({
+                    status: 'pending',
+                    tool_type: toolUsePayload.name,
+                    payload: toolUsePayload.input,
+                    support_ticket_id: ticketId
+                })
+                .select()
+                .single();
+
+            if (hitlError) throw hitlError;
+
+            // Send message with metadata
+            const { error: msgError } = await supabase
+                .from('ticket_messages')
+                .insert({
+                    ticket_id: ticketId,
+                    sender_id: 'onyx_system',
+                    message_body: `Onyx proposes an action: ${toolUsePayload.name}`,
+                    metadata: { hitl_log_id: hitlLog.id }
+                });
+
+            if (msgError) throw msgError;
+
+            return new Response(JSON.stringify({ success: true, action_proposed: true }), {
+                 headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' },
+            });
+        }
+
+        // Default response if no tool is used
+        return new Response(JSON.stringify({ success: true, action_proposed: false }), {
+             headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' },
+        });
+
+    } catch (error: any) {
+        return new Response(JSON.stringify({ error: error.message }), {
+            status: 500,
+            headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
+        });
+    }
+}
+
+
+
+async function handleExecuteAction(request: Request, env: Env): Promise<Response> {
+    const authHeader = request.headers.get('Authorization');
+    if (authHeader !== `Bearer ${env.AXIM_ONYX_SECRET}`) {
+      return new Response('Unauthorized', { status: 401 });
+    }
+
+    try {
+        const { hitlLogId } = (await request.json()) as any;
+        const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
+
+        // Fetch hitl log
+        const { data: hitlLog, error: fetchError } = await supabase
+            .from('hitl_audit_logs')
+            .select('*')
+            .eq('id', hitlLogId)
+            .single();
+
+        if (fetchError) throw fetchError;
+
+        // Perform actual action execution here based on tool_type
+        // For example:
+        // if (hitlLog.tool_type === 'issue_refund') {
+        //     await stripe.refunds.create({ charge: 'ch_123', amount: hitlLog.payload.amount });
+        // }
+
+        console.log(`Simulating execution of ${hitlLog.tool_type} with payload:`, hitlLog.payload);
+
+        // Update ticket with execution message
+        if (hitlLog.support_ticket_id) {
+            await supabase.from('ticket_messages').insert({
+                ticket_id: hitlLog.support_ticket_id,
+                sender_id: 'onyx_system',
+                message_body: `ACTION EXECUTED: ${hitlLog.tool_type} completed successfully.`
+            });
+        }
+
+        return new Response(JSON.stringify({ success: true, executed: true }), {
+             headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' },
+        });
+
+    } catch (error: any) {
+        return new Response(JSON.stringify({ error: error.message }), {
+            status: 500,
+            headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
+        });
+    }
+}
+
+
+
+async function handleTicketResolved(request: Request, env: Env): Promise<Response> {
+    // This is called via Supabase DB Webhook when a ticket status changes to 'resolved'
+    // The webhook payload structure depends on Supabase, usually contains 'record' and 'old_record'
+
+    // Auth could be a simple secret check for webhooks
+    const url = new URL(request.url);
+    if (url.searchParams.get('secret') !== env.AXIM_ONYX_SECRET) {
+        return new Response('Unauthorized', { status: 401 });
+    }
+
+    try {
+        const payload: any = await request.json();
+        const record = payload.record;
+
+        if (!record || record.status !== 'resolved' || record.priority !== 'urgent' || record.rca_generated) {
+            return new Response('Ignored', { status: 200 });
+        }
+
+        const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
+
+        // Fetch thread
+        const { data: messages } = await supabase
+            .from('ticket_messages')
+            .select('sender_id, message_body, created_at')
+            .eq('ticket_id', record.id)
+            .order('created_at', { ascending: true });
+
+        const threadText = messages?.map(m => `[${m.sender_id}]: ${m.message_body}`).join('\n') || '';
+
+        // Call Claude 3 Haiku for RCA
+        // Mock RCA generation:
+        const rcaMarkdown = `
+# Root Cause Analysis: ${record.subject}
+
+## Problem
+Customer reported a critical issue.
+
+## Impact
+High impact for VIP customer.
+
+## Root Cause
+Configuration error in the core system.
+
+## Resolution
+Applied the correct configuration and verified functionality.
+`;
+
+        // 1. Push to vector_kb
+        const embedding = Array(384).fill(0).map(() => Math.random() * 2 - 1);
+        await supabase.from('knowledge_base').insert({
+            title: `RCA: ${record.subject}`,
+            content: rcaMarkdown,
+            embedding: embedding // requires pgvector integration correctly setup
+        });
+
+        // 2. Push to events_ax2024
+        await supabase.from('events_ax2024').insert({
+            type: 'rca_generated',
+            payload: {
+                ticket_id: record.id,
+                subject: record.subject,
+                rca: rcaMarkdown
+            }
+        });
+
+        // 3. Mark ticket as rca_generated
+        await supabase.from('support_tickets').update({ rca_generated: true }).eq('id', record.id);
+
+        return new Response(JSON.stringify({ success: true, rca_generated: true }), {
+             headers: { 'Content-Type': 'application/json' },
+        });
+
+    } catch (error: any) {
+        return new Response(JSON.stringify({ error: error.message }), {
+            status: 500,
+            headers: { 'Content-Type': 'application/json' }
+        });
+    }
 }

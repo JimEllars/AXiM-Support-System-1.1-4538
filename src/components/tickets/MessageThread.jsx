@@ -2,6 +2,7 @@ import React from 'react';
 import { formatDistanceToNow } from 'date-fns';
 import SafeIcon from '../../common/SafeIcon';
 import * as FiIcons from 'react-icons/fi';
+import ActionProposalBlock from './ActionProposalBlock';
 
 const { FiUser, FiCpu, FiLock, FiTerminal } = FiIcons;
 
@@ -43,6 +44,9 @@ export default function MessageThread({ messages }) {
               <p className={`text-zinc-300 leading-relaxed font-medium ${isAI ? 'mono-font text-sm' : ''}`}>
                 {msg.message_body}
               </p>
+              {msg.metadata?.hitl_log_id && (
+                  <ActionProposalBlock hitlLogId={msg.metadata.hitl_log_id} />
+              )}
             </div>
           </div>
         );
