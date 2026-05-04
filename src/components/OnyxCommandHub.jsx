@@ -1,0 +1,90 @@
+import React, { useState, useEffect, useRef } from 'react';
+import SafeIcon from '../common/SafeIcon';
+import * as FiIcons from 'react-icons/fi';
+import { motion, AnimatePresence } from 'framer-motion';
+import { useTicketStore } from '../store/useTicketStore';
+
+const { FiTerminal, FiSearch, FiZap, FiChevronRight, FiFilter } = FiIcons;
+
+export default function OnyxCommandHub() {
+  const { searchQuery, setSearchQuery } = useTicketStore();
+  const [isFocused, setIsFocused] = useState(false);
+  const inputRef = useRef(null);
+
+  // Global CMD+K shortcut
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+        e.preventDefault();
+        inputRef.current?.focus();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
+
+  const handlePresetAction = (presetText) => {
+    setSearchQuery(presetText);
+    inputRef.current?.focus();
+  };
+
+  return (
+    <div className="relative mb-10">
+      <motion.div 
+        animate={{ 
+          borderColor: isFocused ? '#22d3ee' : '#27272a',
+          boxShadow: isFocused ? '0 0 20px rgba(34, 211, 238, 0.1)' : 'none'
+        }}
+        className="flex items-center gap-4 bg-zinc-900 border-2 rounded-2xl px-6 py-4 transition-all relative z-50"
+      >
+        <SafeIcon icon={FiTerminal} className={`text-xl transition-colors ${isFocused ? 'text-cyan-400' : 'text-zinc-500'}`} />
+        <div className="flex-1 flex items-center gap-1">
+          <span className="mono-font text-cyan-500 font-bold text-lg opacity-70">onyx_</span>
+          <input 
+            ref={inputRef}
+            type="text"
+            placeholder="Invoke command or filter stream..."
+            className="flex-1 bg-transparent outline-none text-zinc-100 placeholder-zinc-700 font-medium mono-font text-lg"
+            value={searchQuery}
+            onFocus={() => setIsFocused(true)}
+            onBlur={() => setTimeout(() => setIsFocused(false), 200)}
+            onChange={(e) => setSearchQuery(e.target.value)}
+          />
+          {isFocused && !searchQuery && <span className="w-2.5 h-6 bg-cyan-500 cursor-blink ml-1" />}
+        </div>
+        <div className="hidden md:flex items-center gap-2 text-[10px] font-black text-zinc-600 bg-zinc-950 border border-zinc-800 px-3 py-1.5 rounded-lg uppercase tracking-tighter">
+          <SafeIcon icon={FiZap} className="text-amber-500" /> CMD + K
+        </div>
+      </motion.div>
+      
+      <AnimatePresence>
+        {isFocused && searchQuery.length > 0 && (
+          <motion.div 
+            initial={{ opacity: 0, y: -10 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -10 }}
+            className="absolute top-full left-0 right-0 mt-3 glass-panel rounded-2xl shadow-2xl z-40 p-4 border-cyan-500/20"
+          >
+            <div className="text-[10px] font-black text-zinc-500 uppercase tracking-[0.2em] mb-4 px-2">Prediction Engine - Active Filters</div>
+            <div className="space-y-1">
+              <div onClick={() => handlePresetAction(`urgent`)} className="flex items-center justify-between p-3 hover:bg-zinc-800/50 rounded-xl cursor-pointer group transition-all">
+                <div className="flex items-center gap-3">
+                  <SafeIcon icon={FiFilter} className="text-zinc-500 group-hover:text-cyan-400" />
+                  <span className="text-sm font-medium text-zinc-300">Show only matches for "<span className="text-cyan-400">{searchQuery}</span>"</span>
+                </div>
+                <div className="text-[10px] mono-font text-zinc-600 bg-zinc-950 px-2 py-1 rounded">ENTER</div>
+              </div>
+              <div className="flex items-center justify-between p-3 hover:bg-zinc-800/50 rounded-xl cursor-pointer group transition-all">
+                <div className="flex items-center gap-3">
+                  <SafeIcon icon={FiZap} className="text-zinc-500 group-hover:text-fuchsia-400" />
+                  <span className="text-sm font-medium text-zinc-300">Generate Onyx summary for "<span className="text-fuchsia-400">{searchQuery}</span>"</span>
+                </div>
+                <SafeIcon icon={FiChevronRight} className="text-zinc-700 group-hover:text-fuchsia-400" />
+              </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+}

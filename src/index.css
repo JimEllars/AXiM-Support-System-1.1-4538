@@ -1,0 +1,48 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply bg-zinc-950 text-zinc-100 antialiased;
+    font-family: 'Inter', system-ui, sans-serif;
+  }
+
+  /* Custom Scrollbar for Noir Theme */
+  ::-webkit-scrollbar {
+    width: 6px;
+  }
+  ::-webkit-scrollbar-track {
+    @apply bg-zinc-950;
+  }
+  ::-webkit-scrollbar-thumb {
+    @apply bg-zinc-800 rounded-full hover:bg-zinc-700 transition-colors;
+  }
+}
+
+@layer components {
+  .glass-panel {
+    @apply bg-zinc-900/60 backdrop-blur-xl border border-zinc-800/50;
+  }
+
+  .neon-border-cyan {
+    @apply border border-cyan-500/30 shadow-[0_0_15px_rgba(34,211,238,0.1)];
+  }
+
+  .neon-border-fuchsia {
+    @apply border border-fuchsia-500/30 shadow-[0_0_15px_rgba(217,70,239,0.1)];
+  }
+
+  .mono-font {
+    font-family: 'Fira Code', 'JetBrains Mono', monospace;
+  }
+}
+
+/* Animations for terminal cursor */
+@keyframes blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
+.cursor-blink {
+  animation: blink 1s step-end infinite;
+}
