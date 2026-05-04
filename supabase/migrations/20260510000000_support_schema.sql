@@ -22,7 +22,7 @@ CREATE TABLE IF NOT EXISTS public.support_tickets (
 CREATE TABLE IF NOT EXISTS public.ticket_messages (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     ticket_id UUID REFERENCES public.support_tickets(id) ON DELETE CASCADE,
-    sender_id UUID NOT NULL, -- Can be auth.users or contacts_ax2024
+    sender_id TEXT NOT NULL, -- Can be auth.users, contacts_ax2024, or 'onyx_system'
     message_body TEXT NOT NULL,
     is_internal_note BOOLEAN DEFAULT FALSE,
     created_at TIMESTAMPTZ DEFAULT NOW()

@@ -219,7 +219,11 @@ async function handleBatchTriage(request: Request, env: Env): Promise<Response> 
 }
 
 async function handleWebhookIntake(request: Request, env: Env): Promise<Response> {
-    // Normalization middleware for varying payload formats
+    const authHeader = request.headers.get('Authorization');
+    if (authHeader !== `Bearer ${env.AXIM_ONYX_SECRET}`) {
+      return new Response('Unauthorized', { status: 401 });
+    }
+
     try {
         const rawPayload: any = await request.json();
 
@@ -227,26 +231,115 @@ async function handleWebhookIntake(request: Request, env: Env): Promise<Response
         const normalizedData = {
             subject: rawPayload.subject || rawPayload.title || rawPayload.inquiry_subject || 'External Intake Webhook',
             description: rawPayload.description || rawPayload.body || rawPayload.message || JSON.stringify(rawPayload),
-            customer_id: null // In real app, we'd lookup customer by email from the payload
+            customer_email: rawPayload.customer_email || rawPayload.email || rawPayload.sender,
+            source: rawPayload.source || 'webhook'
         };
+
+        if (!normalizedData.customer_email) {
+            return new Response(JSON.stringify({ error: "Missing customer email" }), {
+                status: 400,
+                headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
+            });
+        }
 
         const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
 
+        // 1. Customer Upsert Logic
+        let customerId;
+        let customerTags: string[] = [];
+        const { data: existingCustomer, error: lookupError } = await supabase
+            .from('contacts_ax2024')
+            .select('id, tags')
+            .eq('email', normalizedData.customer_email)
+            .single();
+
+        if (lookupError && lookupError.code !== 'PGRST116') { // PGRST116 is not found
+            throw lookupError;
+        }
+
+        if (existingCustomer) {
+            customerId = existingCustomer.id;
+            customerTags = existingCustomer.tags || [];
+        } else {
+            // Create new customer
+            const { data: newCustomer, error: insertError } = await supabase
+                .from('contacts_ax2024')
+                .insert({
+                    email: normalizedData.customer_email,
+                    name: rawPayload.customer_name || rawPayload.name || normalizedData.customer_email.split('@')[0],
+                    tags: rawPayload.tags || []
+                })
+                .select('id, tags')
+                .single();
+
+            if (insertError) throw insertError;
+            customerId = newCustomer.id;
+            customerTags = newCustomer.tags || [];
+        }
+
         // Analyze and insert
         const onyxAnalysis = await analyzeWithOnyx(normalizedData.subject, normalizedData.description, env.ANTHROPIC_API_KEY);
+
+        let initialStatus = 'open';
+        let onyxResponseDraft = onyxAnalysis.draft;
+
+        let priority = onyxAnalysis.priority;
+        let slaBreachAt = new Date();
+        slaBreachAt.setHours(slaBreachAt.getHours() + 24); // Default 24h SLA
+
+        const isVIP = customerTags.includes('VIP') || customerTags.includes('Enterprise');
+        if (isVIP) {
+            priority = 'urgent';
+            slaBreachAt = new Date();
+            slaBreachAt.setHours(slaBreachAt.getHours() + 1); // 1h SLA for VIP
+        }
+
+        // Sentinel Logic: Run vector search and attempt deflection
+        // Mocking embedding since we don't have a real one here
+        const embedding = Array(384).fill(0).map(() => Math.random() * 2 - 1);
+        const { data: searchResults, error: searchError } = await supabase.rpc('match_kb_articles', {
+            query_embedding: embedding,
+            match_threshold: 0.5,
+            match_count: 3
+        });
+
+        let context = '';
+        if (!searchError && searchResults && searchResults.length > 0) {
+           context = searchResults.map((r: any) => `Title: ${r.title}\nContent: ${r.content}`).join('\n\n');
+        }
+
+        // If confidence > 90%, deflect
+        if (onyxAnalysis.confidence > 90) {
+            initialStatus = 'pending'; // Changed to pending_user via pending status per enum
+        }
 
         const { data: ticket, error: ticketError } = await supabase
             .from('support_tickets')
             .insert({
                 subject: normalizedData.subject,
                 description: normalizedData.description,
-                priority: onyxAnalysis.priority,
-                status: 'open'
+                customer_id: customerId,
+                priority: priority,
+                sla_breach_at: slaBreachAt.toISOString(),
+                status: initialStatus
             })
             .select()
             .single();
 
         if (ticketError) throw ticketError;
+
+        if (initialStatus === 'pending' && onyxResponseDraft) {
+            // Insert deflected response
+            const { error: messageError } = await supabase
+                .from('ticket_messages')
+                .insert({
+                    ticket_id: ticket.id,
+                    sender_id: 'onyx_system', // Need to make sender_id Onyx. Update schema or use an AI id
+                    message_body: onyxResponseDraft,
+                    is_internal_note: false
+                });
+            if (messageError) console.error("Error inserting Onyx deflection message:", messageError);
+        }
 
         await supabase
             .from('ticket_ai_telemetry')
