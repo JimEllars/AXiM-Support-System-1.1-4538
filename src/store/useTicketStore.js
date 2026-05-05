@@ -75,5 +75,66 @@ export const useTicketStore = create((set, get) => ({
     return () => {
       supabase.removeChannel(channel);
     };
+  },
+
+  // --- Real-Time Agent Presence ---
+  presenceChannel: null,
+  activeAgents: [],
+
+  joinTicketPresence: (ticketId, currentAgent) => {
+    const existingChannel = get().presenceChannel;
+    if (existingChannel) {
+      supabase.removeChannel(existingChannel);
+    }
+
+    const channelName = `ticket-presence:${ticketId}`;
+    const channel = supabase.channel(channelName, {
+      config: {
+        presence: {
+          key: currentAgent.agentId,
+        },
+      },
+    });
+
+    channel
+      .on('presence', { event: 'sync' }, () => {
+        const presenceState = channel.presenceState();
+        const active = [];
+        for (const id in presenceState) {
+          active.push(presenceState[id][0]); // take the first presence per agent
+        }
+        set({ activeAgents: active });
+      })
+      .subscribe(async (status) => {
+        if (status === 'SUBSCRIBED') {
+          await channel.track({
+            agentId: currentAgent.agentId,
+            name: currentAgent.name,
+            role: currentAgent.role || 'Agent',
+            color: currentAgent.color || 'bg-cyan-500',
+            isTyping: false,
+          });
+        }
+      });
+
+    set({ presenceChannel: channel });
+  },
+
+  updateTypingStatus: async (isTyping, currentAgent) => {
+    const channel = get().presenceChannel;
+    if (channel) {
+      await channel.track({
+        ...currentAgent,
+        isTyping,
+      });
+    }
+  },
+
+  leaveTicketPresence: () => {
+    const channel = get().presenceChannel;
+    if (channel) {
+      supabase.removeChannel(channel);
+      set({ presenceChannel: null, activeAgents: [] });
+    }
   }
 }));
