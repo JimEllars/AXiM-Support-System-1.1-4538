@@ -23,6 +23,13 @@ export default function Dashboard() {
     if (id === 'broadcast') setModalType('broadcast');
   };
 
+  const currentAgent = {
+    agentId: 'dash-user-1',
+    name: 'Greta (Local)',
+    role: 'Senior Architect',
+    color: 'bg-cyan-500',
+  };
+
   return (
     <div className="min-h-screen selection:bg-cyan-500/30 pb-20">
       {/* Background Decor */}
@@ -52,7 +59,7 @@ export default function Dashboard() {
           </div>
 
           <div className="flex items-center gap-8">
-            <AgentPresence />
+            <AgentPresence ticketId="dashboard" currentAgent={currentAgent} />
             <button 
               onClick={() => setModalType('create')}
               className="group relative px-8 py-3.5 bg-cyan-600 hover:bg-cyan-500 text-black font-black uppercase tracking-widest rounded-2xl transition-all shadow-[0_0_20px_rgba(34,211,238,0.3)] hover:shadow-[0_0_30px_rgba(34,211,238,0.5)] active:scale-95 overflow-hidden"

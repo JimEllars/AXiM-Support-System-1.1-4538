@@ -3,13 +3,16 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabaseClient';
 import MessageThread from '../components/tickets/MessageThread';
 import Customer360 from '../components/tickets/Customer360';
+import AgentPresence from '../components/AgentPresence';
 import AutoDraftWhisper from '../components/tickets/AutoDraftWhisper';
 import KBSidebar from '../components/tickets/KBSidebar';
+import OnyxInvestigationPanel from '../components/tickets/OnyxInvestigationPanel';
 import SafeIcon from '../common/SafeIcon';
 import * as FiIcons from 'react-icons/fi';
 import { motion, AnimatePresence } from 'framer-motion';
 import { onyxService } from '../services/onyxService';
 import toast from 'react-hot-toast';
+import { useTicketStore } from '../store/useTicketStore';
 
 const { FiArrowLeft, FiSend, FiLock, FiGlobe, FiCpu, FiLayout, FiActivity } = FiIcons;
 
@@ -26,6 +29,16 @@ export default function TicketDetail() {
   const [showMentionMenu, setShowMentionMenu] = useState(false);
   const [mentionQuery, setMentionQuery] = useState('');
   const [mentionIndex, setMentionIndex] = useState(-1);
+
+  const updateTypingStatus = useTicketStore((state) => state.updateTypingStatus);
+
+  const currentAgent = {
+    agentId: 'dash-user-1',
+    name: 'Greta (Local)',
+    role: 'Senior Architect',
+    color: 'bg-cyan-500',
+  };
+
   const [teamMembers, setTeamMembers] = useState([
     { id: '1', name: 'Ada Lovelace', role: 'admin' },
     { id: '2', name: 'Alan Turing', role: 'support' },
@@ -128,6 +141,18 @@ export default function TicketDetail() {
                   <h1 className="text-4xl font-black text-white tracking-tighter leading-tight">{ticket?.subject}</h1>
                 </div>
                 <div className="flex gap-3">
+                   {telemetry?.confidence_score && (
+                     <div className="px-4 py-2.5 rounded-2xl bg-fuchsia-500/10 text-fuchsia-400 border border-fuchsia-500/30 flex items-center gap-2 text-[10px] font-black uppercase tracking-widest">
+                       <SafeIcon icon={FiCpu} />
+                       {telemetry.confidence_score}% Confidence
+                     </div>
+                   )}
+                   {telemetry?.primary_intent && (
+                     <div className="px-4 py-2.5 rounded-2xl bg-cyan-500/10 text-cyan-400 border border-cyan-500/30 flex items-center gap-2 text-[10px] font-black uppercase tracking-widest">
+                       <SafeIcon icon={FiActivity} />
+                       {telemetry.primary_intent}
+                     </div>
+                   )}
                    <div className="px-6 py-2.5 rounded-2xl bg-rose-500/10 text-rose-400 border border-rose-500/30 text-[10px] font-black uppercase tracking-widest">
                     {ticket?.priority}
                   </div>
@@ -139,7 +164,27 @@ export default function TicketDetail() {
               <p className="text-zinc-400 text-xl font-medium leading-relaxed max-w-4xl">{ticket?.description}</p>
             </div>
 
+            {telemetry?.confidence_score >= 75 && telemetry?.confidence_score < 90 && telemetry?.auto_response_draft && (
+              <div className="mx-12 mt-4 p-4 rounded-2xl bg-fuchsia-950/30 border border-fuchsia-500/50 flex items-start justify-between gap-6 relative overflow-hidden group">
+                 <div className="absolute top-0 left-0 w-1 h-full bg-fuchsia-500" />
+                 <div>
+                    <div className="flex items-center gap-2 mb-2">
+                       <SafeIcon icon={FiCpu} className="text-fuchsia-400" />
+                       <span className="text-fuchsia-400 text-xs font-black uppercase tracking-widest">Sentinel Suggestion (Vector KB Match)</span>
+                    </div>
+                    <p className="text-zinc-300 text-sm">{telemetry.auto_response_draft.substring(0, 150)}...</p>
+                 </div>
+                 <button
+                    onClick={() => applyDraft(telemetry.auto_response_draft)}
+                    className="px-6 py-3 shrink-0 bg-fuchsia-500 hover:bg-fuchsia-400 text-black font-black text-xs uppercase tracking-widest rounded-xl transition-all shadow-[0_0_20px_rgba(217,70,239,0.3)]"
+                 >
+                    Adopt Draft
+                 </button>
+              </div>
+            )}
+
             <div className="p-12 min-h-[500px] bg-zinc-950/20 space-y-12">
+              <OnyxInvestigationPanel ticketId={id} />
               <MessageThread messages={messages} />
             </div>
 
@@ -165,6 +210,12 @@ export default function TicketDetail() {
                     const val = e.target.value;
                     setReply(val);
 
+                    if (val.length > 0) {
+                      updateTypingStatus(true, currentAgent);
+                    } else {
+                      updateTypingStatus(false, currentAgent);
+                    }
+
                     const cursorPosition = e.target.selectionStart;
                     const textBeforeCursor = val.slice(0, cursorPosition);
                     const match = textBeforeCursor.match(/@(\w*)$/);
@@ -177,6 +228,7 @@ export default function TicketDetail() {
                         setShowMentionMenu(false);
                     }
                   }}
+                  onBlur={() => updateTypingStatus(false, currentAgent)}
                   placeholder={isInternal ? "SYSLOG: Add internal agent perspective..." : "RESPOND: Craft a public resolution message..."}
                   className={`w-full p-8 pb-20 rounded-[2.5rem] border-2 outline-none transition-all font-medium text-lg resize-none ${isInternal ? 'bg-amber-950/10 border-amber-500/20 focus:border-amber-500/50 text-amber-100 placeholder-amber-900/50' : 'bg-zinc-950 border-zinc-800 focus:border-cyan-500/50 text-white placeholder-zinc-800'}`}
                   rows={4}
