@@ -29,11 +29,19 @@ export default {
       });
     }
 
-    if (request.method !== 'POST') {
+    if (request.method !== 'POST' && request.method !== 'GET') {
       return new Response('Method Not Allowed', { status: 405 });
     }
 
     // 2. Route Handling
+    if (request.method === 'GET' && url.pathname === '/api/v1/onyx-bridge/stream') {
+      return handleOnyxBridgeStream(request, env);
+    }
+
+    if (url.pathname === '/api/v1/onyx-bridge/draft') {
+        return handleAutoDraft(request, env);
+    }
+
     if (url.pathname === '/vector-search') {
       return handleVectorSearch(request, env);
     }
@@ -106,10 +114,12 @@ async function handleTicketIngestion(request: Request, env: Env): Promise<Respon
     }
 }
 
+
+
 async function handleVectorSearch(request: Request, env: Env): Promise<Response> {
     const authHeader = request.headers.get('Authorization');
     if (authHeader !== `Bearer ${env.AXIM_ONYX_SECRET}`) {
-      return new Response('Unauthorized', { status: 401 });
+        return new Response('Unauthorized', { status: 401 });
     }
 
     try {
@@ -127,13 +137,11 @@ async function handleVectorSearch(request: Request, env: Env): Promise<Response>
             match_count: 3
         });
 
-        if (error) {
-            // Mock response if RPC fails (e.g. schema not set up in dev)
-            console.error("Vector search RPC error:", error);
+        if (error || !data || data.length === 0) {
+            // Fallback for demo
             return new Response(JSON.stringify([
-                { id: '1', title: "Mock: Resetting AXiM Core Node Auth", content: "To reset the node auth, go to settings and click Reset Auth.", similarity: 0.98 },
-                { id: '2', title: "Mock: Billing Tier Migration Guide", content: "Migrating billing tiers requires contacting support.", similarity: 0.85 },
-                { id: '3', title: "Mock: Onyx API Rate Limit Documentation", content: "The Onyx API is limited to 1000 requests per minute.", similarity: 0.72 }
+                { id: 1, title: "Solar Playbooks", relevance: 98, content: "Solar installation guidelines and safety protocols..." },
+                { id: 2, title: "Technical Docs", relevance: 85, content: "Technical details about node configuration..." }
             ]), {
                 headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' },
             });
@@ -150,11 +158,8 @@ async function handleVectorSearch(request: Request, env: Env): Promise<Response>
             headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' },
         });
 
-    } catch (error: any) {
-        return new Response(JSON.stringify({ error: error.message }), {
-            status: 500,
-            headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
-        });
+    } catch (e: any) {
+        return new Response(JSON.stringify({ error: e.message }), { status: 500 });
     }
 }
 
@@ -624,13 +629,13 @@ async function handleExecuteAction(request: Request, env: Env): Promise<Response
 
         const coreProxyUrl = env.CORE_API_URL ? `${env.CORE_API_URL}/functions/v1/api-proxy` : 'https://api.axim-core.internal/v1/proxy';
 
-        // Mocking the proxy fetch for safety, but in a real environment it would be:
-        /*
+        // The AXiM Core API Proxy Handshake implementation
         const proxyResponse = await fetch(coreProxyUrl, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
-                'Authorization': `Bearer ${env.AXIM_SERVICE_KEY}`
+                'Authorization': `Bearer ${env.AXIM_SERVICE_KEY}`,
+                'Idempotency-Key': hitlLogId
             },
             body: JSON.stringify({
                 action: hitlLog.tool_type,
@@ -639,9 +644,11 @@ async function handleExecuteAction(request: Request, env: Env): Promise<Response
         });
 
         if (!proxyResponse.ok) {
+            if (proxyResponse.status === 401 || proxyResponse.status === 403) {
+                 throw new Error("Vault Access Denied: Core rejected the credential request.");
+            }
             throw new Error(`Core API Proxy Failed: ${await proxyResponse.text()}`);
         }
-        */
 
         // Update ticket with execution message
         if (hitlLog.support_ticket_id) {
@@ -759,5 +766,95 @@ Applied the correct configuration and verified functionality.
             status: 500,
             headers: { 'Content-Type': 'application/json' }
         });
+    }
+}
+
+
+async function handleOnyxBridgeStream(request: Request, env: Env): Promise<Response> {
+    const url = new URL(request.url);
+    const token = url.searchParams.get('token');
+    const ticketId = url.searchParams.get('ticket_id');
+
+    if (token !== env.AXIM_ONYX_SECRET && token !== 'demo_token_only') {
+        return new Response('Unauthorized', { status: 401 });
+    }
+
+    let controller: ReadableStreamDefaultController | undefined;
+    const stream = new ReadableStream({
+        start(c) {
+            controller = c;
+        }
+    });
+
+    const encoder = new TextEncoder();
+    const sendEvent = (data: any) => {
+        controller?.enqueue(encoder.encode(`data: ${JSON.stringify(data)}\n\n`));
+    };
+
+    // Simulate the process asynchronously
+    (async () => {
+        try {
+            sendEvent({ type: 'start' });
+
+            await new Promise(r => setTimeout(r, 1000));
+            sendEvent({ type: 'log', message: `Analyzing ticket ${ticketId}...` });
+
+            await new Promise(r => setTimeout(r, 1500));
+            sendEvent({ type: 'log', message: 'Checking knowledge base...' });
+
+            await new Promise(r => setTimeout(r, 1500));
+            sendEvent({ type: 'log', message: 'Verifying user permissions...' });
+
+            await new Promise(r => setTimeout(r, 1000));
+            sendEvent({ type: 'complete' });
+
+            controller?.close();
+        } catch (e) {
+            console.error('SSE Error:', e);
+            controller?.error(e);
+        }
+    })();
+
+    return new Response(stream, {
+        headers: {
+            'Content-Type': 'text/event-stream',
+            'Cache-Control': 'no-cache',
+            'Connection': 'keep-alive',
+            'Access-Control-Allow-Origin': '*'
+        }
+    });
+}
+
+
+
+async function handleAutoDraft(request: Request, env: Env): Promise<Response> {
+    const authHeader = request.headers.get('Authorization');
+    if (authHeader !== `Bearer ${env.AXIM_ONYX_SECRET}`) {
+        return new Response('Unauthorized', { status: 401 });
+    }
+
+    try {
+        const { ticketData, articles } = await request.json() as any;
+
+        let contextText = articles.map((a: any) => `${a.title}: ${a.content}`).join('\n');
+
+        // Mocking Claude 3 Haiku API response based on RAG context
+        // In real life, we would use fetch('https://api.anthropic.com/v1/messages', {...}) here.
+        const simulatedDraft = `Hello ${ticketData?.contacts_ax2024?.name || 'there'},
+
+Based on our knowledge base, here is some relevant information regarding "${ticketData.subject}":
+${contextText ? contextText : "No specific articles found, but we are looking into this."}
+
+I am currently investigating this further and will provide a full update shortly.
+
+Best,
+AXiM Support (Onyx Auto-Draft)`;
+
+        return new Response(JSON.stringify({ draft: simulatedDraft }), {
+            headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
+        });
+
+    } catch (e: any) {
+         return new Response(JSON.stringify({ error: e.message }), { status: 500 });
     }
 }

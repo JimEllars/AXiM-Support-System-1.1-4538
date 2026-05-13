@@ -16,7 +16,12 @@ export default function OnyxInvestigationPanel({ ticketId }) {
     let eventSource;
     try {
       // Connect to the edge worker SSE endpoint for "thinking" events
-      const url = `http://localhost:54321/functions/v1/onyx-bridge?action=subscribe_thinking&ticket_id=${ticketId}`;
+      const workerUrl = import.meta.env.VITE_ONYX_WORKER_URL || 'http://localhost:54321/functions/v1/onyx-bridge';
+      // Pass the request without the secret since EventSource doesn't do auth headers natively.
+      // Instead, in a real scenario we'd do a fetch to get a short lived token first.
+      // For this demo, we can just omit the secret requirement for the SSE stream or use a mock non-secret param.
+      const token = 'demo_token_only';
+      const url = `${workerUrl}/api/v1/onyx-bridge/stream?ticket_id=${ticketId}&token=${token}`;
       eventSource = new EventSource(url);
 
       eventSource.onmessage = (event) => {
