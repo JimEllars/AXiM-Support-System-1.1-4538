@@ -46,6 +46,10 @@ export default {
       return handleVectorSearch(request, env);
     }
 
+    if (url.pathname === '/api/v1/onyx/generate-suggestion') {
+        return handleGenerateSuggestion(request, env);
+    }
+
     if (url.pathname === '/batch-triage') {
         return handleBatchTriage(request, env);
     }
@@ -775,7 +779,8 @@ async function handleOnyxBridgeStream(request: Request, env: Env): Promise<Respo
     const token = url.searchParams.get('token');
     const ticketId = url.searchParams.get('ticket_id');
 
-    if (token !== env.AXIM_ONYX_SECRET && token !== 'demo_token_only') {
+    // Strict validation against AXIM_ONYX_SECRET
+    if (token !== env.AXIM_ONYX_SECRET) {
         return new Response('Unauthorized', { status: 401 });
     }
 
@@ -791,10 +796,34 @@ async function handleOnyxBridgeStream(request: Request, env: Env): Promise<Respo
         controller?.enqueue(encoder.encode(`data: ${JSON.stringify(data)}\n\n`));
     };
 
-    // Simulate the process asynchronously
+    const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
+
+    // Simulate the process asynchronously and update Presence
     (async () => {
         try {
             sendEvent({ type: 'start' });
+
+            // Presence Integration: notify agents Onyx is thinking
+            if (ticketId) {
+                const presencePayload = {
+                    ticket_id: ticketId,
+                    status: 'Thinking',
+                    agent: 'Onyx AI'
+                };
+
+                // Fire an event to a "presence" table or realtime channel
+                // Note: Edge functions generally cannot directly maintain a realtime presence channel
+                // in the traditional client-side way using supabase.channel('...').track().
+                // Instead, we will simulate it by creating a temporary 'thinking' event or
+                // updating the ticket status momentarily, or writing to an events table.
+
+                // We'll write to events_ax2024 to simulate server-side broadcast, and the UI
+                // can listen to events_ax2024 for 'onyx_presence' type events.
+                await supabase.from('events_ax2024').insert({
+                    type: 'onyx_presence',
+                    payload: presencePayload
+                });
+            }
 
             await new Promise(r => setTimeout(r, 1000));
             sendEvent({ type: 'log', message: `Analyzing ticket ${ticketId}...` });
@@ -806,6 +835,15 @@ async function handleOnyxBridgeStream(request: Request, env: Env): Promise<Respo
             sendEvent({ type: 'log', message: 'Verifying user permissions...' });
 
             await new Promise(r => setTimeout(r, 1000));
+
+            // Clear presence
+            if (ticketId) {
+                 await supabase.from('events_ax2024').insert({
+                    type: 'onyx_presence',
+                    payload: { ticket_id: ticketId, status: 'Idle', agent: 'Onyx AI' }
+                });
+            }
+
             sendEvent({ type: 'complete' });
 
             controller?.close();
@@ -824,8 +862,6 @@ async function handleOnyxBridgeStream(request: Request, env: Env): Promise<Respo
         }
     });
 }
-
-
 
 async function handleAutoDraft(request: Request, env: Env): Promise<Response> {
     const authHeader = request.headers.get('Authorization');
@@ -856,5 +892,75 @@ AXiM Support (Onyx Auto-Draft)`;
 
     } catch (e: any) {
          return new Response(JSON.stringify({ error: e.message }), { status: 500 });
+    }
+}
+
+
+async function handleGenerateSuggestion(request: Request, env: Env): Promise<Response> {
+    const authHeader = request.headers.get('Authorization');
+    if (authHeader !== `Bearer ${env.AXIM_ONYX_SECRET}`) {
+        return new Response('Unauthorized', { status: 401 });
+    }
+
+    try {
+        const { subject, description } = await request.json() as any;
+        const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
+
+        // 1. Query memory_banks for context (top 3)
+        const { data: memoryBanks, error: dbError } = await supabase
+            .from('memory_banks')
+            .select('title, content')
+            .limit(3)
+            .order('created_at', { ascending: false });
+
+        if (dbError) throw dbError;
+
+        let contextText = memoryBanks?.map(m => `Title: ${m.title}\nContent: ${m.content}`).join('\n\n') || 'No context found.';
+
+        // 2. Call Claude 3 Haiku
+        const prompt = `You are Onyx, an expert AXiM Support AI. Given the following ticket details and context from our memory banks, write a professional and helpful support response draft for the agent to review and send to the customer.
+
+Ticket Subject: ${subject}
+Ticket Description: ${description}
+
+Context from Memory Banks (Playbooks/RCAs):
+${contextText}
+
+Draft a concise, professional reply:`;
+
+        let draft = '';
+        if (env.ANTHROPIC_API_KEY) {
+            const anthropicRes = await fetch('https://api.anthropic.com/v1/messages', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'x-api-key': env.ANTHROPIC_API_KEY,
+                    'anthropic-version': '2023-06-01'
+                },
+                body: JSON.stringify({
+                    model: 'claude-3-haiku-20240307',
+                    max_tokens: 500,
+                    messages: [{ role: 'user', content: prompt }]
+                })
+            });
+
+            if (anthropicRes.ok) {
+                const data: any = await anthropicRes.json();
+                draft = data.content[0].text;
+            } else {
+                console.error("Anthropic Error:", await anthropicRes.text());
+                draft = "I encountered an issue generating the draft from the AI.";
+            }
+        } else {
+            // Fallback if no key is provided in env
+            draft = `Based on the context:\n${contextText}\n\nWe are investigating the issue "${subject}".`;
+        }
+
+        return new Response(JSON.stringify({ draft }), {
+            headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
+        });
+
+    } catch (error: any) {
+         return new Response(JSON.stringify({ error: error.message }), { status: 500, headers: { 'Access-Control-Allow-Origin': '*' } });
     }
 }

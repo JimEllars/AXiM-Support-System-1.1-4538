@@ -20,11 +20,25 @@ export const onyxService = {
   },
 
   async generateAutoDraft(ticketId, ticketData) {
-    return new Promise(resolve => setTimeout(() => {
-        resolve({
-            draft: `Hello ${ticketData.contacts_ax2024?.name || 'there'},\n\nOnyx has analyzed your issue regarding "${ticketData.subject}". I am looking into this right now and will update you shortly.\n\nBest,\nSupport Team`
+    if (import.meta.env.VITE_MOCK_LLM_ENABLED === 'true') {
+        return new Promise(resolve => setTimeout(() => {
+            resolve({
+                draft: `Hello ${ticketData.contacts_ax2024?.name || 'there'},\n\nOnyx has analyzed your issue regarding "${ticketData.subject}". I am looking into this right now and will update you shortly.\n\nBest,\nSupport Team`
+            });
+        }, 1000));
+    }
+
+    try {
+        const response = await fetch(`${ONYX_WORKER_URL}/api/v1/onyx/generate-suggestion`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${ONYX_SECRET}` },
+            body: JSON.stringify({ subject: ticketData.subject, description: ticketData.description })
         });
-    }, 1000));
+        return await response.json();
+    } catch (e) {
+        console.error("Failed to generate auto-draft:", e);
+        return { draft: "Failed to generate draft." };
+    }
   },
 
   async getKBSuggestions(subject, description) {

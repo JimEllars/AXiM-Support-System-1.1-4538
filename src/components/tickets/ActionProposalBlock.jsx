@@ -44,10 +44,10 @@ export default function ActionProposalBlock({ hitlLogId }) {
             const ONYX_WORKER_URL = import.meta.env.VITE_ONYX_WORKER_URL;
             const ONYX_SECRET = "onyx_local_dev_secret";
 
-            const res = await fetch(`${ONYX_WORKER_URL}/v1/actions/resolve`, {
+            const res = await fetch(`${ONYX_WORKER_URL}/api/v1/actions/resolve`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${ONYX_SECRET}` },
-                body: JSON.stringify({ action_id: hitlLogId, resolution: 'approve' })
+                body: JSON.stringify({ hitlLogId: hitlLogId })
             });
             const resultData = await res.json();
 
