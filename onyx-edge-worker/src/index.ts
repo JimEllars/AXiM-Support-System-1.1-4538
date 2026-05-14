@@ -805,24 +805,21 @@ async function handleOnyxBridgeStream(request: Request, env: Env): Promise<Respo
 
             // Presence Integration: notify agents Onyx is thinking
             if (ticketId) {
-                const presencePayload = {
-                    ticket_id: ticketId,
-                    status: 'Thinking',
-                    agent: 'Onyx AI'
-                };
-
-                // Fire an event to a "presence" table or realtime channel
-                // Note: Edge functions generally cannot directly maintain a realtime presence channel
-                // in the traditional client-side way using supabase.channel('...').track().
-                // Instead, we will simulate it by creating a temporary 'thinking' event or
-                // updating the ticket status momentarily, or writing to an events table.
-
-                // We'll write to events_ax2024 to simulate server-side broadcast, and the UI
-                // can listen to events_ax2024 for 'onyx_presence' type events.
-                await supabase.from('events_ax2024').insert({
-                    type: 'onyx_presence',
-                    payload: presencePayload
+                const channelName = `ticket-presence:${ticketId}`;
+                const channel = supabase.channel(channelName);
+                channel.subscribe(async (status) => {
+                    if (status === 'SUBSCRIBED') {
+                        await channel.track({
+                            agentId: 'onyx-ai',
+                            name: 'Onyx AI',
+                            role: 'AI Orchestrator',
+                            color: 'bg-fuchsia-500',
+                            isAI: true,
+                            isTyping: true
+                        });
+                    }
                 });
+                await new Promise(r => setTimeout(r, 500));
             }
 
             await new Promise(r => setTimeout(r, 1000));
@@ -838,10 +835,10 @@ async function handleOnyxBridgeStream(request: Request, env: Env): Promise<Respo
 
             // Clear presence
             if (ticketId) {
-                 await supabase.from('events_ax2024').insert({
-                    type: 'onyx_presence',
-                    payload: { ticket_id: ticketId, status: 'Idle', agent: 'Onyx AI' }
-                });
+                 const channelName = `ticket-presence:${ticketId}`;
+                 const channel = supabase.channel(channelName);
+                 await channel.untrack();
+                 supabase.removeChannel(channel);
             }
 
             sendEvent({ type: 'complete' });
@@ -907,15 +904,18 @@ async function handleGenerateSuggestion(request: Request, env: Env): Promise<Res
         const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
 
         // 1. Query memory_banks for context (top 3)
-        const { data: memoryBanks, error: dbError } = await supabase
-            .from('memory_banks')
-            .select('title, content')
-            .limit(3)
-            .order('created_at', { ascending: false });
+        // Mock embedding generation
+        const embedding = Array(384).fill(0).map(() => Math.random() * 2 - 1);
+
+        const { data: memoryBanks, error: dbError } = await supabase.rpc('match_memory_banks', {
+            query_embedding: embedding,
+            match_threshold: 0.0,
+            match_count: 3
+        });
 
         if (dbError) throw dbError;
 
-        let contextText = memoryBanks?.map(m => `Title: ${m.title}\nContent: ${m.content}`).join('\n\n') || 'No context found.';
+        let contextText = memoryBanks?.map((m: any) => `Title: ${m.title}\nContent: ${m.content}`).join('\n\n') || 'No context found.';
 
         // 2. Call Claude 3 Haiku
         const prompt = `You are Onyx, an expert AXiM Support AI. Given the following ticket details and context from our memory banks, write a professional and helpful support response draft for the agent to review and send to the customer.

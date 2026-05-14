@@ -3,10 +3,11 @@
     "target": "es2021",
     "lib": [
       "es2021",
-      "DOM",
+
       "ES2022"
     ],
     "alwaysStrict": true,
+    "skipLibCheck": true,
     "strict": true,
     "preserveConstEnums": true,
     "moduleResolution": "node",

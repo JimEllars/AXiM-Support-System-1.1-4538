@@ -12,12 +12,6 @@ export default function CoreHealthIndicator() {
         // But the prompt says "AXiM Core's gateway-heartbeat edge function"
         const url = `${CORE_URL}/functions/v1/gateway-heartbeat`;
 
-        // Mock the fetch if we are in a purely local environment without a real core
-        if (import.meta.env.VITE_MOCK_LLM_ENABLED === 'true') {
-            setIsOnline(true);
-            return;
-        }
-
         const res = await fetch(url, { method: 'GET' });
         setIsOnline(res.ok);
       } catch (e) {
