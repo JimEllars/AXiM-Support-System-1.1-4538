@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
+import { useTicketStore } from '../../store/useTicketStore';
 
 export default function CoreHealthIndicator() {
-  const [isOnline, setIsOnline] = useState(true);
+  const { isCoreOnline: isOnline, setIsCoreOnline: setIsOnline } = useTicketStore();
 
   useEffect(() => {
     const checkHealth = async () => {
