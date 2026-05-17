@@ -3,12 +3,14 @@ import SafeIcon from '../../common/SafeIcon';
 import * as FiIcons from 'react-icons/fi';
 import { supabase } from '../../lib/supabaseClient';
 import toast from 'react-hot-toast';
+import { useTicketStore } from '../../store/useTicketStore';
 
 const { FiZap, FiCheck, FiX } = FiIcons;
 
 export default function ActionProposalBlock({ hitlLogId }) {
   const [log, setLog] = useState(null);
   const [loading, setLoading] = useState(true);
+  const { isCoreOnline } = useTicketStore();
 
   React.useEffect(() => {
     async function fetchLog() {
@@ -115,20 +117,29 @@ export default function ActionProposalBlock({ hitlLogId }) {
       </div>
 
       {log.status === 'pending' ? (
+        <>
+        {!isCoreOnline && (
+            <div className="mt-4 mb-2 p-3 bg-rose-500/10 border border-rose-500/50 rounded-lg flex items-center gap-2 text-rose-400 text-sm font-mono">
+                <SafeIcon icon={FiZap} className="animate-pulse" /> ⚠️ Action Vault Offline: Execution suspended due to system connectivity issues.
+            </div>
+        )}
         <div className="flex gap-3 mt-4">
             <button
                 onClick={() => handleAction('approve')}
-                className="flex items-center gap-2 px-4 py-2 bg-cyan-500 hover:bg-cyan-400 text-zinc-950 font-bold rounded-lg transition-colors text-sm"
+                disabled={!isCoreOnline}
+                className={`flex items-center gap-2 px-4 py-2 ${!isCoreOnline ? 'bg-zinc-700 text-zinc-500 cursor-not-allowed' : 'bg-cyan-500 hover:bg-cyan-400 text-zinc-950'} font-bold rounded-lg transition-colors text-sm`}
             >
                 <SafeIcon icon={FiCheck} /> Approve & Execute
             </button>
             <button
                 onClick={() => handleAction('reject')}
-                className="flex items-center gap-2 px-4 py-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 font-medium rounded-lg transition-colors text-sm"
+                disabled={!isCoreOnline}
+                className={`flex items-center gap-2 px-4 py-2 ${!isCoreOnline ? 'bg-zinc-800/50 text-zinc-600 cursor-not-allowed' : 'bg-zinc-800 hover:bg-zinc-700 text-zinc-300'} font-medium rounded-lg transition-colors text-sm`}
             >
                 <SafeIcon icon={FiX} /> Reject
             </button>
         </div>
+        </>
       ) : (
           <div className="flex items-center gap-2 text-sm font-bold mono-font mt-4">
               <span className={log.status === 'approved' ? 'text-emerald-400' : 'text-red-400'}>

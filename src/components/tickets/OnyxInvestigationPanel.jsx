@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import SafeIcon from '../../common/SafeIcon';
 import * as FiIcons from 'react-icons/fi';
 import { useTicketStore } from '../../store/useTicketStore';
+import { supabase } from '../../lib/supabaseClient';
 
 const { FiTerminal, FiCpu, FiCheck, FiLoader } = FiIcons;
 
@@ -13,48 +14,35 @@ export default function OnyxInvestigationPanel({ ticketId }) {
   useEffect(() => {
     if (!ticketId) return;
 
-    let eventSource;
-    try {
-      // Connect to the edge worker SSE endpoint for "thinking" events
-      const workerUrl = import.meta.env.VITE_ONYX_WORKER_URL || 'http://localhost:54321/functions/v1/onyx-bridge';
-      // Pass the request without the secret since EventSource doesn't do auth headers natively.
-      // Instead, in a real scenario we'd do a fetch to get a short lived token first.
-      // For this demo, we can just omit the secret requirement for the SSE stream or use a mock non-secret param.
-      const token = 'demo_token_only';
-      const url = `${workerUrl}/api/v1/onyx-bridge/stream?ticket_id=${ticketId}&token=${token}`;
-      eventSource = new EventSource(url);
-
-      eventSource.onmessage = (event) => {
-        try {
-          const data = JSON.parse(event.data);
-
-          if (data.type === 'start') {
-             setIsActive(true);
-             setLogs([{ id: Date.now(), msg: 'Onyx sub-agents spawned.', type: 'info' }]);
-          } else if (data.type === 'log') {
-             setLogs(prev => [...prev, { id: Date.now(), msg: data.message, type: 'process' }]);
-          } else if (data.type === 'complete') {
-             setLogs(prev => [...prev, { id: Date.now(), msg: 'Investigation complete.', type: 'success' }]);
-             setTimeout(() => setIsActive(false), 5000); // Hide after a while
+    // Subscribe to events_ax2024 for onyx_presence logs
+    const channel = supabase.channel(`onyx-presence-${ticketId}`)
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'events_ax2024',
+          filter: `type=eq.onyx_presence`
+        },
+        (payload) => {
+          const newEvent = payload.new;
+          if (newEvent.payload && newEvent.payload.ticket_id === ticketId) {
+            if (newEvent.payload.status === 'Thinking') {
+              setIsActive(true);
+              setLogs(prev => [...prev, { id: Date.now(), msg: newEvent.payload.message || 'Onyx sub-agents spawned.', type: 'info' }]);
+            } else if (newEvent.payload.status === 'Complete') {
+              setLogs(prev => [...prev, { id: Date.now(), msg: newEvent.payload.message || 'Investigation complete.', type: 'success' }]);
+              setTimeout(() => setIsActive(false), 5000);
+            } else {
+              setLogs(prev => [...prev, { id: Date.now(), msg: newEvent.payload.message || 'Processing...', type: 'process' }]);
+            }
           }
-        } catch (e) {
-          console.error("Failed to parse SSE data", e);
         }
-      };
-
-      eventSource.onerror = (err) => {
-        // SSE often errors on close, ignore or handle reconnect logic here
-        eventSource.close();
-      };
-
-    } catch (err) {
-      console.error("Failed to connect to Onyx SSE", err);
-    }
+      )
+      .subscribe();
 
     return () => {
-      if (eventSource) {
-        eventSource.close();
-      }
+      supabase.removeChannel(channel);
     };
   }, [ticketId]);
 

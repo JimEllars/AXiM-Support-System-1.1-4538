@@ -129,8 +129,25 @@ async function handleVectorSearch(request: Request, env: Env): Promise<Response>
     try {
         const { query } = (await request.json()) as any;
 
-        // Mock embedding generation - in production use Cloudflare AI or external API
-        const embedding = Array(384).fill(0).map(() => Math.random() * 2 - 1);
+        let embedding = Array(384).fill(0).map(() => Math.random() * 2 - 1);
+        try {
+            const embedRes = await fetch(`${env.CORE_API_URL || 'https://api.axim-core.internal'}/functions/v1/generate-embedding`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${env.AXIM_SERVICE_KEY}`
+                },
+                body: JSON.stringify({ input: query })
+            });
+            if (embedRes.ok) {
+                const embedData: any = await embedRes.json();
+                if (embedData.embedding) embedding = embedData.embedding;
+            } else {
+                console.error("Core embedding API failed:", await embedRes.text());
+            }
+        } catch (err) {
+            console.error("Error fetching embedding:", err);
+        }
 
         const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
 
@@ -357,8 +374,24 @@ async function handleWebhookIntake(request: Request, env: Env): Promise<Response
         }
 
         // Sentinel Logic: Run vector search and attempt deflection
-        // Mocking embedding since we don't have a real one here
-        const embedding = Array(384).fill(0).map(() => Math.random() * 2 - 1);
+        let embedding = Array(384).fill(0).map(() => Math.random() * 2 - 1);
+        try {
+            const textToEmbed = `${normalizedData.subject} ${normalizedData.description || ''}`;
+            const embedRes = await fetch(`${env.CORE_API_URL || 'https://api.axim-core.internal'}/functions/v1/generate-embedding`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${env.AXIM_SERVICE_KEY}`
+                },
+                body: JSON.stringify({ input: textToEmbed })
+            });
+            if (embedRes.ok) {
+                const embedData: any = await embedRes.json();
+                if (embedData.embedding) embedding = embedData.embedding;
+            }
+        } catch (err) {
+            console.error("Error fetching embedding:", err);
+        }
         const { data: searchResults, error: searchError } = await supabase.rpc('match_kb_articles', {
             query_embedding: embedding,
             match_threshold: 0.5,
@@ -822,6 +855,18 @@ async function handleOnyxBridgeStream(request: Request, env: Env): Promise<Respo
                 await new Promise(r => setTimeout(r, 500));
             }
 
+            // Also push to events_ax2024 for the frontend to pick up the 'Thinking' status
+            if (ticketId) {
+                 await supabase.from('events_ax2024').insert({
+                     type: 'onyx_presence',
+                     payload: {
+                         ticket_id: ticketId,
+                         status: 'Thinking',
+                         message: 'Onyx sub-agents spawned.'
+                     }
+                 });
+            }
+
             await new Promise(r => setTimeout(r, 1000));
             sendEvent({ type: 'log', message: `Analyzing ticket ${ticketId}...` });
 
@@ -841,6 +886,16 @@ async function handleOnyxBridgeStream(request: Request, env: Env): Promise<Respo
                  supabase.removeChannel(channel);
             }
 
+            if (ticketId) {
+                 await supabase.from('events_ax2024').insert({
+                     type: 'onyx_presence',
+                     payload: {
+                         ticket_id: ticketId,
+                         status: 'Complete',
+                         message: 'Investigation complete.'
+                     }
+                 });
+            }
             sendEvent({ type: 'complete' });
 
             controller?.close();
@@ -904,8 +959,24 @@ async function handleGenerateSuggestion(request: Request, env: Env): Promise<Res
         const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
 
         // 1. Query memory_banks for context (top 3)
-        // Mock embedding generation
-        const embedding = Array(384).fill(0).map(() => Math.random() * 2 - 1);
+        let embedding = Array(384).fill(0).map(() => Math.random() * 2 - 1);
+        try {
+            const textToEmbed = `${subject} ${description || ''}`;
+            const embedRes = await fetch(`${env.CORE_API_URL || 'https://api.axim-core.internal'}/functions/v1/generate-embedding`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${env.AXIM_SERVICE_KEY}`
+                },
+                body: JSON.stringify({ input: textToEmbed })
+            });
+            if (embedRes.ok) {
+                const embedData: any = await embedRes.json();
+                if (embedData.embedding) embedding = embedData.embedding;
+            }
+        } catch (err) {
+            console.error("Error fetching embedding:", err);
+        }
 
         const { data: memoryBanks, error: dbError } = await supabase.rpc('match_memory_banks', {
             query_embedding: embedding,
@@ -930,26 +1001,40 @@ Draft a concise, professional reply:`;
 
         let draft = '';
         if (env.ANTHROPIC_API_KEY) {
-            const anthropicRes = await fetch('https://api.anthropic.com/v1/messages', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'x-api-key': env.ANTHROPIC_API_KEY,
-                    'anthropic-version': '2023-06-01'
-                },
-                body: JSON.stringify({
-                    model: 'claude-3-haiku-20240307',
-                    max_tokens: 500,
-                    messages: [{ role: 'user', content: prompt }]
-                })
-            });
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 8000); // 8s timeout boundary
 
-            if (anthropicRes.ok) {
-                const data: any = await anthropicRes.json();
-                draft = data.content[0].text;
-            } else {
-                console.error("Anthropic Error:", await anthropicRes.text());
-                draft = "I encountered an issue generating the draft from the AI.";
+            try {
+                const anthropicRes = await fetch('https://api.anthropic.com/v1/messages', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'x-api-key': env.ANTHROPIC_API_KEY,
+                        'anthropic-version': '2023-06-01'
+                    },
+                    body: JSON.stringify({
+                        model: 'claude-3-haiku-20240307',
+                        max_tokens: 500,
+                        messages: [{ role: 'user', content: prompt }]
+                    }),
+                    signal: controller.signal
+                });
+
+                clearTimeout(timeoutId);
+
+                if (anthropicRes.ok) {
+                    const data: any = await anthropicRes.json();
+                    draft = data.content[0].text;
+                } else {
+                    console.error("Anthropic Error:", await anthropicRes.text());
+                    throw new Error("Anthropic API returned non-OK status.");
+                }
+            } catch (err: any) {
+                clearTimeout(timeoutId);
+                console.error("LLM Generation Error or Timeout:", err.message);
+
+                // Engineered fallback boundary
+                draft = `[AUTO-FALLBACK: AI Generation Timeout]\n\nBased on the primary knowledge base findings, we have identified the following context for your issue:\n\n${contextText}\n\nOur support team will review this information and follow up shortly.`;
             }
         } else {
             // Fallback if no key is provided in env
