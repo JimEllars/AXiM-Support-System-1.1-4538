@@ -3,7 +3,8 @@
   "version": "1.0.0",
   "main": "src/index.ts",
   "dependencies": {
-    "@supabase/supabase-js": "^2.39.0"
+    "@supabase/supabase-js": "^2.39.0",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20260511.1",
