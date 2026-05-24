@@ -7,6 +7,30 @@ import ActionProposalBlock from './ActionProposalBlock';
 const { FiUser, FiCpu, FiLock, FiTerminal } = FiIcons;
 
 export default function MessageThread({ messages }) {
+
+  if (!messages || messages.length === 0) {
+    return (
+      <div className="space-y-8">
+        {[1, 2, 3].map(i => (
+          <div key={i} className="flex gap-6 animate-pulse">
+            <div className="w-12 h-12 bg-zinc-800 rounded-2xl shrink-0" />
+            <div className="flex-1 p-6 rounded-[1.5rem] bg-zinc-900/40 border border-zinc-800">
+              <div className="flex justify-between items-center mb-4">
+                <div className="h-3 bg-zinc-800 rounded w-1/4" />
+                <div className="h-3 bg-zinc-800 rounded w-1/6" />
+              </div>
+              <div className="space-y-2">
+                <div className="h-4 bg-zinc-800 rounded w-full" />
+                <div className="h-4 bg-zinc-800 rounded w-5/6" />
+                <div className="h-4 bg-zinc-800 rounded w-3/4" />
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-8">
       {messages.map((msg) => {
