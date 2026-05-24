@@ -8,14 +8,24 @@ export default function CoreHealthIndicator() {
   useEffect(() => {
     const checkHealth = async () => {
       try {
-        const CORE_URL = import.meta.env.VITE_CORE_API_URL || 'https://api.axim-core.internal';
-        // Usually, edge functions are under /functions/v1/
-        // But the prompt says "AXiM Core's gateway-heartbeat edge function"
-        const url = `${CORE_URL}/functions/v1/gateway-heartbeat`;
+        const workerUrl = import.meta.env.VITE_ONYX_WORKER_URL || 'http://localhost:54321/functions/v1/onyx-bridge';
+        const res = await fetch(`${workerUrl}/health`, {
+          method: 'GET',
+          signal: AbortSignal.timeout(5000),
+        });
 
-        const res = await fetch(url, { method: 'GET' });
-        setIsOnline(res.ok);
-      } catch (e) {
+        if (res.ok) {
+          const data = await res.json();
+          setIsOnline(data.status === 'healthy' || data.status === 'degraded');
+
+          if (data.status === 'degraded') {
+            console.warn('[CoreHealth] System degraded:', data.checks);
+          }
+        } else {
+          setIsOnline(false);
+        }
+      } catch (error) {
+        console.error('[CoreHealth] Health check failed:', error);
         setIsOnline(false);
       }
     };
