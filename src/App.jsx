@@ -13,6 +13,33 @@ const queryClient = new QueryClient();
 function App() {
   const { subscribeToTickets, unsubscribeFromTickets } = useTicketStore();
 
+
+  useEffect(() => {
+    const handleKeyPress = (e) => {
+      // Cmd/Ctrl + K for command palette (mock or set state if store has it)
+      if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+        e.preventDefault();
+        // Here we would open Command Hub, could dispatch custom event
+        window.dispatchEvent(new CustomEvent('open-command-hub'));
+      }
+
+      // Escape to close modals
+      if (e.key === 'Escape') {
+        // Here we could close active modals
+        window.dispatchEvent(new CustomEvent('close-modals'));
+      }
+
+      // Cmd/Ctrl + N to create new ticket
+      if ((e.metaKey || e.ctrlKey) && e.key === 'n') {
+        e.preventDefault();
+        window.dispatchEvent(new CustomEvent('open-create-ticket'));
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyPress);
+    return () => window.removeEventListener('keydown', handleKeyPress);
+  }, []);
+
   useEffect(() => {
     console.log('[App] Setting up subscriptions');
     subscribeToTickets();

@@ -5,13 +5,145 @@
 
 import { createClient } from '@supabase/supabase-js';
 
+import { z } from 'zod';
+
+
+const WebhookIntakeSchema = z.object({
+  subject: z.string().min(1).max(500),
+  description: z.string().optional(),
+  customer_email: z.string().email(),
+  priority: z.enum(['low', 'medium', 'high', 'urgent']).optional(),
+});
+
+const ToolCommandSchema = z.object({
+  hitlLogId: z.string().uuid()
+});
+
+// Rate limiting map
+const rateLimitMap = new Map<string, { count: number; resetAt: number }>();
+
+function checkRateLimit(ip: string, maxRequests: number, windowMs = 60000): boolean {
+  const now = Date.now();
+  const record = rateLimitMap.get(ip);
+
+  if (!record || now > record.resetAt) {
+    rateLimitMap.set(ip, { count: 1, resetAt: now + windowMs });
+    return true;
+  }
+
+  if (record.count >= maxRequests) {
+    return false;
+  }
+
+  record.count++;
+  return true;
+}
+
+// Allowed Origins helper
+function getCorsHeaders(env: Env, request: Request) {
+    const origin = request.headers.get('Origin');
+    const allowedOrigins = env.ALLOWED_ORIGINS?.split(',') || ['http://localhost:5173'];
+    const allowOrigin = origin && allowedOrigins.includes(origin) ? origin : allowedOrigins[0];
+
+    return {
+        'Access-Control-Allow-Origin': allowOrigin,
+        'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+        'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+        'Access-Control-Max-Age': '86400',
+    };
+}
+
+const ALLOWED_MIME_TYPES = ['image/png', 'image/jpeg', 'image/gif', 'application/pdf', 'text/plain'];
+const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
+
+function validateAttachment(file: { name: string; type: string; size: number }): { valid: boolean; error?: string } {
+  if (!ALLOWED_MIME_TYPES.includes(file.type)) {
+    return { valid: false, error: `File type ${file.type} not allowed` };
+  }
+  if (file.size > MAX_FILE_SIZE) {
+    return { valid: false, error: `File size exceeds ${MAX_FILE_SIZE / 1024 / 1024}MB limit` };
+  }
+  return { valid: true };
+}
+
+interface LogContext {
+  requestId: string;
+  endpoint: string;
+  method: string;
+  timestamp: string;
+}
+
+function createLogContext(request: Request): LogContext {
+  return {
+    requestId: crypto.randomUUID(),
+    endpoint: new URL(request.url).pathname,
+    method: request.method,
+    timestamp: new Date().toISOString(),
+  };
+}
+
+async function logToEvents(supabase: any, context: LogContext, type: string, message: string, metadata?: any) {
+    console.log(JSON.stringify({ level: type === 'error' ? 'ERROR' : 'INFO', ...context, message, metadata }));
+    await supabase.from('events_ax2024').insert({
+        type: type,
+        payload: {
+            ...context,
+            message,
+            metadata
+        }
+    });
+}
+
+
 export interface Env {
+  ALLOWED_ORIGINS?: string;
   SUPABASE_URL: string;
   SUPABASE_SERVICE_ROLE_KEY: string;
   AXIM_ONYX_SECRET: string;
   ANTHROPIC_API_KEY: string;
   AXIM_SERVICE_KEY: string;
   CORE_API_URL: string;
+}
+
+
+async function handleHealthCheck(env: Env, request: Request): Promise<Response> {
+  const checks = {
+    database: false,
+    coreApi: false,
+  };
+
+  try {
+    const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
+
+    const logCtx = createLogContext(request);
+    logToEvents(supabase, logCtx, 'performance_metric', 'Request start', { headers: request.headers });
+
+    const { error } = await supabase.from('support_tickets').select('id').limit(1);
+    checks.database = !error;
+  } catch (e) {
+    checks.database = false;
+  }
+
+  try {
+    const coreRes = await fetch(`${env.CORE_API_URL || 'https://api.axim-core.internal'}/functions/v1/gateway-heartbeat`, {
+        method: 'GET',
+        // signal: AbortSignal.timeout(3000), // Cloudflare worker AbortSignal support check
+    });
+    checks.coreApi = coreRes.ok;
+  } catch (e) {
+    checks.coreApi = false;
+  }
+
+  const allHealthy = Object.values(checks).every(Boolean);
+
+  return new Response(JSON.stringify({
+    status: allHealthy ? 'healthy' : 'degraded',
+    checks,
+    timestamp: new Date().toISOString(),
+  }), {
+    status: allHealthy ? 200 : 503,
+    headers: { 'Content-Type': 'application/json', ...getCorsHeaders(env, request) }
+  });
 }
 
 export default {
@@ -22,7 +154,7 @@ export default {
     if (request.method === 'OPTIONS') {
       return new Response(null, {
         headers: {
-          'Access-Control-Allow-Origin': '*',
+          ...getCorsHeaders(env, request),
           'Access-Control-Allow-Methods': 'POST, GET, OPTIONS',
           'Access-Control-Allow-Headers': 'Content-Type, Authorization',
         },
@@ -82,6 +214,10 @@ async function handleTicketIngestion(request: Request, env: Env): Promise<Respon
       const onyxAnalysis = await analyzeWithOnyx(subject, description, env.ANTHROPIC_API_KEY);
       const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
 
+    const logCtx = createLogContext(request);
+    logToEvents(supabase, logCtx, 'performance_metric', 'Request start', { headers: request.headers });
+
+
       const { data: ticket, error: ticketError } = await supabase
         .from('support_tickets')
         .insert({
@@ -107,13 +243,13 @@ async function handleTicketIngestion(request: Request, env: Env): Promise<Respon
         });
 
       return new Response(JSON.stringify({ success: true, ticket_id: ticket.id }), {
-        headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' },
+        headers: { 'Content-Type': 'application/json', ...getCorsHeaders(env, request) },
       });
 
     } catch (error: any) {
       return new Response(JSON.stringify({ error: error.message }), { 
         status: 500,
-        headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
+        headers: { 'Content-Type': 'application/json', ...getCorsHeaders(env, request) }
       });
     }
 }
@@ -129,7 +265,8 @@ async function handleVectorSearch(request: Request, env: Env): Promise<Response>
     try {
         const { query } = (await request.json()) as any;
 
-        let embedding = Array(384).fill(0).map(() => Math.random() * 2 - 1);
+
+        let embedding = [];
         try {
             const embedRes = await fetch(`${env.CORE_API_URL || 'https://api.axim-core.internal'}/functions/v1/generate-embedding`, {
                 method: 'POST',
@@ -143,13 +280,20 @@ async function handleVectorSearch(request: Request, env: Env): Promise<Response>
                 const embedData: any = await embedRes.json();
                 if (embedData.embedding) embedding = embedData.embedding;
             } else {
-                console.error("Core embedding API failed:", await embedRes.text());
+                console.error("Embedding API error:", await embedRes.text());
+                throw new Error("Failed to fetch embedding from Core");
             }
         } catch (err) {
             console.error("Error fetching embedding:", err);
+            throw new Error("Embedding generation failed");
         }
 
+
         const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
+
+    const logCtx = createLogContext(request);
+    logToEvents(supabase, logCtx, 'performance_metric', 'Request start', { headers: request.headers });
+
 
         // Use RPC to search pgvector
         const { data, error } = await supabase.rpc('match_kb_articles', {
@@ -164,7 +308,7 @@ async function handleVectorSearch(request: Request, env: Env): Promise<Response>
                 { id: 1, title: "Solar Playbooks", relevance: 98, content: "Solar installation guidelines and safety protocols..." },
                 { id: 2, title: "Technical Docs", relevance: 85, content: "Technical details about node configuration..." }
             ]), {
-                headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' },
+                headers: { 'Content-Type': 'application/json', ...getCorsHeaders(env, request) },
             });
         }
 
@@ -176,7 +320,7 @@ async function handleVectorSearch(request: Request, env: Env): Promise<Response>
         }));
 
         return new Response(JSON.stringify(results), {
-            headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' },
+            headers: { 'Content-Type': 'application/json', ...getCorsHeaders(env, request) },
         });
 
     } catch (e: any) {
@@ -193,6 +337,10 @@ async function handleBatchTriage(request: Request, env: Env): Promise<Response> 
     try {
         const { ticketIds } = (await request.json()) as any;
         const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
+
+    const logCtx = createLogContext(request);
+    logToEvents(supabase, logCtx, 'performance_metric', 'Request start', { headers: request.headers });
+
 
         // Fetch tickets to analyze
         const { data: tickets, error: fetchError } = await supabase
@@ -239,18 +387,27 @@ async function handleBatchTriage(request: Request, env: Env): Promise<Response> 
         if (telemetryError) throw telemetryError;
 
         return new Response(JSON.stringify({ success: true, processed: updates.length }), {
-            headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' },
+            headers: { 'Content-Type': 'application/json', ...getCorsHeaders(env, request) },
         });
 
     } catch (error: any) {
         return new Response(JSON.stringify({ error: error.message }), {
             status: 500,
-            headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
+            headers: { 'Content-Type': 'application/json', ...getCorsHeaders(env, request) }
         });
     }
 }
 
 async function handleWebhookIntake(request: Request, env: Env): Promise<Response> {
+
+        const clientIP = request.headers.get('CF-Connecting-IP') || 'unknown';
+        if (!checkRateLimit(clientIP, 10)) {
+            return new Response(JSON.stringify({ error: 'Rate limit exceeded for webhooks' }), {
+                status: 429,
+                headers: { 'Content-Type': 'application/json', ...getCorsHeaders(env, request) }
+            });
+        }
+
     const authHeader = request.headers.get('Authorization');
     if (authHeader !== `Bearer ${env.AXIM_ONYX_SECRET}`) {
       return new Response('Unauthorized', { status: 401 });
@@ -258,6 +415,10 @@ async function handleWebhookIntake(request: Request, env: Env): Promise<Response
 
     try {
         const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
+
+    const logCtx = createLogContext(request);
+    logToEvents(supabase, logCtx, 'performance_metric', 'Request start', { headers: request.headers });
+
         const contentType = request.headers.get('content-type') || '';
         let normalizedData: any = {};
         let attachmentUrl = null;
@@ -319,7 +480,7 @@ async function handleWebhookIntake(request: Request, env: Env): Promise<Response
         if (!normalizedData.customer_email) {
             return new Response(JSON.stringify({ error: "Missing customer email" }), {
                 status: 400,
-                headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
+                headers: { 'Content-Type': 'application/json', ...getCorsHeaders(env, request) }
             });
         }
 
@@ -374,24 +535,29 @@ async function handleWebhookIntake(request: Request, env: Env): Promise<Response
         }
 
         // Sentinel Logic: Run vector search and attempt deflection
-        let embedding = Array(384).fill(0).map(() => Math.random() * 2 - 1);
+
+        let embedding = [];
         try {
-            const textToEmbed = `${normalizedData.subject} ${normalizedData.description || ''}`;
             const embedRes = await fetch(`${env.CORE_API_URL || 'https://api.axim-core.internal'}/functions/v1/generate-embedding`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
                     'Authorization': `Bearer ${env.AXIM_SERVICE_KEY}`
                 },
-                body: JSON.stringify({ input: textToEmbed })
+                body: JSON.stringify({ input: `${normalizedData.subject} ${normalizedData.description || ''}` })
             });
             if (embedRes.ok) {
                 const embedData: any = await embedRes.json();
                 if (embedData.embedding) embedding = embedData.embedding;
+            } else {
+                console.error("Embedding API error:", await embedRes.text());
+                throw new Error("Failed to fetch embedding from Core");
             }
         } catch (err) {
             console.error("Error fetching embedding:", err);
+            throw new Error("Embedding generation failed");
         }
+
         const { data: searchResults, error: searchError } = await supabase.rpc('match_kb_articles', {
             query_embedding: embedding,
             match_threshold: 0.5,
@@ -460,13 +626,13 @@ async function handleWebhookIntake(request: Request, env: Env): Promise<Response
             });
 
         return new Response(JSON.stringify({ success: true, ticket_id: ticket.id }), {
-            headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' },
+            headers: { 'Content-Type': 'application/json', ...getCorsHeaders(env, request) },
         });
 
     } catch (error: any) {
         return new Response(JSON.stringify({ error: error.message }), {
             status: 500,
-            headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
+            headers: { 'Content-Type': 'application/json', ...getCorsHeaders(env, request) }
         });
     }
 }
@@ -567,6 +733,10 @@ async function handleToolCommand(request: Request, env: Env): Promise<Response> 
         const { command, ticketId } = (await request.json()) as any;
         const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
 
+    const logCtx = createLogContext(request);
+    logToEvents(supabase, logCtx, 'performance_metric', 'Request start', { headers: request.headers });
+
+
         // Stubbed logic calling Claude API with tools
         // A real implementation would send 'command' to Anthropic API
         // `anthropic-version`: `2023-06-01`
@@ -622,19 +792,19 @@ async function handleToolCommand(request: Request, env: Env): Promise<Response> 
             if (msgError) throw msgError;
 
             return new Response(JSON.stringify({ success: true, action_proposed: true }), {
-                 headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' },
+                 headers: { 'Content-Type': 'application/json', ...getCorsHeaders(env, request) },
             });
         }
 
         // Default response if no tool is used
         return new Response(JSON.stringify({ success: true, action_proposed: false }), {
-             headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' },
+             headers: { 'Content-Type': 'application/json', ...getCorsHeaders(env, request) },
         });
 
     } catch (error: any) {
         return new Response(JSON.stringify({ error: error.message }), {
             status: 500,
-            headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
+            headers: { 'Content-Type': 'application/json', ...getCorsHeaders(env, request) }
         });
     }
 }
@@ -650,6 +820,10 @@ async function handleExecuteAction(request: Request, env: Env): Promise<Response
     try {
         const { hitlLogId } = (await request.json()) as any;
         const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
+
+    const logCtx = createLogContext(request);
+    logToEvents(supabase, logCtx, 'performance_metric', 'Request start', { headers: request.headers });
+
 
         // Fetch hitl log
         const { data: hitlLog, error: fetchError } = await supabase
@@ -710,13 +884,13 @@ async function handleExecuteAction(request: Request, env: Env): Promise<Response
         await supabase.from('hitl_audit_logs').update({ status: 'executed' }).eq('id', hitlLogId);
 
         return new Response(JSON.stringify({ success: true, executed: true, proxied: true }), {
-             headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' },
+             headers: { 'Content-Type': 'application/json', ...getCorsHeaders(env, request) },
         });
 
     } catch (error: any) {
         return new Response(JSON.stringify({ error: error.message }), {
             status: 500,
-            headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
+            headers: { 'Content-Type': 'application/json', ...getCorsHeaders(env, request) }
         });
     }
 }
@@ -742,6 +916,10 @@ async function handleTicketResolved(request: Request, env: Env): Promise<Respons
         }
 
         const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
+
+    const logCtx = createLogContext(request);
+    logToEvents(supabase, logCtx, 'performance_metric', 'Request start', { headers: request.headers });
+
 
         // Fetch thread
         const { data: messages } = await supabase
@@ -831,6 +1009,10 @@ async function handleOnyxBridgeStream(request: Request, env: Env): Promise<Respo
 
     const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
 
+    const logCtx = createLogContext(request);
+    logToEvents(supabase, logCtx, 'performance_metric', 'Request start', { headers: request.headers });
+
+
     // Simulate the process asynchronously and update Presence
     (async () => {
         try {
@@ -910,7 +1092,7 @@ async function handleOnyxBridgeStream(request: Request, env: Env): Promise<Respo
             'Content-Type': 'text/event-stream',
             'Cache-Control': 'no-cache',
             'Connection': 'keep-alive',
-            'Access-Control-Allow-Origin': '*'
+            ...getCorsHeaders(env, request)
         }
     });
 }
@@ -939,7 +1121,7 @@ Best,
 AXiM Support (Onyx Auto-Draft)`;
 
         return new Response(JSON.stringify({ draft: simulatedDraft }), {
-            headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
+            headers: { 'Content-Type': 'application/json', ...getCorsHeaders(env, request) }
         });
 
     } catch (e: any) {
@@ -958,25 +1140,34 @@ async function handleGenerateSuggestion(request: Request, env: Env): Promise<Res
         const { subject, description } = await request.json() as any;
         const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
 
+    const logCtx = createLogContext(request);
+    logToEvents(supabase, logCtx, 'performance_metric', 'Request start', { headers: request.headers });
+
+
         // 1. Query memory_banks for context (top 3)
-        let embedding = Array(384).fill(0).map(() => Math.random() * 2 - 1);
+
+        let embedding = [];
         try {
-            const textToEmbed = `${subject} ${description || ''}`;
             const embedRes = await fetch(`${env.CORE_API_URL || 'https://api.axim-core.internal'}/functions/v1/generate-embedding`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
                     'Authorization': `Bearer ${env.AXIM_SERVICE_KEY}`
                 },
-                body: JSON.stringify({ input: textToEmbed })
+                body: JSON.stringify({ input: `${subject} ${description || ''}` })
             });
             if (embedRes.ok) {
                 const embedData: any = await embedRes.json();
                 if (embedData.embedding) embedding = embedData.embedding;
+            } else {
+                console.error("Embedding API error:", await embedRes.text());
+                throw new Error("Failed to fetch embedding from Core");
             }
         } catch (err) {
             console.error("Error fetching embedding:", err);
+            throw new Error("Embedding generation failed");
         }
+
 
         const { data: memoryBanks, error: dbError } = await supabase.rpc('match_memory_banks', {
             query_embedding: embedding,
@@ -1042,10 +1233,10 @@ Draft a concise, professional reply:`;
         }
 
         return new Response(JSON.stringify({ draft }), {
-            headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
+            headers: { 'Content-Type': 'application/json', ...getCorsHeaders(env, request) }
         });
 
     } catch (error: any) {
-         return new Response(JSON.stringify({ error: error.message }), { status: 500, headers: { 'Access-Control-Allow-Origin': '*' } });
+         return new Response(JSON.stringify({ error: error.message }), { status: 500, headers: { ...getCorsHeaders(env, request) } });
     }
 }
