@@ -19,7 +19,27 @@ export default function TicketList({ onSelectTicket }) {
   useEffect(() => {
     fetchTickets();
     const unsubscribe = subscribeToTickets();
-    return () => {
+
+  if (isLoading && tickets.length === 0) {
+    return (
+      <div className="space-y-3 p-4">
+        {[1, 2, 3, 4, 5].map(i => (
+          <div key={i} className="animate-pulse glass-panel rounded-[2rem] p-6 border border-white/5 bg-white/5">
+            <div className="flex gap-4">
+              <div className="w-12 h-12 bg-zinc-800/50 rounded-2xl" />
+              <div className="flex-1 space-y-3 py-1">
+                <div className="h-4 bg-zinc-800/50 rounded w-3/4" />
+                <div className="h-3 bg-zinc-800/50 rounded w-1/2" />
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+    );
+  }
+
+  return (
+) => {
       unsubscribe();
     };
   }, [fetchTickets, subscribeToTickets]);
