@@ -120,7 +120,7 @@ export default function ActionProposalBlock({ hitlLogId }) {
         <>
         {!isCoreOnline && (
             <div className="mt-4 mb-2 p-3 bg-rose-500/10 border border-rose-500/50 rounded-lg flex items-center gap-2 text-rose-400 text-sm font-mono">
-                <SafeIcon icon={FiZap} className="animate-pulse" /> ⚠️ Action Vault Offline: Execution suspended due to system connectivity issues.
+                <SafeIcon icon={FiZap} className="animate-pulse" /> ⚠️ AXiM Core Offline: Action execution suspended.
             </div>
         )}
         <div className="flex gap-3 mt-4">

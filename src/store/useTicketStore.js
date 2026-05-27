@@ -6,7 +6,7 @@ export const useTicketStore = create((set, get) => ({
   tickets: [],
   isLoading: false,
   isCoreOnline: true,
-  setIsCoreOnline: (status) => set({ isCoreOnline: status }),
+  setCoreOnlineStatus: (status) => set({ isCoreOnline: status }),
   selectedTicketId: null,
   setSelectedTicketId: (id) => set({ selectedTicketId: id }),
   searchQuery: '',

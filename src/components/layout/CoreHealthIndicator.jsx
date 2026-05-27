@@ -3,7 +3,7 @@ import { motion } from 'framer-motion';
 import { useTicketStore } from '../../store/useTicketStore';
 
 export default function CoreHealthIndicator() {
-  const { isCoreOnline: isOnline, setIsCoreOnline: setIsOnline } = useTicketStore();
+  const { isCoreOnline: isOnline, setCoreOnlineStatus: setIsOnline } = useTicketStore();
 
   useEffect(() => {
     const checkHealth = async () => {
