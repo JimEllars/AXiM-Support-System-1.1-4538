@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { useTicketStore } from '../store/useTicketStore';
 import { motion, AnimatePresence } from 'framer-motion';
 import SafeIcon from '../common/SafeIcon';
 import * as FiIcons from 'react-icons/fi';
