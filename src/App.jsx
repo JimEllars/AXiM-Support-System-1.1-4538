@@ -11,8 +11,6 @@ import { useTicketStore } from './store/useTicketStore';
 const queryClient = new QueryClient();
 
 function App() {
-  const { subscribeToTickets, unsubscribeFromTickets } = useTicketStore();
-
 
   useEffect(() => {
     const handleKeyPress = (e) => {
@@ -40,15 +38,6 @@ function App() {
     return () => window.removeEventListener('keydown', handleKeyPress);
   }, []);
 
-  useEffect(() => {
-    console.log('[App] Setting up subscriptions');
-    subscribeToTickets();
-
-    return () => {
-      console.log('[App] Cleaning up subscriptions');
-      unsubscribeFromTickets();
-    };
-  }, []);
   return (
     <QueryClientProvider client={queryClient}>
       <BrowserRouter>

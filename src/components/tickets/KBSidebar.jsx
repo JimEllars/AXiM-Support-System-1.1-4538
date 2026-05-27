@@ -5,6 +5,30 @@ import * as FiIcons from 'react-icons/fi';
 
 const { FiCpu, FiExternalLink, FiTarget, FiCopy } = FiIcons;
 
+const getRelevanceStyle = (score) => {
+  if (score > 90) return {
+    text: 'text-emerald-400',
+    bg: 'bg-emerald-500/10',
+    border: 'border-emerald-500/30',
+    glow: 'shadow-[0_0_12px_rgba(16,185,129,0.2)]',
+    hoverBorder: 'hover:border-emerald-500/40'
+  };
+  if (score >= 75) return {
+    text: 'text-cyan-400',
+    bg: 'bg-cyan-500/10',
+    border: 'border-cyan-500/30',
+    glow: '',
+    hoverBorder: 'hover:border-cyan-500/40'
+  };
+  return {
+    text: 'text-zinc-400',
+    bg: 'bg-zinc-800/50',
+    border: 'border-zinc-700',
+    glow: '',
+    hoverBorder: 'hover:border-zinc-600'
+  };
+};
+
 export default function KBSidebar({ subject, description, onCopySolution }) {
   const [suggestions, setSuggestions] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -34,13 +58,15 @@ export default function KBSidebar({ subject, description, onCopySolution }) {
             {[1, 2].map(i => <div key={i} className="h-20 bg-zinc-800/50 rounded-2xl" />)}
           </div>
         ) : (
-          suggestions.map((item) => (
-            <div key={item.id} className="group p-5 bg-zinc-950/50 hover:bg-fuchsia-500/5 rounded-2xl border border-zinc-800 hover:border-fuchsia-500/40 transition-all cursor-pointer relative">
+          suggestions.map((item) => {
+            const rs = getRelevanceStyle(item.relevance);
+            return (
+            <div key={item.id} className={`group p-5 bg-zinc-950/50 hover:bg-fuchsia-500/5 rounded-2xl border border-zinc-800 transition-all cursor-pointer relative ${rs.hoverBorder}`}>
               <div className="flex justify-between items-center mb-3">
-                <div className="flex items-center gap-2">
-                  <SafeIcon icon={FiTarget} className="text-fuchsia-500 text-xs" />
-                  <span className="mono-font text-[10px] font-black text-fuchsia-400 uppercase tracking-widest">
-                    {item.relevance}% Confidence
+                <div className={`flex items-center gap-2 px-2 py-1 rounded border ${rs.bg} ${rs.border} ${rs.glow}`}>
+                  <SafeIcon icon={FiTarget} className={`${rs.text} text-xs`} />
+                  <span className={`mono-font text-[10px] font-black uppercase tracking-widest ${rs.text}`}>
+                    {item.relevance}% Match
                   </span>
                 </div>
                 <div className="flex gap-2">
@@ -61,7 +87,8 @@ export default function KBSidebar({ subject, description, onCopySolution }) {
               </h4>
               <p className="mt-2 text-xs text-zinc-500 line-clamp-2">{item.content}</p>
             </div>
-          ))
+            );
+          })
         )}
       </div>
       

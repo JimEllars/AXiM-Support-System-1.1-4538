@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import SafeIcon from '../common/SafeIcon';
 import * as FiIcons from 'react-icons/fi';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -13,6 +13,22 @@ const statusStyles = {
   closed: { icon: FiCheckCircle, color: 'text-zinc-500', border: 'border-zinc-500/30', bg: 'bg-zinc-500/5' },
 };
 
+const getSLADisplay = (ticket, now) => {
+  if (!ticket.sla_breach_at) return null;
+  if (ticket.status === 'resolved' || ticket.status === 'closed') return null;
+
+  const diffMs = new Date(ticket.sla_breach_at) - now;
+
+  if (diffMs <= 0) {
+    return { label: 'BREACHED', className: 'text-rose-500 bg-rose-500/10 border-rose-500/30' };
+  }
+  if (diffMs < 3600000) {
+    return { label: '< 1 hr', className: 'animate-pulse text-amber-500 bg-amber-500/10 border-amber-500/30' };
+  }
+  const h = Math.floor(diffMs / 3600000);
+  const m = Math.floor((diffMs % 3600000) / 60000);
+  return { label: `${h}h ${m}m`, className: 'text-zinc-400 bg-zinc-800/50 border-zinc-700' };
+};
 
 const SkeletonLoader = () => (
   <div className="space-y-3 p-4">
@@ -32,34 +48,20 @@ const SkeletonLoader = () => (
 
 export default function TicketList({ onSelectTicket }) {
   const { tickets, isLoading, fetchTickets, subscribeToTickets, searchQuery, selectedTicketIds, toggleSelectedTicketId } = useTicketStore();
+  const [now, setNow] = useState(new Date());
 
   useEffect(() => {
     fetchTickets();
     const unsubscribe = subscribeToTickets();
-
-  if (isLoading && tickets.length === 0) {
-    return (
-      <div className="space-y-3 p-4">
-        {[1, 2, 3, 4, 5].map(i => (
-          <div key={i} className="animate-pulse glass-panel rounded-[2rem] p-6 border border-white/5 bg-white/5">
-            <div className="flex gap-4">
-              <div className="w-12 h-12 bg-zinc-800/50 rounded-2xl" />
-              <div className="flex-1 space-y-3 py-1">
-                <div className="h-4 bg-zinc-800/50 rounded w-3/4" />
-                <div className="h-3 bg-zinc-800/50 rounded w-1/2" />
-              </div>
-            </div>
-          </div>
-        ))}
-      </div>
-    );
-  }
-
-  return (
-) => {
+    return () => {
       unsubscribe();
     };
-  }, [fetchTickets, subscribeToTickets]);
+  }, []);
+
+  useEffect(() => {
+    const interval = setInterval(() => setNow(new Date()), 60000);
+    return () => clearInterval(interval);
+  }, []);
 
   const filteredTickets = tickets.filter((ticket) => {
     if (!searchQuery) return true;
@@ -114,15 +116,7 @@ export default function TicketList({ onSelectTicket }) {
           const priorityColor = ticket.priority === 'urgent' ? 'text-rose-500' : ticket.priority === 'high' ? 'text-amber-500' : 'text-zinc-500';
           const customerName = ticket.contacts_ax2024?.name || 'Unknown Contact';
 
-          let slaBreaching = false;
-          if (ticket.sla_breach_at && ticket.status !== 'resolved' && ticket.status !== 'closed') {
-              const breachDate = new Date(ticket.sla_breach_at);
-              const oneHourFromNow = new Date();
-              oneHourFromNow.setHours(oneHourFromNow.getHours() + 1);
-              if (breachDate < oneHourFromNow) {
-                  slaBreaching = true;
-              }
-          }
+          const slaDisplay = getSLADisplay(ticket, now);
           const isSelected = selectedTicketIds.includes(ticket.id);
           
           return (
@@ -133,7 +127,7 @@ export default function TicketList({ onSelectTicket }) {
               animate={{ opacity: 1, scale: 1 }} 
               exit={{ opacity: 0, scale: 0.95 }}
               transition={{ duration: 0.2 }}
-              className={`group flex items-center justify-between p-5 border rounded-2xl transition-all cursor-pointer ${slaBreaching ? 'animate-pulse text-rose-500 border-rose-500/50' : ''} ${
+              className={`group flex items-center justify-between p-5 border rounded-2xl transition-all cursor-pointer ${
                   isSelected ? 'bg-fuchsia-500/10 border-fuchsia-500/50' : 'bg-zinc-900/40 border-zinc-800 hover:border-zinc-600 hover:bg-zinc-800/40'
               }`}
             >
@@ -165,8 +159,16 @@ export default function TicketList({ onSelectTicket }) {
                 </div>
               </div>
               
-              <div onClick={() => onSelectTicket(ticket.id)} className={`px-4 py-1.5 rounded-lg border text-[10px] font-black uppercase tracking-[0.15em] shrink-0 ${style.color} ${style.border} ${style.bg}`}>
-                {ticket.status}
+              <div className="flex items-center gap-3 shrink-0">
+                {slaDisplay && (
+                  <div onClick={() => onSelectTicket(ticket.id)} className={`px-3 py-1.5 rounded-lg border text-[10px] font-black uppercase tracking-widest flex items-center gap-1.5 ${slaDisplay.className}`}>
+                    <SafeIcon icon={FiClock} className="text-xs" />
+                    {slaDisplay.label}
+                  </div>
+                )}
+                <div onClick={() => onSelectTicket(ticket.id)} className={`px-4 py-1.5 rounded-lg border text-[10px] font-black uppercase tracking-[0.15em] ${style.color} ${style.border} ${style.bg}`}>
+                  {ticket.status}
+                </div>
               </div>
             </motion.div>
           );

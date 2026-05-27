@@ -49,16 +49,21 @@ export default function MessageThread({ messages }) {
             
             <div className={`flex-1 p-6 rounded-[1.5rem] border transition-all ${
               isAI ? 'bg-fuchsia-950/10 border-fuchsia-500/20 neon-border-fuchsia' :
-              isInternal ? 'bg-amber-900/20 border-amber-500/30' :
+              isInternal ? 'bg-amber-900/10 backdrop-blur-sm border-amber-500/30' :
               'bg-zinc-900/40 border-zinc-800 shadow-xl'
             }`}>
               <div className="flex justify-between items-center mb-4">
                 <div className="flex items-center gap-3">
-                  <span className={`text-[10px] font-black uppercase tracking-[0.2em] ${
+                  <span className={`text-[10px] font-black uppercase tracking-[0.2em] flex items-center gap-2 ${
                     isAI ? 'text-fuchsia-400' : isInternal ? 'text-amber-400' : 'text-zinc-500'
                   }`}>
                     {isAI ? 'Onyx Intelligence' : isInternal ? 'Agent Internal' : 'Customer Relay'}
                   </span>
+                  {isInternal && (
+                    <span className="px-2 py-0.5 bg-amber-500/15 text-amber-400 text-[9px] font-black uppercase tracking-widest rounded border border-amber-500/30">
+                      👁️ Internal Note
+                    </span>
+                  )}
                   {isAI && <div className="w-1.5 h-1.5 rounded-full bg-fuchsia-500 animate-pulse" />}
                 </div>
                 <span className="mono-font text-[10px] text-zinc-600 font-bold">
