@@ -13,6 +13,23 @@ const statusStyles = {
   closed: { icon: FiCheckCircle, color: 'text-zinc-500', border: 'border-zinc-500/30', bg: 'bg-zinc-500/5' },
 };
 
+
+const SkeletonLoader = () => (
+  <div className="space-y-3 p-4">
+    {[1, 2, 3, 4, 5].map(i => (
+      <div key={i} className="animate-pulse bg-zinc-900/80 rounded-[2rem] p-6 border border-zinc-800 backdrop-blur-md">
+        <div className="flex gap-4">
+          <div className="w-12 h-12 bg-zinc-800 rounded-2xl" />
+          <div className="flex-1 space-y-2">
+            <div className="h-4 bg-zinc-800 rounded w-3/4" />
+            <div className="h-3 bg-zinc-800 rounded w-1/2" />
+          </div>
+        </div>
+      </div>
+    ))}
+  </div>
+);
+
 export default function TicketList({ onSelectTicket }) {
   const { tickets, isLoading, fetchTickets, subscribeToTickets, searchQuery, selectedTicketIds, toggleSelectedTicketId } = useTicketStore();
 

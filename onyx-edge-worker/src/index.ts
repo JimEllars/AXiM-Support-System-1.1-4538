@@ -104,6 +104,11 @@ async function logToEvents(supabase: any, context: LogContext, type: string, mes
 }
 
 
+
+declare var supabase: any;
+declare var logCtx: any;
+declare var startTime: number;
+
 export interface Env {
   ALLOWED_ORIGINS?: string;
   SUPABASE_URL: string;
@@ -131,17 +136,21 @@ async function handleHealthCheck(env: Env, request: Request): Promise<Response> 
     checks.database = !error;
   } catch (e: any) {
         console.error('Error:', e);
+        try { logErr(supabase, logCtx, e); } catch(err){}
+
     checks.database = false;
   }
 
   try {
     const coreRes = await fetch(`${env.CORE_API_URL || 'https://api.axim-core.internal'}/functions/v1/gateway-heartbeat`, {
         method: 'GET',
-        // signal: AbortSignal.timeout(3000), // Cloudflare worker AbortSignal support check
+        signal: AbortSignal.timeout(3000),
     });
     checks.coreApi = coreRes.ok;
   } catch (e: any) {
         console.error('Error:', e);
+        try { logErr(supabase, logCtx, e); } catch(err){}
+
     checks.coreApi = false;
   }
 
@@ -177,6 +186,9 @@ export default {
     }
 
     // 2. Route Handling
+    if (url.pathname === '/health' || url.pathname === '/api/v1/health') {
+        return handleHealthCheck(env, request);
+    }
     if (request.method === 'GET' && url.pathname === '/api/v1/onyx-bridge/stream') {
       return handleOnyxBridgeStream(request, env);
     }
@@ -255,12 +267,14 @@ async function handleTicketIngestion(request: Request, env: Env): Promise<Respon
         });
 
 
-        return new Response(JSON.stringify({ success: true, ticket_id: ticket.id }), {
+         try { logEnd(supabase, logCtx, startTime); } catch(e){} return new Response(JSON.stringify({ success: true, ticket_id: ticket.id }), {
         headers: { 'Content-Type': 'application/json', ...getCorsHeaders(env, request) },
       });
 
     } catch (error: any) {
         console.error('Error:', error);
+        try { logErr(supabase, logCtx, error); } catch(e){}
+
       return new Response(JSON.stringify({ error: error.message }), { 
         status: 500,
         headers: { 'Content-Type': 'application/json', ...getCorsHeaders(env, request) }
@@ -339,7 +353,9 @@ async function handleVectorSearch(request: Request, env: Env): Promise<Response>
         });
 
     } catch (e: any) {
-         console.error('Error:', e);
+        console.error('Error:', e);
+        try { logErr(supabase, logCtx, e); } catch(err){}
+
         return new Response(JSON.stringify({ error: e.message }), { status: 500 });
     }
 }
@@ -409,6 +425,8 @@ async function handleBatchTriage(request: Request, env: Env): Promise<Response> 
 
     } catch (error: any) {
         console.error('Error:', error);
+        try { logErr(supabase, logCtx, error); } catch(e){}
+
         return new Response(JSON.stringify({ error: error.message }), {
             status: 500,
             headers: { 'Content-Type': 'application/json', ...getCorsHeaders(env, request) }
@@ -664,12 +682,14 @@ async function handleWebhookIntake(request: Request, env: Env): Promise<Response
             });
 
 
-        return new Response(JSON.stringify({ success: true, ticket_id: ticket.id }), {
+         try { logEnd(supabase, logCtx, startTime); } catch(e){} return new Response(JSON.stringify({ success: true, ticket_id: ticket.id }), {
             headers: { 'Content-Type': 'application/json', ...getCorsHeaders(env, request) },
         });
 
     } catch (error: any) {
         console.error('Error:', error);
+        try { logErr(supabase, logCtx, error); } catch(e){}
+
         return new Response(JSON.stringify({ error: error.message }), {
             status: 500,
             headers: { 'Content-Type': 'application/json', ...getCorsHeaders(env, request) }
@@ -832,19 +852,21 @@ async function handleToolCommand(request: Request, env: Env): Promise<Response> 
             if (msgError) throw msgError;
 
 
-        return new Response(JSON.stringify({ success: true, action_proposed: true }), {
+         try { logEnd(supabase, logCtx, startTime); } catch(e){} return new Response(JSON.stringify({ success: true, action_proposed: true }), {
                  headers: { 'Content-Type': 'application/json', ...getCorsHeaders(env, request) },
             });
         }
 
         // Default response if no tool is used
 
-        return new Response(JSON.stringify({ success: true, action_proposed: false }), {
+         try { logEnd(supabase, logCtx, startTime); } catch(e){} return new Response(JSON.stringify({ success: true, action_proposed: false }), {
              headers: { 'Content-Type': 'application/json', ...getCorsHeaders(env, request) },
         });
 
     } catch (error: any) {
         console.error('Error:', error);
+        try { logErr(supabase, logCtx, error); } catch(e){}
+
         return new Response(JSON.stringify({ error: error.message }), {
             status: 500,
             headers: { 'Content-Type': 'application/json', ...getCorsHeaders(env, request) }
@@ -950,12 +972,14 @@ async function handleExecuteAction(request: Request, env: Env): Promise<Response
         await supabase.from('hitl_audit_logs').update({ status: 'executed' }).eq('id', hitlLogId);
 
 
-        return new Response(JSON.stringify({ success: true, executed: true, proxied: true }), {
+         try { logEnd(supabase, logCtx, startTime); } catch(e){} return new Response(JSON.stringify({ success: true, executed: true, proxied: true }), {
              headers: { 'Content-Type': 'application/json', ...getCorsHeaders(env, request) },
         });
 
     } catch (error: any) {
         console.error('Error:', error);
+        try { logErr(supabase, logCtx, error); } catch(e){}
+
         return new Response(JSON.stringify({ error: error.message }), {
             status: 500,
             headers: { 'Content-Type': 'application/json', ...getCorsHeaders(env, request) }
@@ -1042,12 +1066,14 @@ Applied the correct configuration and verified functionality.
         await supabase.from('support_tickets').update({ rca_generated: true }).eq('id', record.id);
 
 
-        return new Response(JSON.stringify({ success: true, rca_generated: true }), {
+         try { logEnd(supabase, logCtx, startTime); } catch(e){} return new Response(JSON.stringify({ success: true, rca_generated: true }), {
              headers: { 'Content-Type': 'application/json' },
         });
 
     } catch (error: any) {
         console.error('Error:', error);
+        try { logErr(supabase, logCtx, error); } catch(e){}
+
         return new Response(JSON.stringify({ error: error.message }), {
             status: 500,
             headers: { 'Content-Type': 'application/json' }
@@ -1155,6 +1181,8 @@ async function handleOnyxBridgeStream(request: Request, env: Env): Promise<Respo
             controller?.close();
         } catch (e: any) {
         console.error('Error:', e);
+        try { logErr(supabase, logCtx, e); } catch(err){}
+
             console.error('SSE Error:', e);
             controller?.error(e);
         }
@@ -1199,7 +1227,9 @@ AXiM Support (Onyx Auto-Draft)`;
         });
 
     } catch (e: any) {
-         console.error('Error:', e);
+        console.error('Error:', e);
+        try { logErr(supabase, logCtx, e); } catch(err){}
+
          return new Response(JSON.stringify({ error: e.message }), { status: 500 });
     }
 }
@@ -1309,12 +1339,14 @@ Draft a concise, professional reply:`;
         }
 
 
-        return new Response(JSON.stringify({ draft }), {
+         try { logEnd(supabase, logCtx, startTime); } catch(e){} return new Response(JSON.stringify({ draft }), {
             headers: { 'Content-Type': 'application/json', ...getCorsHeaders(env, request) }
         });
 
     } catch (error: any) {
         console.error('Error:', error);
+        try { logErr(supabase, logCtx, error); } catch(e){}
+
          return new Response(JSON.stringify({ error: error.message }), { status: 500, headers: { ...getCorsHeaders(env, request) } });
     }
 }
