@@ -61,12 +61,16 @@ export const useTicketStore = create((set, get) => ({
             toast.success(`New Case Received: #${newRecord.id.slice(0, 8)}`, {
               style: { background: '#18181b', color: '#22d3ee', border: '1px solid #0891b2' }
             });
-            get().fetchTickets();
+            set((state) => ({ tickets: [newRecord, ...state.tickets] }));
           } else if (eventType === 'UPDATE') {
             toast.success(`Case Updated: #${newRecord.id.slice(0, 8)}`, {
               style: { background: '#18181b', color: '#22d3ee', border: '1px solid #0891b2' }
             });
-            get().fetchTickets();
+            set((state) => ({
+              tickets: state.tickets.map(t =>
+                t.id === newRecord.id ? { ...t, ...newRecord } : t
+              )
+            }));
           } else if (eventType === 'DELETE') {
             set({ tickets: currentTickets.filter(t => t.id !== oldRecord.id) });
           }
@@ -78,6 +82,8 @@ export const useTicketStore = create((set, get) => ({
       supabase.removeChannel(channel);
     };
   },
+
+  unsubscribeFromTickets: () => {},
 
   // --- Real-Time Agent Presence ---
   presenceChannel: null,
