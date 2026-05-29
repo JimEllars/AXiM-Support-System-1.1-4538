@@ -261,6 +261,10 @@ export default {
       return handleBatchTriage(request, env);
     }
 
+    if (url.pathname === "/api/v1/webhooks/ticket-resolved") {
+      return handleTicketResolved(request, env);
+    }
+
     if (url.pathname === "/webhooks/intake") {
       return handleWebhookIntake(request, env);
     }
@@ -490,6 +494,7 @@ async function handleBatchTriage(
 
     const updates = [];
     const telemetryUpdates = [];
+    const messagesToInsert = [];
 
     // Simulate parallel AI processing for batch
     for (const ticket of tickets) {
@@ -512,6 +517,15 @@ async function handleBatchTriage(
         auto_response_draft: analysis.draft,
         confidence_score: analysis.confidence,
       });
+
+      if (analysis.confidence > 90 && analysis.draft) {
+        messagesToInsert.push({
+          ticket_id: ticket.id,
+          sender_id: 'onyx_system',
+          message_body: analysis.draft,
+          is_internal_note: false
+        });
+      }
     }
 
     // Bulk update tickets (upsert hack for bulk update in Supabase JS)
@@ -527,6 +541,13 @@ async function handleBatchTriage(
       .upsert(telemetryUpdates);
 
     if (telemetryError) throw telemetryError;
+
+    if (messagesToInsert.length > 0) {
+      const { error: messagesError } = await supabase
+        .from("ticket_messages")
+        .insert(messagesToInsert);
+      if (messagesError) throw messagesError;
+    }
 
     return new Response(
       JSON.stringify({ success: true, processed: updates.length }),
