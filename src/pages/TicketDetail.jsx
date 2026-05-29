@@ -88,6 +88,32 @@ export default function TicketDetail() {
   }, [id]);
 
 
+  const handleClaimTicket = async () => {
+    const { error: updateError } = await supabase
+      .from('support_tickets')
+      .update({ assigned_to: currentAgent.agentId })
+      .eq('id', id);
+
+    if (updateError) {
+      toast.error('Failed to claim ticket.', { style: { background: '#18181b', color: '#f43f5e', border: '1px solid #9f1239' } });
+      return;
+    }
+
+    const systemMessage = `Ticket claimed by ${currentAgent.name}.`;
+    const newMessage = {
+      ticket_id: id,
+      message_body: systemMessage,
+      is_internal_note: true,
+      sender_id: 'system',
+    };
+
+    const { error: msgError } = await supabase.from('ticket_messages').insert(newMessage);
+    if (!msgError) {
+      toast.success('Ticket claimed successfully', { style: { background: '#18181b', color: '#10b981', border: '1px solid #047857' } });
+      setTicket(prev => ({ ...prev, assigned_to: currentAgent.agentId }));
+    }
+  };
+
   const handleTransfer = async (agent) => {
     setShowHandoffMenu(false);
 
@@ -197,6 +223,14 @@ export default function TicketDetail() {
                     {ticket?.priority}
                   </div>
 
+                  <button
+                    onClick={handleClaimTicket}
+                    className="px-6 py-2.5 rounded-2xl bg-zinc-900 text-emerald-400 hover:text-emerald-300 border border-zinc-700 hover:border-emerald-500/50 transition-colors flex items-center gap-2 text-[10px] font-black uppercase tracking-widest"
+                  >
+                    <SafeIcon icon={FiUserPlus} />
+                    Claim
+                  </button>
+
                   {/* Agent Handoff Dropdown */}
                   <div className="relative">
                     <button
@@ -240,9 +274,50 @@ export default function TicketDetail() {
                       )}
                     </AnimatePresence>
                   </div>
-                  <div className="px-6 py-2.5 rounded-2xl bg-zinc-950 text-zinc-100 border border-zinc-800 text-[10px] font-black uppercase tracking-widest">
-                    {ticket?.status}
+
+                  <div className="relative group/status">
+                    <select
+                      value={ticket?.status || 'open'}
+                      onChange={async (e) => {
+                        const newStatus = e.target.value;
+                        const { error } = await supabase
+                          .from('support_tickets')
+                          .update({ status: newStatus })
+                          .eq('id', id);
+
+                        if (!error) {
+                          setTicket(prev => ({ ...prev, status: newStatus }));
+                          if (newStatus === 'resolved' && (ticket?.priority === 'urgent' || ticket?.priority === 'escalated')) {
+                            toast.success("Urgent ticket resolved. Onyx is generating an RCA for the Memory Banks.", {
+                              style: { background: '#18181b', color: '#10b981', border: '1px solid #047857' }
+                            });
+                          } else {
+                            toast.success(`Status updated to ${newStatus}`, {
+                              style: { background: '#18181b', color: '#10b981', border: '1px solid #047857' }
+                            });
+                          }
+                        } else {
+                          toast.error('Failed to update status', {
+                            style: { background: '#18181b', color: '#f43f5e', border: '1px solid #9f1239' }
+                          });
+                        }
+                      }}
+                      className={`appearance-none px-8 py-2.5 rounded-2xl border text-[10px] font-black uppercase tracking-widest cursor-pointer outline-none transition-all ${
+                        ticket?.status === 'resolved'
+                          ? 'bg-emerald-500 text-black border-emerald-400 shadow-[0_0_15px_rgba(16,185,129,0.3)]'
+                          : 'bg-zinc-950 text-zinc-100 border-zinc-800 hover:border-zinc-700'
+                      }`}
+                    >
+                      <option value="open">Open</option>
+                      <option value="pending">Pending</option>
+                      <option value="resolved">Resolved</option>
+                      <option value="closed">Closed</option>
+                    </select>
+                    <div className={`absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none ${ticket?.status === 'resolved' ? 'text-black' : 'text-zinc-500'}`}>
+                      <SafeIcon icon={FiChevronDown} />
+                    </div>
                   </div>
+
                   {ticket?.sla_breach_at && <SLABadge breachAt={ticket.sla_breach_at} status={ticket.status} />}
                 </div>
               </div>
