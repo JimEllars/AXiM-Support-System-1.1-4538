@@ -3,31 +3,15 @@ import SafeIcon from '../common/SafeIcon';
 import * as FiIcons from 'react-icons/fi';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useTicketStore } from '../store/useTicketStore';
+import SLABadge from './tickets/SLABadge';
 
-const { FiCircle, FiCheckCircle, FiClock, FiAlertCircle, FiSearch, FiCheckSquare, FiSquare } = FiIcons;
+const { FiCircle, FiCheckCircle, FiClock, FiAlertCircle, FiSearch, FiCheckSquare, FiSquare, FiGlobe, FiMail, FiMessageSquare } = FiIcons;
 
 const statusStyles = {
   open: { icon: FiCircle, color: 'text-cyan-400', border: 'border-cyan-500/50', bg: 'bg-cyan-500/10' },
   pending: { icon: FiClock, color: 'text-amber-400', border: 'border-amber-500/50', bg: 'bg-amber-500/10' },
   resolved: { icon: FiCheckCircle, color: 'text-emerald-400', border: 'border-emerald-500/50', bg: 'bg-emerald-500/10' },
   closed: { icon: FiCheckCircle, color: 'text-zinc-500', border: 'border-zinc-500/30', bg: 'bg-zinc-500/5' },
-};
-
-const getSLADisplay = (ticket, now) => {
-  if (!ticket.sla_breach_at) return null;
-  if (ticket.status === 'resolved' || ticket.status === 'closed') return null;
-
-  const diffMs = new Date(ticket.sla_breach_at) - now;
-
-  if (diffMs <= 0) {
-    return { label: 'BREACHED', className: 'text-rose-500 bg-rose-500/10 border-rose-500/30' };
-  }
-  if (diffMs < 3600000) {
-    return { label: '< 1 hr', className: 'animate-pulse text-amber-500 bg-amber-500/10 border-amber-500/30' };
-  }
-  const h = Math.floor(diffMs / 3600000);
-  const m = Math.floor((diffMs % 3600000) / 60000);
-  return { label: `${h}h ${m}m`, className: 'text-zinc-400 bg-zinc-800/50 border-zinc-700' };
 };
 
 const SkeletonLoader = () => (
@@ -48,7 +32,6 @@ const SkeletonLoader = () => (
 
 export default function TicketList({ onSelectTicket }) {
   const { tickets, isLoading, fetchTickets, subscribeToTickets, searchQuery, selectedTicketIds, toggleSelectedTicketId } = useTicketStore();
-  const [now, setNow] = useState(new Date());
 
   useEffect(() => {
     fetchTickets();
@@ -58,10 +41,6 @@ export default function TicketList({ onSelectTicket }) {
     };
   }, []);
 
-  useEffect(() => {
-    const interval = setInterval(() => setNow(new Date()), 60000);
-    return () => clearInterval(interval);
-  }, []);
 
   const filteredTickets = tickets.filter((ticket) => {
     if (!searchQuery) return true;
@@ -116,7 +95,7 @@ export default function TicketList({ onSelectTicket }) {
           const priorityColor = ticket.priority === 'urgent' ? 'text-rose-500' : ticket.priority === 'high' ? 'text-amber-500' : 'text-zinc-500';
           const customerName = ticket.contacts_ax2024?.name || 'Unknown Contact';
 
-          const slaDisplay = getSLADisplay(ticket, now);
+
           const isSelected = selectedTicketIds.includes(ticket.id);
           
           return (
@@ -152,20 +131,21 @@ export default function TicketList({ onSelectTicket }) {
                       {ticket.priority}
                     </span>
                     <div className="w-1 h-1 rounded-full bg-zinc-800" />
-                    <span className="text-[10px] font-bold text-zinc-500 tracking-wider">
+                    {/* Omnichannel Source Badging */}
+                    <div className="flex items-center gap-1 text-[10px] font-bold text-zinc-500 tracking-wider">
                       {customerName}
-                    </span>
+                      <span className="ml-1 opacity-60">
+                        {ticket.source === 'website' || ticket.source === 'widget' ? <SafeIcon icon={FiGlobe} /> : ticket.source === 'email' ? <SafeIcon icon={FiMail} /> : <SafeIcon icon={FiMessageSquare} />}
+                      </span>
+                    </div>
                   </div>
                 </div>
               </div>
               
               <div className="flex items-center gap-3 shrink-0">
-                {slaDisplay && (
-                  <div onClick={() => onSelectTicket(ticket.id)} className={`px-3 py-1.5 rounded-lg border text-[10px] font-black uppercase tracking-widest flex items-center gap-1.5 ${slaDisplay.className}`}>
-                    <SafeIcon icon={FiClock} className="text-xs" />
-                    {slaDisplay.label}
-                  </div>
-                )}
+                <div onClick={() => onSelectTicket(ticket.id)}>
+                  <SLABadge breachAt={ticket.sla_breach_at} status={ticket.status} />
+                </div>
                 <div onClick={() => onSelectTicket(ticket.id)} className={`px-4 py-1.5 rounded-lg border text-[10px] font-black uppercase tracking-[0.15em] ${style.color} ${style.border} ${style.bg}`}>
                   {ticket.status}
                 </div>
