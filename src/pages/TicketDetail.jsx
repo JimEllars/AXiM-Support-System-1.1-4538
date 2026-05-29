@@ -9,12 +9,13 @@ import KBSidebar from '../components/tickets/KBSidebar';
 import OnyxInvestigationPanel from '../components/tickets/OnyxInvestigationPanel';
 import SafeIcon from '../common/SafeIcon';
 import * as FiIcons from 'react-icons/fi';
+import SLABadge from '../components/tickets/SLABadge';
 import { motion, AnimatePresence } from 'framer-motion';
 import { onyxService } from '../services/onyxService';
 import toast from 'react-hot-toast';
 import { useTicketStore } from '../store/useTicketStore';
 
-const { FiArrowLeft, FiSend, FiLock, FiGlobe, FiCpu, FiLayout, FiActivity } = FiIcons;
+const { FiArrowLeft, FiSend, FiLock, FiGlobe, FiCpu, FiLayout, FiActivity, FiMail, FiMessageSquare, FiUserPlus, FiChevronDown } = FiIcons;
 
 export default function TicketDetail() {
   const { id } = useParams();
@@ -29,6 +30,7 @@ export default function TicketDetail() {
   const [showMentionMenu, setShowMentionMenu] = useState(false);
   const [mentionQuery, setMentionQuery] = useState('');
   const [mentionIndex, setMentionIndex] = useState(-1);
+  const [showHandoffMenu, setShowHandoffMenu] = useState(false);
 
   const updateTypingStatus = useTicketStore((state) => state.updateTypingStatus);
 
@@ -60,7 +62,7 @@ export default function TicketDetail() {
           setTelemetry(telemRes.data);
       } else if (ticketRes.data) {
           // If no telemetry exists, trigger Onyx draft generation
-          const draftRes = await onyxService.generateAutoDraft(id, ticketRes.data);
+          const draftRes = await onyxService.generateAutoDraft(id, ticketRes.data, msgsRes.data || []);
           setTelemetry({ auto_response_draft: draftRes.draft, analyzed_sentiment: 'Processing...', confidence_score: 85 });
       }
 
@@ -84,6 +86,39 @@ export default function TicketDetail() {
       supabase.removeChannel(channel);
     };
   }, [id]);
+
+
+  const handleTransfer = async (agent) => {
+    setShowHandoffMenu(false);
+
+    // 1. Update the ticket assigned_to column
+    const { error: updateError } = await supabase
+      .from('support_tickets')
+      .update({ assigned_to: agent.id })
+      .eq('id', id);
+
+    if (updateError) {
+      toast.error('Failed to transfer ticket.', { style: { background: '#18181b', color: '#f43f5e', border: '1px solid #9f1239' } });
+      return;
+    }
+
+    // 2. Add an internal system message to the thread
+    const systemMessage = `Ticket transferred to ${agent.name} by ${currentAgent.name}.`;
+    const newMessage = {
+      ticket_id: id,
+      message_body: systemMessage,
+      is_internal_note: true,
+      sender_id: 'system',
+    };
+
+    const { error: msgError } = await supabase.from('ticket_messages').insert(newMessage);
+    if (!msgError) {
+      toast.success(`Ticket transferred to ${agent.name}`, { style: { background: '#18181b', color: '#10b981', border: '1px solid #047857' } });
+      // The ticket state and message thread will update via realtime subscriptions if configured,
+      // or we can manually refetch.
+      setTicket(prev => ({ ...prev, assigned_to: agent.id }));
+    }
+  };
 
   const handleSend = async () => {
     if (!reply.trim()) return;
@@ -137,6 +172,11 @@ export default function TicketDetail() {
                     <div className="flex items-center gap-1.5 px-2 py-0.5 bg-zinc-950 border border-zinc-800 rounded text-[9px] font-black text-cyan-400 uppercase tracking-widest">
                       <div className="w-1 h-1 rounded-full bg-cyan-400 animate-pulse" /> LIVE_SYNC_ACTIVE
                     </div>
+                    {/* Omnichannel Source Badging */}
+                    <div className="flex items-center gap-1.5 px-2 py-0.5 bg-zinc-900 border border-zinc-700 rounded text-[9px] font-black text-zinc-300 uppercase tracking-widest">
+                      {ticket?.source === 'website' || ticket?.source === 'widget' ? <SafeIcon icon={FiGlobe} /> : ticket?.source === 'email' ? <SafeIcon icon={FiMail} /> : <SafeIcon icon={FiMessageSquare} />}
+                      {ticket?.source || 'direct'}
+                    </div>
                   </div>
                   <h1 className="text-4xl font-black text-white tracking-tighter leading-tight">{ticket?.subject}</h1>
                 </div>
@@ -156,9 +196,54 @@ export default function TicketDetail() {
                    <div className="px-6 py-2.5 rounded-2xl bg-rose-500/10 text-rose-400 border border-rose-500/30 text-[10px] font-black uppercase tracking-widest">
                     {ticket?.priority}
                   </div>
+
+                  {/* Agent Handoff Dropdown */}
+                  <div className="relative">
+                    <button
+                      onClick={() => setShowHandoffMenu(!showHandoffMenu)}
+                      className="px-6 py-2.5 rounded-2xl bg-zinc-900 text-cyan-400 hover:text-cyan-300 border border-zinc-700 hover:border-cyan-500/50 transition-colors flex items-center gap-2 text-[10px] font-black uppercase tracking-widest"
+                    >
+                      <SafeIcon icon={FiUserPlus} />
+                      Transfer
+                      <SafeIcon icon={FiChevronDown} />
+                    </button>
+
+                    <AnimatePresence>
+                      {showHandoffMenu && (
+                        <motion.div
+                          initial={{ opacity: 0, y: 10 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          exit={{ opacity: 0, y: 10 }}
+                          className="absolute right-0 mt-2 w-56 bg-zinc-900 border border-zinc-700 rounded-2xl shadow-xl overflow-hidden z-50"
+                        >
+                          <div className="px-4 py-2 bg-zinc-950 border-b border-zinc-800 text-[10px] font-black text-zinc-500 uppercase tracking-widest">
+                            Select Agent
+                          </div>
+                          <div className="max-h-60 overflow-y-auto">
+                            {teamMembers.map(member => (
+                              <button
+                                key={member.id}
+                                onClick={() => handleTransfer(member)}
+                                className="w-full text-left px-4 py-3 hover:bg-zinc-800 transition-colors flex items-center gap-3 border-b border-zinc-800/50 last:border-0"
+                              >
+                                <div className="w-6 h-6 rounded-full bg-cyan-500/10 text-cyan-400 flex items-center justify-center text-xs font-bold">
+                                  {member.name.charAt(0)}
+                                </div>
+                                <div>
+                                  <div className="text-xs font-bold text-white">{member.name}</div>
+                                  <div className="text-[10px] text-zinc-500 capitalize">{member.role}</div>
+                                </div>
+                              </button>
+                            ))}
+                          </div>
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
+                  </div>
                   <div className="px-6 py-2.5 rounded-2xl bg-zinc-950 text-zinc-100 border border-zinc-800 text-[10px] font-black uppercase tracking-widest">
                     {ticket?.status}
                   </div>
+                  {ticket?.sla_breach_at && <SLABadge breachAt={ticket.sla_breach_at} status={ticket.status} />}
                 </div>
               </div>
               <p className="text-zinc-400 text-xl font-medium leading-relaxed max-w-4xl">{ticket?.description}</p>

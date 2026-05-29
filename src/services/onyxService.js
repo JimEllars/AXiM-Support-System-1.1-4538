@@ -19,12 +19,23 @@ export const onyxService = {
     return response.json();
   },
 
-  async generateAutoDraft(ticketId, ticketData) {
+  async generateAutoDraft(ticketId, ticketData, messages = []) {
     try {
+        // AI Privacy Guardrails & Context Windowing
+        // 1. Strictly filter out any internal notes
+        const publicMessages = messages.filter(msg => msg.is_internal_note !== true);
+
+        // 2. Implement a rolling context window (last 5 public messages)
+        const recentContext = publicMessages.slice(-5);
+
         const response = await fetch(`${ONYX_WORKER_URL}/api/v1/onyx/generate-suggestion`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${ONYX_SECRET}` },
-            body: JSON.stringify({ subject: ticketData.subject, description: ticketData.description })
+            body: JSON.stringify({
+                subject: ticketData.subject,
+                description: ticketData.description,
+                context_messages: recentContext
+            })
         });
         return await response.json();
     } catch (e) {
