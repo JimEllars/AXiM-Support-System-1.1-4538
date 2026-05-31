@@ -140,9 +140,6 @@ async function logToEvents(
   });
 }
 
-declare var supabase: any;
-declare var logCtx: any;
-declare var startTime: number;
 
 export interface Env {
   ALLOWED_ORIGINS?: string;
@@ -449,6 +446,7 @@ async function handleVectorSearch(
       relevance: Math.round(item.similarity * 100),
     }));
 
+    logEnd(supabase, logCtx, startTime);
     return new Response(JSON.stringify(results), {
       headers: {
         "Content-Type": "application/json",
@@ -1029,6 +1027,11 @@ async function handleToolCommand(
   request: Request,
   env: Env,
 ): Promise<Response> {
+  const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
+  const logCtx = createLogContext(request);
+  const startTime = Date.now();
+  await logToEvents(supabase, logCtx, 'performance_metric', 'Request start', { headers: request.headers });
+
   const authHeader = request.headers.get("Authorization");
   if (authHeader !== `Bearer ${env.AXIM_ONYX_SECRET}`) {
     return new Response("Unauthorized", { status: 401 });
@@ -1288,6 +1291,11 @@ async function handleTicketResolved(
   request: Request,
   env: Env,
 ): Promise<Response> {
+  const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
+  const logCtx = createLogContext(request);
+  const startTime = Date.now();
+  await logToEvents(supabase, logCtx, 'performance_metric', 'Request start', { headers: request.headers });
+
   // This is called via Supabase DB Webhook when a ticket status changes to 'resolved'
   // The webhook payload structure depends on Supabase, usually contains 'record' and 'old_record'
 
@@ -1505,6 +1513,11 @@ async function handleOnyxBridgeStream(
 }
 
 async function handleAutoDraft(request: Request, env: Env): Promise<Response> {
+  const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
+  const logCtx = createLogContext(request);
+  const startTime = Date.now();
+  await logToEvents(supabase, logCtx, 'performance_metric', 'Request start', { headers: request.headers });
+
   const authHeader = request.headers.get("Authorization");
   if (authHeader !== `Bearer ${env.AXIM_ONYX_SECRET}`) {
     return new Response("Unauthorized", { status: 401 });
