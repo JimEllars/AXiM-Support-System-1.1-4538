@@ -10,7 +10,7 @@
     "skipLibCheck": true,
     "strict": true,
     "preserveConstEnums": true,
-    "moduleResolution": "node",
+    "moduleResolution": "bundler",
     "sourceMap": true,
     "esModuleInterop": true,
     "types": [

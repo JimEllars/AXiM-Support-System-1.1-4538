@@ -10,9 +10,12 @@
     "@cloudflare/workers-types": "^4.20260527.1",
     "@types/node": "^25.7.0",
     "esbuild": "^0.17.18",
-    "typescript": "^6.0.3"
+    "typescript": "^6.0.3",
+    "wrangler": "^3.0.0"
   },
   "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
     "build": "esbuild src/index.ts --bundle --outfile=dist/index.js --format=esm --target=es2022"
   }
 }
