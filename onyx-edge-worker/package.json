@@ -10,7 +10,7 @@
     "@cloudflare/workers-types": "^4.20260527.1",
     "@types/node": "^25.7.0",
     "esbuild": "^0.17.18",
-    "typescript": "^5.0.4"
+    "typescript": "^6.0.3"
   },
   "scripts": {
     "build": "esbuild src/index.ts --bundle --outfile=dist/index.js --format=esm --target=es2022"
