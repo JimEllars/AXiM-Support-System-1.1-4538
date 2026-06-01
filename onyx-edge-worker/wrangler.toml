@@ -1,0 +1,18 @@
+name = "onyx-edge-worker"
+main = "src/index.ts"
+compatibility_date = "2024-03-20"
+compatibility_flags = ["nodejs_compat"]
+
+[vars]
+ALLOWED_ORIGINS = "http://localhost:5173,https://axim.us.com"
+CORE_API_URL = "https://api.axim-core.internal"
+SUPABASE_URL = "https://your-supabase-project.supabase.co"
+
+# --- SECRETS DOCUMENTATION ---
+# The following secrets MUST be securely bound via the environment vault:
+# Use `wrangler secret put <SECRET_NAME>` to set these in production.
+#
+# - SUPABASE_SERVICE_ROLE_KEY
+# - AXIM_ONYX_SECRET
+# - ANTHROPIC_API_KEY
+# - AXIM_SERVICE_KEY
