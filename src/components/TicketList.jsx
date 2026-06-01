@@ -92,7 +92,8 @@ export default function TicketList({ onSelectTicket }) {
       <AnimatePresence>
         {filteredTickets.map((ticket) => {
           const style = statusStyles[ticket.status] || statusStyles.open;
-          const priorityColor = ticket.priority === 'urgent' ? 'text-rose-500' : ticket.priority === 'high' ? 'text-amber-500' : 'text-zinc-500';
+          const priorityColor = ticket.priority === 'escalated' ? 'text-rose-500' : ticket.priority === 'urgent' ? 'text-rose-500' : ticket.priority === 'high' ? 'text-amber-500' : 'text-zinc-500';
+          const isEscalated = ticket.priority === 'escalated';
           const customerName = ticket.contacts_ax2024?.name || 'Unknown Contact';
 
 

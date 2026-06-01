@@ -224,7 +224,7 @@ export default function TicketDetail() {
                        {telemetry.primary_intent}
                      </div>
                    )}
-                   <div className="px-6 py-2.5 rounded-2xl bg-rose-500/10 text-rose-400 border border-rose-500/30 text-[10px] font-black uppercase tracking-widest">
+                   <div className={`px-6 py-2.5 rounded-2xl text-[10px] font-black uppercase tracking-widest ${ticket?.priority === 'escalated' ? 'bg-rose-500 text-white border border-rose-600 shadow-[0_0_10px_rgba(225,29,72,0.8)]' : 'bg-rose-500/10 text-rose-400 border border-rose-500/30'}`}>
                     {ticket?.priority}
                   </div>
 
