@@ -140,7 +140,6 @@ async function logToEvents(
   });
 }
 
-
 export interface Env {
   ALLOWED_ORIGINS?: string;
   SUPABASE_URL: string;
@@ -199,6 +198,7 @@ async function handleHealthCheck(
 
   const allHealthy = Object.values(checks).every(Boolean);
 
+  logEnd(supabase, logCtx, startTime);
   return new Response(
     JSON.stringify({
       status: allHealthy ? "healthy" : "degraded",
@@ -519,9 +519,9 @@ async function handleBatchTriage(
       if (analysis.confidence > 90 && analysis.draft) {
         messagesToInsert.push({
           ticket_id: ticket.id,
-          sender_id: 'onyx_system',
+          sender_id: "onyx_system",
           message_body: analysis.draft,
-          is_internal_note: false
+          is_internal_note: false,
         });
       }
     }
@@ -1027,10 +1027,15 @@ async function handleToolCommand(
   request: Request,
   env: Env,
 ): Promise<Response> {
-  const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
+  const supabase = createClient(
+    env.SUPABASE_URL,
+    env.SUPABASE_SERVICE_ROLE_KEY,
+  );
   const logCtx = createLogContext(request);
   const startTime = Date.now();
-  await logToEvents(supabase, logCtx, 'performance_metric', 'Request start', { headers: request.headers });
+  await logToEvents(supabase, logCtx, "performance_metric", "Request start", {
+    headers: request.headers,
+  });
 
   const authHeader = request.headers.get("Authorization");
   if (authHeader !== `Bearer ${env.AXIM_ONYX_SECRET}`) {
@@ -1291,10 +1296,15 @@ async function handleTicketResolved(
   request: Request,
   env: Env,
 ): Promise<Response> {
-  const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
+  const supabase = createClient(
+    env.SUPABASE_URL,
+    env.SUPABASE_SERVICE_ROLE_KEY,
+  );
   const logCtx = createLogContext(request);
   const startTime = Date.now();
-  await logToEvents(supabase, logCtx, 'performance_metric', 'Request start', { headers: request.headers });
+  await logToEvents(supabase, logCtx, "performance_metric", "Request start", {
+    headers: request.headers,
+  });
 
   // This is called via Supabase DB Webhook when a ticket status changes to 'resolved'
   // The webhook payload structure depends on Supabase, usually contains 'record' and 'old_record'
@@ -1326,8 +1336,9 @@ async function handleTicketResolved(
       .order("created_at", { ascending: true });
 
     const threadText =
-      messages?.map((m: any) => `[${m.sender_id}]: ${m.message_body}`).join("\n") ||
-      "";
+      messages
+        ?.map((m: any) => `[${m.sender_id}]: ${m.message_body}`)
+        .join("\n") || "";
 
     // Call Claude 3 Haiku for RCA
     // Mock RCA generation:
@@ -1513,10 +1524,15 @@ async function handleOnyxBridgeStream(
 }
 
 async function handleAutoDraft(request: Request, env: Env): Promise<Response> {
-  const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
+  const supabase = createClient(
+    env.SUPABASE_URL,
+    env.SUPABASE_SERVICE_ROLE_KEY,
+  );
   const logCtx = createLogContext(request);
   const startTime = Date.now();
-  await logToEvents(supabase, logCtx, 'performance_metric', 'Request start', { headers: request.headers });
+  await logToEvents(supabase, logCtx, "performance_metric", "Request start", {
+    headers: request.headers,
+  });
 
   const authHeader = request.headers.get("Authorization");
   if (authHeader !== `Bearer ${env.AXIM_ONYX_SECRET}`) {
@@ -1575,7 +1591,21 @@ async function handleGenerateSuggestion(
   }
 
   try {
-    const { subject, description } = (await request.json()) as any;
+    const { subject, description, context_messages } =
+      (await request.json()) as any;
+
+    // Defense-in-Depth Filter (even though frontend already filters, we filter just in case, though frontend sends string array now, we can check if it has is_internal_note property if we sent objects, but if we sent strings we can just map them directly. Let's filter just in case it's objects, but the frontend sends strings)
+    // Wait, the prompt says: "Implement a strict backend filter: const safeMessages = (context_messages || []).filter((m: any) => m.is_internal_note !== true);"
+    const safeMessages = (context_messages || []).filter(
+      (m: any) => m.is_internal_note !== true,
+    );
+
+    // Convert to text since they might be strings or objects depending on the previous steps
+    const historyText = safeMessages
+      .map((m: any) =>
+        typeof m === "string" ? m : m.text || m.message_body || "",
+      )
+      .join("\n");
 
     // 1. Query memory_banks for context (top 3)
 
@@ -1629,6 +1659,9 @@ async function handleGenerateSuggestion(
 
 Ticket Subject: ${subject}
 Ticket Description: ${description}
+
+Recent Conversation History:
+${historyText || "No previous replies."}
 
 Context from Memory Banks (Playbooks/RCAs):
 ${contextText}

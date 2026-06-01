@@ -25,8 +25,11 @@ export const onyxService = {
         // 1. Strictly filter out any internal notes
         const publicMessages = messages.filter(msg => msg.is_internal_note !== true);
 
-        // 2. Implement a rolling context window (last 5 public messages)
-        const recentContext = publicMessages.slice(-5);
+        // 2. Implement a rolling context window (last 5 public messages) and map to string
+        const recentContext = publicMessages.slice(-5).map(msg => {
+            const senderType = msg.sender_id === ticketData.customer_id ? 'Customer' : 'Agent';
+            return `[${senderType}]: ${msg.message_body}`;
+        });
 
         const response = await fetch(`${ONYX_WORKER_URL}/api/v1/onyx/generate-suggestion`, {
             method: 'POST',

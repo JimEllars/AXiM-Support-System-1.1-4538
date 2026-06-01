@@ -117,13 +117,18 @@ export default function TicketDetail() {
   const handleTransfer = async (agent) => {
     setShowHandoffMenu(false);
 
-    // 1. Update the ticket assigned_to column
-    const { error: updateError } = await supabase
-      .from('support_tickets')
-      .update({ assigned_to: agent.id })
-      .eq('id', id);
+    try {
+      // 1. Update the ticket assigned_to and assigned_department column
+      const { error: updateError } = await supabase
+        .from('support_tickets')
+        .update({
+          assigned_to: agent.id,
+          assigned_department: agent.department || 'General Support'
+        })
+        .eq('id', id);
 
-    if (updateError) {
+      if (updateError) throw updateError;
+    } catch (err) {
       toast.error('Failed to transfer ticket.', { style: { background: '#18181b', color: '#f43f5e', border: '1px solid #9f1239' } });
       return;
     }
