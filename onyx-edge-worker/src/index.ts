@@ -1213,6 +1213,18 @@ async function handleExecuteAction(
 
     if (fetchError) throw fetchError;
 
+    // Idempotency check
+    if (hitlLog.status === 'executed') {
+      logEnd(supabase, logCtx, startTime);
+      return new Response(JSON.stringify({ success: true, executed: true, message: "Action already executed." }), {
+        status: 200,
+        headers: {
+          "Content-Type": "application/json",
+          ...getCorsHeaders(env, request),
+        },
+      });
+    }
+
     // Step 1: The AXiM Core API Proxy Handshake
     // Proxy the request through the AXiM Core Ecosystem Vault
     console.log(`Proxying execution of ${hitlLog.tool_type} to AXiM Core`);
@@ -1642,7 +1654,7 @@ async function handleGenerateSuggestion(
       "match_memory_banks",
       {
         query_embedding: embedding,
-        match_threshold: 0.0,
+        match_threshold: 0.75,
         match_count: 3,
       },
     );
