@@ -1,3 +1,5 @@
+import { onyxService } from '../services/onyxService';
+import toast from 'react-hot-toast';
 import React, { useEffect, useState } from 'react';
 import SafeIcon from '../common/SafeIcon';
 import * as FiIcons from 'react-icons/fi';
@@ -32,6 +34,38 @@ const SkeletonLoader = () => (
 
 export default function TicketList({ onSelectTicket }) {
   const { tickets, isLoading, fetchTickets, subscribeToTickets, searchQuery, selectedTicketIds, toggleSelectedTicketId } = useTicketStore();
+  const handleBatchTriage = async () => {
+    if (selectedTicketIds.length === 0) return;
+
+    const toastId = toast.loading("Onyx is triaging selected cases...", {
+        style: { background: '#18181b', color: '#22d3ee', border: '1px solid #0891b2' }
+    });
+
+    try {
+        const result = await onyxService.executeBatchTriage(selectedTicketIds);
+
+        if (result && result.success) {
+            useTicketStore.getState().setSelectedTicketIds([]);
+            fetchTickets();
+            toast.success(`Successfully triaged ${selectedTicketIds.length} cases`, {
+                id: toastId,
+                style: { background: '#18181b', color: '#10b981', border: '1px solid #047857' }
+            });
+        } else {
+            toast.error("Batch triage failed to complete", {
+                id: toastId,
+                style: { background: '#18181b', color: '#f43f5e', border: '1px solid #9f1239' }
+            });
+        }
+    } catch (error) {
+        toast.error("An error occurred during batch triage", {
+            id: toastId,
+            style: { background: '#18181b', color: '#f43f5e', border: '1px solid #9f1239' }
+        });
+        console.error("Batch triage error:", error);
+    }
+  };
+
 
   useEffect(() => {
     fetchTickets();
@@ -57,7 +91,7 @@ export default function TicketList({ onSelectTicket }) {
 
   if (isLoading && tickets.length === 0) {
     return (
-      <div className="space-y-3">
+      <div className="space-y-3 relative">
         {[1, 2, 3, 4, 5].map(i => (
           <div key={i} className="animate-pulse flex items-center justify-between p-5 border border-zinc-800 rounded-2xl bg-zinc-900/40">
             <div className="flex gap-4 items-center w-full">
@@ -158,6 +192,33 @@ export default function TicketList({ onSelectTicket }) {
             </motion.div>
           );
         })}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {selectedTicketIds.length > 0 && (
+          <motion.div
+            initial={{ opacity: 0, y: 50, x: '-50%' }}
+            animate={{ opacity: 1, y: 0, x: '-50%' }}
+            exit={{ opacity: 0, y: 50, x: '-50%' }}
+            className="fixed bottom-8 left-1/2 bg-zinc-900/90 backdrop-blur-xl border border-zinc-700 p-4 rounded-2xl shadow-2xl z-50 flex items-center gap-4"
+          >
+            <span className="text-zinc-300 font-bold text-sm tracking-widest uppercase px-4 border-r border-zinc-700">
+              {selectedTicketIds.length} Cases Selected
+            </span>
+            <button
+              onClick={handleBatchTriage}
+              className="px-6 py-2 bg-fuchsia-500 hover:bg-fuchsia-400 text-black font-black text-xs uppercase tracking-widest rounded-xl transition-all shadow-[0_0_20px_rgba(217,70,239,0.3)]"
+            >
+              Batch Triage
+            </button>
+            <button
+              onClick={() => useTicketStore.getState().setSelectedTicketIds([])}
+              className="px-6 py-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 font-black text-xs uppercase tracking-widest rounded-xl transition-all"
+            >
+              Clear Selection
+            </button>
+          </motion.div>
+        )}
       </AnimatePresence>
     </div>
   );

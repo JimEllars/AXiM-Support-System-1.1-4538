@@ -414,29 +414,12 @@ async function handleVectorSearch(
     });
 
     if (error || !data || data.length === 0) {
-      // Fallback for demo
-      return new Response(
-        JSON.stringify([
-          {
-            id: 1,
-            title: "Solar Playbooks",
-            relevance: 98,
-            content: "Solar installation guidelines and safety protocols...",
-          },
-          {
-            id: 2,
-            title: "Technical Docs",
-            relevance: 85,
-            content: "Technical details about node configuration...",
-          },
-        ]),
-        {
-          headers: {
-            "Content-Type": "application/json",
-            ...getCorsHeaders(env, request),
-          },
+      return new Response(JSON.stringify([]), {
+        headers: {
+          "Content-Type": "application/json",
+          ...getCorsHeaders(env, request),
         },
-      );
+      });
     }
 
     const results = data.map((item: any) => ({
@@ -1214,15 +1197,22 @@ async function handleExecuteAction(
     if (fetchError) throw fetchError;
 
     // Idempotency check
-    if (hitlLog.status === 'executed') {
+    if (hitlLog.status === "executed") {
       logEnd(supabase, logCtx, startTime);
-      return new Response(JSON.stringify({ success: true, executed: true, message: "Action already executed." }), {
-        status: 200,
-        headers: {
-          "Content-Type": "application/json",
-          ...getCorsHeaders(env, request),
+      return new Response(
+        JSON.stringify({
+          success: true,
+          executed: true,
+          message: "Action already executed.",
+        }),
+        {
+          status: 200,
+          headers: {
+            "Content-Type": "application/json",
+            ...getCorsHeaders(env, request),
+          },
         },
-      });
+      );
     }
 
     // Step 1: The AXiM Core API Proxy Handshake
@@ -1608,9 +1598,9 @@ async function handleGenerateSuggestion(
 
     // Defense-in-Depth Filter (even though frontend already filters, we filter just in case, though frontend sends string array now, we can check if it has is_internal_note property if we sent objects, but if we sent strings we can just map them directly. Let's filter just in case it's objects, but the frontend sends strings)
     // Wait, the prompt says: "Implement a strict backend filter: const safeMessages = (context_messages || []).filter((m: any) => m.is_internal_note !== true);"
-    const safeMessages = (context_messages || []).filter(
-      (m: any) => m.is_internal_note !== true,
-    ).slice(-5);
+    const safeMessages = (context_messages || [])
+      .filter((m: any) => m.is_internal_note !== true)
+      .slice(-5);
 
     // Convert to text since they might be strings or objects depending on the previous steps
     const historyText = safeMessages
