@@ -5,9 +5,9 @@ import * as FiIcons from 'react-icons/fi';
 import { useTicketStore } from '../../store/useTicketStore';
 import { supabase } from '../../lib/supabaseClient';
 
-const { FiTerminal, FiCpu, FiCheck, FiLoader } = FiIcons;
+const { FiTerminal, FiCpu, FiCheck, FiLoader, FiX } = FiIcons;
 
-export default function OnyxInvestigationPanel({ ticketId, isInvestigating }) {
+export default function OnyxInvestigationPanel({ ticketId, isInvestigating, onClose }) {
   const [logs, setLogs] = useState([]);
   const [isActive, setIsActive] = useState(false);
 
@@ -68,6 +68,15 @@ export default function OnyxInvestigationPanel({ ticketId, isInvestigating }) {
             <SafeIcon icon={FiLoader} className="animate-spin" /> Processing
           </div>
         )}
+        <button
+          onClick={() => {
+            setIsActive(false);
+            if (onClose) onClose();
+          }}
+          className="ml-4 p-2 hover:bg-fuchsia-500/10 rounded-lg text-zinc-500 hover:text-fuchsia-400 transition-colors"
+        >
+          <SafeIcon icon={FiX} />
+        </button>
       </div>
 
       <div className="p-6 font-mono text-xs bg-[#09090b] min-h-[120px] max-h-[240px] overflow-y-auto space-y-3">

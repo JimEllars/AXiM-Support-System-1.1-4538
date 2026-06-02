@@ -4,7 +4,7 @@ import reactHooks from 'eslint-plugin-react-hooks';
 import reactRefresh from 'eslint-plugin-react-refresh';
 
 export default [
-  { ignores: ['dist', 'onyx-edge-worker/dist'] },
+  { ignores: ['dist', 'onyx-edge-worker/dist', 'onyx-edge-worker/.wrangler'] },
   js.configs.recommended,
   {
     files: ['**/*.{js,jsx}'],

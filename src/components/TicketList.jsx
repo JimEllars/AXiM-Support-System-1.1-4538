@@ -34,8 +34,10 @@ const SkeletonLoader = () => (
 
 export default function TicketList({ onSelectTicket }) {
   const { tickets, isLoading, fetchTickets, subscribeToTickets, searchQuery, selectedTicketIds, toggleSelectedTicketId } = useTicketStore();
+  const [isTriaging, setIsTriaging] = useState(false);
   const handleBatchTriage = async () => {
-    if (selectedTicketIds.length === 0) return;
+    if (selectedTicketIds.length === 0 || isTriaging) return;
+    setIsTriaging(true);
 
     const toastId = toast.loading("Onyx is triaging selected cases...", {
         style: { background: '#18181b', color: '#22d3ee', border: '1px solid #0891b2' }
@@ -63,6 +65,8 @@ export default function TicketList({ onSelectTicket }) {
             style: { background: '#18181b', color: '#f43f5e', border: '1px solid #9f1239' }
         });
         console.error("Batch triage error:", error);
+    } finally {
+        setIsTriaging(false);
     }
   };
 
@@ -207,9 +211,10 @@ export default function TicketList({ onSelectTicket }) {
             </span>
             <button
               onClick={handleBatchTriage}
-              className="px-6 py-2 bg-fuchsia-500 hover:bg-fuchsia-400 text-black font-black text-xs uppercase tracking-widest rounded-xl transition-all shadow-[0_0_20px_rgba(217,70,239,0.3)]"
+              disabled={isTriaging}
+              className={`px-6 py-2 bg-fuchsia-500 hover:bg-fuchsia-400 text-black font-black text-xs uppercase tracking-widest rounded-xl transition-all shadow-[0_0_20px_rgba(217,70,239,0.3)] ${isTriaging ? 'opacity-50 pointer-events-none' : ''}`}
             >
-              Batch Triage
+              {isTriaging ? 'Processing...' : 'Batch Triage'}
             </button>
             <button
               onClick={() => useTicketStore.getState().setSelectedTicketIds([])}
