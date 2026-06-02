@@ -15,7 +15,7 @@ import { onyxService } from '../services/onyxService';
 import toast from 'react-hot-toast';
 import { useTicketStore } from '../store/useTicketStore';
 
-const { FiArrowLeft, FiSend, FiLock, FiGlobe, FiCpu, FiLayout, FiActivity, FiMail, FiMessageSquare, FiUserPlus, FiChevronDown, FiAlertCircle } = FiIcons;
+const { FiTerminal, FiArrowLeft, FiSend, FiLock, FiGlobe, FiCpu, FiLayout, FiActivity, FiMail, FiMessageSquare, FiUserPlus, FiChevronDown, FiAlertCircle } = FiIcons;
 
 export default function TicketDetail() {
   const { id } = useParams();
@@ -23,6 +23,7 @@ export default function TicketDetail() {
   const [ticket, setTicket] = useState(null);
   const [messages, setMessages] = useState([]);
   const [telemetry, setTelemetry] = useState(null);
+  const [isInvestigating, setIsInvestigating] = useState(false);
   const [reply, setReply] = useState('');
   const [isInternal, setIsInternal] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -274,6 +275,14 @@ export default function TicketDetail() {
                   </button>
 
                     <button
+                      onClick={() => setIsInvestigating(true)}
+                      className="px-6 py-2.5 rounded-2xl bg-zinc-900 text-fuchsia-400 hover:text-fuchsia-300 border border-zinc-700 hover:border-fuchsia-500/50 transition-colors flex items-center gap-2 text-[10px] font-black uppercase tracking-widest"
+                    >
+                      <SafeIcon icon={FiTerminal} />
+                      Run Diagnostics
+                    </button>
+
+                    <button
                       onClick={() => setShowHandoffMenu(!showHandoffMenu)}
                       className="px-6 py-2.5 rounded-2xl bg-zinc-900 text-cyan-400 hover:text-cyan-300 border border-zinc-700 hover:border-cyan-500/50 transition-colors flex items-center gap-2 text-[10px] font-black uppercase tracking-widest"
                     >
@@ -384,7 +393,7 @@ export default function TicketDetail() {
             )}
 
             <div className="p-12 min-h-[500px] bg-zinc-950/20 space-y-12">
-              <OnyxInvestigationPanel ticketId={id} />
+              <OnyxInvestigationPanel ticketId={id} isInvestigating={isInvestigating} />
               <MessageThread messages={messages} />
             </div>
 

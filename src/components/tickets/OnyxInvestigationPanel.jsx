@@ -7,12 +7,12 @@ import { supabase } from '../../lib/supabaseClient';
 
 const { FiTerminal, FiCpu, FiCheck, FiLoader } = FiIcons;
 
-export default function OnyxInvestigationPanel({ ticketId }) {
+export default function OnyxInvestigationPanel({ ticketId, isInvestigating }) {
   const [logs, setLogs] = useState([]);
   const [isActive, setIsActive] = useState(false);
 
   useEffect(() => {
-    if (!ticketId) return;
+    if (!ticketId || !isInvestigating) return;
 
     // Subscribe to events_ax2024 for onyx_presence logs
     const channel = supabase.channel(`onyx-presence-${ticketId}`)
