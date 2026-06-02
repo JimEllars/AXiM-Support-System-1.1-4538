@@ -1610,7 +1610,7 @@ async function handleGenerateSuggestion(
     // Wait, the prompt says: "Implement a strict backend filter: const safeMessages = (context_messages || []).filter((m: any) => m.is_internal_note !== true);"
     const safeMessages = (context_messages || []).filter(
       (m: any) => m.is_internal_note !== true,
-    );
+    ).slice(-5);
 
     // Convert to text since they might be strings or objects depending on the previous steps
     const historyText = safeMessages

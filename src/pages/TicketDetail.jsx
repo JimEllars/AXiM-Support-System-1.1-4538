@@ -15,7 +15,7 @@ import { onyxService } from '../services/onyxService';
 import toast from 'react-hot-toast';
 import { useTicketStore } from '../store/useTicketStore';
 
-const { FiArrowLeft, FiSend, FiLock, FiGlobe, FiCpu, FiLayout, FiActivity, FiMail, FiMessageSquare, FiUserPlus, FiChevronDown } = FiIcons;
+const { FiArrowLeft, FiSend, FiLock, FiGlobe, FiCpu, FiLayout, FiActivity, FiMail, FiMessageSquare, FiUserPlus, FiChevronDown, FiAlertCircle } = FiIcons;
 
 export default function TicketDetail() {
   const { id } = useParams();
@@ -111,6 +111,33 @@ export default function TicketDetail() {
     if (!msgError) {
       toast.success('Ticket claimed successfully', { style: { background: '#18181b', color: '#10b981', border: '1px solid #047857' } });
       setTicket(prev => ({ ...prev, assigned_to: currentAgent.agentId }));
+    }
+  };
+
+  const handleEscalate = async () => {
+    try {
+      const { error: updateError } = await supabase
+        .from('support_tickets')
+        .update({ priority: 'escalated' })
+        .eq('id', id);
+
+      if (updateError) throw updateError;
+
+      const systemMessage = `Case manually escalated by ${currentAgent.name}.`;
+      const newMessage = {
+        ticket_id: id,
+        message_body: systemMessage,
+        is_internal_note: true,
+        sender_id: 'system',
+      };
+
+      const { error: msgError } = await supabase.from('ticket_messages').insert(newMessage);
+      if (msgError) throw msgError;
+
+      toast.success('Case escalated manually', { style: { background: '#18181b', color: '#10b981', border: '1px solid #047857' } });
+      setTicket(prev => ({ ...prev, priority: 'escalated' }));
+    } catch (err) {
+      toast.error('Failed to escalate case.', { style: { background: '#18181b', color: '#f43f5e', border: '1px solid #9f1239' } });
     }
   };
 
@@ -238,6 +265,14 @@ export default function TicketDetail() {
 
                   {/* Agent Handoff Dropdown */}
                   <div className="relative">
+                  <button
+                    onClick={handleEscalate}
+                    className="px-6 py-2.5 rounded-2xl bg-zinc-900 text-rose-400 hover:bg-rose-500/10 border border-rose-500/30 transition-colors flex items-center gap-2 text-[10px] font-black uppercase tracking-widest"
+                  >
+                    <SafeIcon icon={FiAlertCircle} />
+                    Escalate
+                  </button>
+
                     <button
                       onClick={() => setShowHandoffMenu(!showHandoffMenu)}
                       className="px-6 py-2.5 rounded-2xl bg-zinc-900 text-cyan-400 hover:text-cyan-300 border border-zinc-700 hover:border-cyan-500/50 transition-colors flex items-center gap-2 text-[10px] font-black uppercase tracking-widest"

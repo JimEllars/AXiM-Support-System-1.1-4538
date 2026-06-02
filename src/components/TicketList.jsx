@@ -108,7 +108,11 @@ export default function TicketList({ onSelectTicket }) {
               exit={{ opacity: 0, scale: 0.95 }}
               transition={{ duration: 0.2 }}
               className={`group flex items-center justify-between p-5 border rounded-2xl transition-all cursor-pointer ${
-                  isSelected ? 'bg-fuchsia-500/10 border-fuchsia-500/50' : 'bg-zinc-900/40 border-zinc-800 hover:border-zinc-600 hover:bg-zinc-800/40'
+                  isSelected
+                    ? 'bg-fuchsia-500/10 border-fuchsia-500/50'
+                    : isEscalated
+                      ? 'bg-rose-950/20 border-rose-500/50 shadow-[0_0_15px_rgba(225,29,72,0.2)]'
+                      : 'bg-zinc-900/40 border-zinc-800 hover:border-zinc-600 hover:bg-zinc-800/40'
               }`}
             >
               <div className="flex items-center gap-5">
