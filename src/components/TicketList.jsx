@@ -200,9 +200,9 @@ export default function TicketList({ onSelectTicket }) {
             initial={{ opacity: 0, y: 50, x: '-50%' }}
             animate={{ opacity: 1, y: 0, x: '-50%' }}
             exit={{ opacity: 0, y: 50, x: '-50%' }}
-            className="fixed bottom-8 left-1/2 bg-zinc-900/90 backdrop-blur-xl border border-zinc-700 p-4 rounded-2xl shadow-2xl z-50 flex items-center gap-4"
+            className="fixed bottom-8 left-1/2 -translate-x-1/2 bg-zinc-900/90 backdrop-blur-xl border border-zinc-700 p-4 rounded-3xl shadow-2xl z-50 flex items-center gap-6"
           >
-            <span className="text-zinc-300 font-bold text-sm tracking-widest uppercase px-4 border-r border-zinc-700">
+            <span className="text-cyan-400 font-bold text-sm tracking-widest uppercase px-4 border-r border-zinc-700">
               {selectedTicketIds.length} Cases Selected
             </span>
             <button
@@ -215,7 +215,7 @@ export default function TicketList({ onSelectTicket }) {
               onClick={() => useTicketStore.getState().setSelectedTicketIds([])}
               className="px-6 py-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 font-black text-xs uppercase tracking-widest rounded-xl transition-all"
             >
-              Clear Selection
+              Clear
             </button>
           </motion.div>
         )}

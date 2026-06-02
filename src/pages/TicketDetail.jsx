@@ -243,13 +243,13 @@ export default function TicketDetail() {
                    {telemetry?.confidence_score && (
                      <div className="px-4 py-2.5 rounded-2xl bg-fuchsia-500/10 text-fuchsia-400 border border-fuchsia-500/30 flex items-center gap-2 text-[10px] font-black uppercase tracking-widest">
                        <SafeIcon icon={FiCpu} />
-                       {telemetry.confidence_score}% Confidence
+                       {telemetry?.confidence_score}% Confidence
                      </div>
                    )}
                    {telemetry?.primary_intent && (
                      <div className="px-4 py-2.5 rounded-2xl bg-cyan-500/10 text-cyan-400 border border-cyan-500/30 flex items-center gap-2 text-[10px] font-black uppercase tracking-widest">
                        <SafeIcon icon={FiActivity} />
-                       {telemetry.primary_intent}
+                       {telemetry?.primary_intent}
                      </div>
                    )}
                    <div className={`px-6 py-2.5 rounded-2xl text-[10px] font-black uppercase tracking-widest ${ticket?.priority === 'escalated' ? 'bg-rose-500 text-white border border-rose-600 shadow-[0_0_10px_rgba(225,29,72,0.8)]' : 'bg-rose-500/10 text-rose-400 border border-rose-500/30'}`}>
@@ -381,7 +381,7 @@ export default function TicketDetail() {
                        <SafeIcon icon={FiCpu} className="text-fuchsia-400" />
                        <span className="text-fuchsia-400 text-xs font-black uppercase tracking-widest">Sentinel Suggestion (Vector KB Match)</span>
                     </div>
-                    <p className="text-zinc-300 text-sm">{telemetry.auto_response_draft.substring(0, 150)}...</p>
+                    <p className="text-zinc-300 text-sm">{telemetry?.auto_response_draft?.substring(0, 150)}...</p>
                  </div>
                  <button
                     onClick={() => applyDraft(telemetry.auto_response_draft)}
@@ -393,7 +393,7 @@ export default function TicketDetail() {
             )}
 
             <div className="p-12 min-h-[500px] bg-zinc-950/20 space-y-12">
-              <OnyxInvestigationPanel ticketId={id} isInvestigating={isInvestigating} />
+              {isInvestigating && <OnyxInvestigationPanel ticketId={id} />}
               <MessageThread messages={messages} />
             </div>
 
