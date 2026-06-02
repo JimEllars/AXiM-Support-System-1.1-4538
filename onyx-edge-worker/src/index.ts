@@ -47,6 +47,7 @@ function getCorsHeaders(env: Env, request: Request) {
   const origin = request.headers.get("Origin");
   const allowedOrigins = env.ALLOWED_ORIGINS?.split(",") || [
     "http://localhost:5173",
+    "https://axim.us.com"
   ];
   const allowOrigin =
     origin && allowedOrigins.includes(origin) ? origin : allowedOrigins[0];
@@ -262,6 +263,9 @@ export default {
       return handleTicketResolved(request, env);
     }
 
+    if (url.pathname === "/api/v1/webhooks/public-intake") {
+      return handleWebhookIntake(request, env);
+    }
     if (url.pathname === "/webhooks/intake") {
       return handleWebhookIntake(request, env);
     }
@@ -1162,7 +1166,12 @@ async function handleExecuteAction(
   }
 
   try {
-    const payload = (await request.json()) as any;
+    const rawPayload: any = await request.json();
+    const url = new URL(request.url);
+    if (url.pathname === "/api/v1/webhooks/public-intake" && !rawPayload.source) {
+      rawPayload.source = "website";
+    }
+    const payload = WebhookIntakeSchema.parse(rawPayload) as any;
 
     try {
       ToolCommandSchema.parse(payload);

@@ -393,7 +393,7 @@ export default function TicketDetail() {
             )}
 
             <div className="p-12 min-h-[500px] bg-zinc-950/20 space-y-12">
-              {isInvestigating && <OnyxInvestigationPanel ticketId={id} />}
+              {isInvestigating && <OnyxInvestigationPanel ticketId={id} isInvestigating={isInvestigating} onClose={() => setIsInvestigating(false)} />}
               <MessageThread messages={messages} />
             </div>
 
