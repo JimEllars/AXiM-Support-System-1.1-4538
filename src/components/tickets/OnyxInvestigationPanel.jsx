@@ -1,13 +1,17 @@
-import React, { useEffect, useState } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
-import SafeIcon from '../../common/SafeIcon';
-import * as FiIcons from 'react-icons/fi';
-import { useTicketStore } from '../../store/useTicketStore';
-import { supabase } from '../../lib/supabaseClient';
+import React, { useEffect, useState } from "react";
+import { motion, AnimatePresence } from "framer-motion";
+import SafeIcon from "../../common/SafeIcon";
+import * as FiIcons from "react-icons/fi";
+import { useTicketStore } from "../../store/useTicketStore";
+import { supabase } from "../../lib/supabaseClient";
 
 const { FiTerminal, FiCpu, FiCheck, FiLoader, FiX } = FiIcons;
 
-export default function OnyxInvestigationPanel({ ticketId, isInvestigating, onClose }) {
+export default function OnyxInvestigationPanel({
+  ticketId,
+  isInvestigating,
+  onClose,
+}) {
   const [logs, setLogs] = useState([]);
   const [isActive, setIsActive] = useState(false);
 
@@ -15,29 +19,51 @@ export default function OnyxInvestigationPanel({ ticketId, isInvestigating, onCl
     if (!ticketId || !isInvestigating) return;
 
     // Subscribe to events_ax2024 for onyx_presence logs
-    const channel = supabase.channel(`onyx-presence-${ticketId}`)
+    const channel = supabase
+      .channel(`onyx-presence-${ticketId}`)
       .on(
-        'postgres_changes',
+        "postgres_changes",
         {
-          event: 'INSERT',
-          schema: 'public',
-          table: 'events_ax2024',
-          filter: `type=eq.onyx_presence`
+          event: "INSERT",
+          schema: "public",
+          table: "events_ax2024",
+          filter: `type=eq.onyx_presence`,
         },
         (payload) => {
           const newEvent = payload.new;
           if (newEvent.payload && newEvent.payload.ticket_id === ticketId) {
-            if (newEvent.payload.status === 'Thinking') {
+            if (newEvent.payload.status === "Thinking") {
               setIsActive(true);
-              setLogs(prev => [...prev, { id: Date.now(), msg: newEvent.payload.message || 'Onyx sub-agents spawned.', type: 'info' }]);
-            } else if (newEvent.payload.status === 'Complete') {
-              setLogs(prev => [...prev, { id: Date.now(), msg: newEvent.payload.message || 'Investigation complete.', type: 'success' }]);
+              setLogs((prev) => [
+                ...prev,
+                {
+                  id: Date.now(),
+                  msg: newEvent.payload.message || "Onyx sub-agents spawned.",
+                  type: "info",
+                },
+              ]);
+            } else if (newEvent.payload.status === "Complete") {
+              setLogs((prev) => [
+                ...prev,
+                {
+                  id: Date.now(),
+                  msg: newEvent.payload.message || "Investigation complete.",
+                  type: "success",
+                },
+              ]);
               setTimeout(() => setIsActive(false), 5000);
             } else {
-              setLogs(prev => [...prev, { id: Date.now(), msg: newEvent.payload.message || 'Processing...', type: 'process' }]);
+              setLogs((prev) => [
+                ...prev,
+                {
+                  id: Date.now(),
+                  msg: newEvent.payload.message || "Processing...",
+                  type: "process",
+                },
+              ]);
             }
           }
-        }
+        },
       )
       .subscribe();
 
@@ -56,10 +82,14 @@ export default function OnyxInvestigationPanel({ ticketId, isInvestigating, onCl
             <SafeIcon icon={FiCpu} className="animate-pulse" />
           </div>
           <div>
-            <h3 className="text-white font-black text-sm uppercase tracking-widest">Onyx Sub-Agent Analysis</h3>
+            <h3 className="text-white font-black text-sm uppercase tracking-widest">
+              Onyx Sub-Agent Analysis
+            </h3>
             <div className="flex items-center gap-2 mt-0.5">
-               <div className="w-1.5 h-1.5 rounded-full bg-fuchsia-500 animate-pulse" />
-               <span className="text-[10px] text-fuchsia-400 font-bold tracking-widest uppercase">Live Telemetry Active</span>
+              <div className="w-1.5 h-1.5 rounded-full bg-fuchsia-500 animate-pulse" />
+              <span className="text-[10px] text-fuchsia-400 font-bold tracking-widest uppercase">
+                Live Telemetry Active
+              </span>
             </div>
           </div>
         </div>
@@ -88,10 +118,14 @@ export default function OnyxInvestigationPanel({ ticketId, isInvestigating, onCl
               animate={{ opacity: 1, x: 0 }}
               className="flex items-start gap-3"
             >
-              <span className="text-zinc-600 shrink-0">[{new Date(log.id).toISOString().split('T')[1].slice(0, -1)}]</span>
-              {log.type === 'success' ? (
-                <span className="text-emerald-400 flex items-center gap-2"><SafeIcon icon={FiCheck} /> {log.msg}</span>
-              ) : log.type === 'info' ? (
+              <span className="text-zinc-600 shrink-0">
+                [{new Date(log.id).toISOString().split("T")[1].slice(0, -1)}]
+              </span>
+              {log.type === "success" ? (
+                <span className="text-emerald-400 flex items-center gap-2">
+                  <SafeIcon icon={FiCheck} /> {log.msg}
+                </span>
+              ) : log.type === "info" ? (
                 <span className="text-fuchsia-400">{log.msg}</span>
               ) : (
                 <span className="text-zinc-300">

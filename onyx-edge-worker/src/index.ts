@@ -47,7 +47,7 @@ function getCorsHeaders(env: Env, request: Request) {
   const origin = request.headers.get("Origin");
   const allowedOrigins = env.ALLOWED_ORIGINS?.split(",") || [
     "http://localhost:5173",
-    "https://axim.us.com"
+    "https://axim.us.com",
   ];
   const allowOrigin =
     origin && allowedOrigins.includes(origin) ? origin : allowedOrigins[0];
@@ -111,8 +111,11 @@ function logEnd(supabase: any, logCtx: any, startTime: number) {
 
 function logErr(supabase: any, logCtx: any, err: any) {
   logToEvents(supabase, logCtx, "error", "Request error", {
-    error: err.message,
-    stack: err.stack,
+    error:
+      err && typeof err === "object" && err.message
+        ? String(err.message)
+        : String(err || "Unknown Error"),
+    stack: err && typeof err === "object" && err.stack ? String(err.stack) : "",
   });
 }
 
@@ -261,6 +264,10 @@ export default {
 
     if (url.pathname === "/api/v1/webhooks/ticket-resolved") {
       return handleTicketResolved(request, env);
+    }
+
+    if (url.pathname === "/api/v1/webhooks/public-ingress") {
+      return handlePublicWebIngress(request, env);
     }
 
     if (url.pathname === "/api/v1/webhooks/public-intake") {
@@ -553,6 +560,49 @@ async function handleBatchTriage(
         ...getCorsHeaders(env, request),
       },
     });
+  }
+}
+
+async function handlePublicWebIngress(
+  request: Request,
+  env: Env,
+): Promise<Response> {
+  const origin = request.headers.get("Origin");
+  const allowedOrigins = env.ALLOWED_ORIGINS
+    ? env.ALLOWED_ORIGINS.split(",")
+    : [];
+
+  if (!origin || !allowedOrigins.includes(origin)) {
+    return new Response(
+      JSON.stringify({ error: "Forbidden: Invalid Origin" }),
+      {
+        status: 403,
+        headers: getCorsHeaders(env, request),
+      },
+    );
+  }
+
+  try {
+    let payload = await request.json();
+    // Hardcode source to 'website'
+    payload.source = "website";
+
+    // Construct a new request to pass down to handleWebhookIntake
+    const newRequest = new Request(request.url, {
+      method: request.method,
+      headers: request.headers,
+      body: JSON.stringify(payload),
+    });
+
+    return handleWebhookIntake(newRequest, env);
+  } catch (error) {
+    return new Response(
+      JSON.stringify({ error: "Bad Request: Invalid JSON payload" }),
+      {
+        status: 400,
+        headers: getCorsHeaders(env, request),
+      },
+    );
   }
 }
 
@@ -1168,7 +1218,10 @@ async function handleExecuteAction(
   try {
     const rawPayload: any = await request.json();
     const url = new URL(request.url);
-    if (url.pathname === "/api/v1/webhooks/public-intake" && !rawPayload.source) {
+    if (
+      url.pathname === "/api/v1/webhooks/public-intake" &&
+      !rawPayload.source
+    ) {
       rawPayload.source = "website";
     }
     const payload = WebhookIntakeSchema.parse(rawPayload) as any;
