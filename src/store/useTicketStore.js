@@ -29,6 +29,15 @@ export const useTicketStore = create((set, get) => ({
       ),
     })),
 
+  updateLocalTicketMeta: (ticketId, assignedTo, department) =>
+    set((state) => ({
+      tickets: state.tickets.map(t =>
+        t.id === ticketId
+          ? { ...t, assigned_to: assignedTo, assigned_department: department }
+          : t
+      )
+    })),
+
   fetchTickets: async () => {
     set({ isLoading: true });
     try {

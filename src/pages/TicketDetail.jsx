@@ -160,7 +160,7 @@ export default function TicketDetail() {
     if (!msgError) {
       useTicketStore
         .getState()
-        .updateTicketAssignee(
+        .updateLocalTicketMeta(
           id,
           currentAgent.agentId,
           ticket?.assigned_department || "General Support",
@@ -233,7 +233,7 @@ export default function TicketDetail() {
       if (updateError) throw updateError;
       useTicketStore
         .getState()
-        .updateTicketAssignee(
+        .updateLocalTicketMeta(
           id,
           agent.id,
           agent.department || "General Support",
