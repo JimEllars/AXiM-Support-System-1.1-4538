@@ -582,25 +582,149 @@ async function handlePublicWebIngress(
     );
   }
 
-  try {
-    let payload = await request.json();
-    // Hardcode source to 'website'
-    payload.source = "website";
+  const supabase = createClient(
+    env.SUPABASE_URL,
+    env.SUPABASE_SERVICE_ROLE_KEY,
+  );
+  const logCtx = createLogContext(request);
+  logToEvents(supabase, logCtx, "performance_metric", "Request start", {
+    headers: request.headers,
+  });
+  const startTime = Date.now();
 
-    // Construct a new request to pass down to handleWebhookIntake
-    const newRequest = new Request(request.url, {
-      method: request.method,
-      headers: request.headers,
-      body: JSON.stringify(payload),
+  try {
+    let payload: any = await request.json();
+
+    const normalizedData = {
+      subject:
+        payload.subject ||
+        payload.title ||
+        payload.inquiry_subject ||
+        "External Intake Webhook",
+      description:
+        payload.description ||
+        payload.body ||
+        payload.message ||
+        JSON.stringify(payload),
+      customer_email:
+        payload.customer_email || payload.email || payload.sender,
+      source: "website", // Hardcoded per requirements
+      customer_name: payload.customer_name || payload.name,
+      tags: payload.tags || [],
+    };
+
+    try {
+      WebhookIntakeSchema.parse(normalizedData);
+    } catch (zodError) {
+      if (zodError instanceof z.ZodError) {
+        return new Response(
+          JSON.stringify({
+            error: "Payload validation failed",
+            details: zodError.issues,
+          }),
+          {
+            status: 400,
+            headers: {
+              "Content-Type": "application/json",
+              ...getCorsHeaders(env, request),
+            },
+          },
+        );
+      }
+      throw zodError;
+    }
+
+    // 1. Fetch or create customer
+    let customerId = null;
+    const { data: existingCustomer } = await supabase
+      .from("contacts_ax2024")
+      .select("id")
+      .eq("email", normalizedData.customer_email)
+      .single();
+
+    if (existingCustomer) {
+      customerId = existingCustomer.id;
+    } else {
+      const { data: newCustomer, error: createError } = await supabase
+        .from("contacts_ax2024")
+        .insert({
+          email: normalizedData.customer_email,
+          name: normalizedData.customer_name || normalizedData.customer_email.split("@")[0],
+          status: "active",
+        })
+        .select()
+        .single();
+      if (createError) {
+        console.error("Error creating customer:", createError);
+      } else {
+        customerId = newCustomer.id;
+      }
+    }
+
+    // 2. Perform Onyx Analysis
+    const onyxAnalysis = await analyzeWithOnyx(
+      normalizedData.subject,
+      normalizedData.description,
+      env.ANTHROPIC_API_KEY,
+    );
+
+    // 3. Inject requires_sandbox_escalation if confidence < 85
+    let metadata = {
+        source: normalizedData.source,
+        tags: normalizedData.tags,
+        ...(onyxAnalysis.confidence < 85 ? { requires_sandbox_escalation: true } : {})
+    };
+
+    // 4. Create the ticket
+    const { data: ticket, error: ticketError } = await supabase
+      .from("support_tickets")
+      .insert({
+        subject: normalizedData.subject,
+        description: normalizedData.description,
+        customer_id: customerId,
+        priority: onyxAnalysis.priority || "medium",
+        status: "open",
+        metadata: metadata,
+      })
+      .select()
+      .single();
+
+    if (ticketError) throw ticketError;
+
+    // 5. Store telemetry
+    await supabase.from("ticket_ai_telemetry").insert({
+      ticket_id: ticket.id,
+      analyzed_sentiment: onyxAnalysis.sentiment,
+      suggested_category: onyxAnalysis.category,
+      auto_response_draft: onyxAnalysis.draft,
+      confidence_score: onyxAnalysis.confidence,
     });
 
-    return handleWebhookIntake(newRequest, env);
-  } catch (error) {
+    logEnd(supabase, logCtx, startTime);
     return new Response(
-      JSON.stringify({ error: "Bad Request: Invalid JSON payload" }),
+      JSON.stringify({
+        success: true,
+        ticket_id: ticket.id,
+        message: "Ticket created successfully via public ingress",
+      }),
       {
-        status: 400,
-        headers: getCorsHeaders(env, request),
+        status: 200,
+        headers: {
+          "Content-Type": "application/json",
+          ...getCorsHeaders(env, request),
+        },
+      },
+    );
+  } catch (error: any) {
+    logErr(supabase, logCtx, error);
+    return new Response(
+      JSON.stringify({ error: "Internal Server Error", details: error.message }),
+      {
+        status: 500,
+        headers: {
+          "Content-Type": "application/json",
+          ...getCorsHeaders(env, request),
+        },
       },
     );
   }
@@ -890,6 +1014,12 @@ async function handleWebhookIntake(
       initialStatus = "pending"; // Changed to pending_user via pending status per enum
     }
 
+    let metadata = {
+        source: normalizedData.source,
+        tags: normalizedData.tags,
+        ...(onyxAnalysis.confidence < 85 ? { requires_sandbox_escalation: true } : {})
+    };
+
     const { data: ticket, error: ticketError } = await supabase
       .from("support_tickets")
       .insert({
@@ -899,6 +1029,7 @@ async function handleWebhookIntake(
         priority: priority,
         sla_breach_at: slaBreachAt.toISOString(),
         status: initialStatus,
+        metadata: metadata,
       })
       .select()
       .single();
@@ -1217,17 +1348,9 @@ async function handleExecuteAction(
 
   try {
     const rawPayload: any = await request.json();
-    const url = new URL(request.url);
-    if (
-      url.pathname === "/api/v1/webhooks/public-intake" &&
-      !rawPayload.source
-    ) {
-      rawPayload.source = "website";
-    }
-    const payload = WebhookIntakeSchema.parse(rawPayload) as any;
-
+    let payload;
     try {
-      ToolCommandSchema.parse(payload);
+      payload = ToolCommandSchema.parse(rawPayload);
     } catch (zodError) {
       if (zodError instanceof z.ZodError) {
         return new Response(
