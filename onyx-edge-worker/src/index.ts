@@ -11,6 +11,7 @@ const WebhookIntakeSchema = z.object({
   subject: z.string().min(1).max(500),
   description: z.string().optional(),
   customer_email: z.string().email(),
+  customer_name: z.string().optional(),
   priority: z.enum(["low", "medium", "high", "urgent"]).optional(),
 });
 
@@ -586,152 +587,19 @@ async function handlePublicWebIngress(
     );
   }
 
-  const supabase = createClient(
-    env.SUPABASE_URL,
-    env.SUPABASE_SERVICE_ROLE_KEY,
-  );
-  const logCtx = createLogContext(request);
-  logToEvents(supabase, logCtx, "performance_metric", "Request start", {
-    headers: request.headers,
+  const newHeaders = new Headers(request.headers);
+  newHeaders.set("Authorization", `Bearer ${env.AXIM_ONYX_SECRET}`);
+  newHeaders.set("X-Axim-Default-Source", "website");
+
+  const newRequest = new Request(request.url, {
+    method: request.method,
+    headers: newHeaders,
+    body: request.body,
+    // @ts-ignore - Required by CF Workers when passing a ReadableStream
+    duplex: 'half',
   });
-  const startTime = Date.now();
 
-  try {
-    let payload: any = await request.json();
-
-    const normalizedData = {
-      subject:
-        payload.subject ||
-        payload.title ||
-        payload.inquiry_subject ||
-        "External Intake Webhook",
-      description:
-        payload.description ||
-        payload.body ||
-        payload.message ||
-        JSON.stringify(payload),
-      customer_email:
-        payload.customer_email || payload.email || payload.sender,
-      source: "website", // Hardcoded per requirements
-      customer_name: payload.customer_name || payload.name,
-      tags: payload.tags || [],
-    };
-
-    try {
-      WebhookIntakeSchema.parse(normalizedData);
-    } catch (zodError) {
-      if (zodError instanceof z.ZodError) {
-        return new Response(
-          JSON.stringify({
-            error: "Payload validation failed",
-            details: zodError.issues,
-          }),
-          {
-            status: 400,
-            headers: {
-              "Content-Type": "application/json",
-              ...getCorsHeaders(env, request),
-            },
-          },
-        );
-      }
-      throw zodError;
-    }
-
-    // 1. Fetch or create customer
-    let customerId = null;
-    const { data: existingCustomer } = await supabase
-      .from("contacts_ax2024")
-      .select("id")
-      .eq("email", normalizedData.customer_email)
-      .single();
-
-    if (existingCustomer) {
-      customerId = existingCustomer.id;
-    } else {
-      const { data: newCustomer, error: createError } = await supabase
-        .from("contacts_ax2024")
-        .insert({
-          email: normalizedData.customer_email,
-          name: normalizedData.customer_name || normalizedData.customer_email.split("@")[0],
-          status: "active",
-        })
-        .select()
-        .single();
-      if (createError) {
-        console.error("Error creating customer:", createError);
-      } else {
-        customerId = newCustomer.id;
-      }
-    }
-
-    // 2. Perform Onyx Analysis
-    const onyxAnalysis = await analyzeWithOnyx(
-      normalizedData.subject,
-      normalizedData.description,
-      env.ANTHROPIC_API_KEY,
-    );
-
-    // 3. Inject requires_sandbox_escalation if confidence < 85
-    let metadata = {
-        source: normalizedData.source,
-        tags: normalizedData.tags,
-        ...(onyxAnalysis.confidence < 85 ? { requires_sandbox_escalation: true } : {})
-    };
-
-    // 4. Create the ticket
-    const { data: ticket, error: ticketError } = await supabase
-      .from("support_tickets")
-      .insert({
-        subject: normalizedData.subject,
-        description: normalizedData.description,
-        customer_id: customerId,
-        priority: onyxAnalysis.priority || "medium",
-        status: "open",
-        metadata: metadata,
-      })
-      .select()
-      .single();
-
-    if (ticketError) throw ticketError;
-
-    // 5. Store telemetry
-    await supabase.from("ticket_ai_telemetry").insert({
-      ticket_id: ticket.id,
-      analyzed_sentiment: onyxAnalysis.sentiment,
-      suggested_category: onyxAnalysis.category,
-      auto_response_draft: onyxAnalysis.draft,
-      confidence_score: onyxAnalysis.confidence,
-    });
-
-    logEnd(supabase, logCtx, startTime);
-    return new Response(
-      JSON.stringify({
-        success: true,
-        ticket_id: ticket.id,
-        message: "Ticket created successfully via public ingress",
-      }),
-      {
-        status: 200,
-        headers: {
-          "Content-Type": "application/json",
-          ...getCorsHeaders(env, request),
-        },
-      },
-    );
-  } catch (error: any) {
-    logErr(supabase, logCtx, error);
-    return new Response(
-      JSON.stringify({ error: "Internal Server Error", details: error.message }),
-      {
-        status: 500,
-        headers: {
-          "Content-Type": "application/json",
-          ...getCorsHeaders(env, request),
-        },
-      },
-    );
-  }
+  return handleWebhookIntake(newRequest, env);
 }
 
 async function handleWebhookIntake(
@@ -804,7 +672,7 @@ async function handleWebhookIntake(
           rawPayload.customer_email ||
           rawPayload.email ||
           rawPayload.sender,
-        source: formData.get("source") || rawPayload.source || "webhook",
+        source: formData.get("source") || rawPayload.source || request.headers.get("X-Axim-Default-Source") || "webhook",
         customer_name:
           formData.get("customer_name") ||
           rawPayload.customer_name ||
@@ -867,7 +735,7 @@ async function handleWebhookIntake(
           JSON.stringify(rawPayload),
         customer_email:
           rawPayload.customer_email || rawPayload.email || rawPayload.sender,
-        source: rawPayload.source || "webhook",
+        source: rawPayload.source || request.headers.get("X-Axim-Default-Source") || "webhook",
         customer_name: rawPayload.customer_name || rawPayload.name,
         tags: rawPayload.tags || [],
       };
