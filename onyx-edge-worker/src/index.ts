@@ -271,7 +271,7 @@ export default {
     }
 
     if (url.pathname === "/api/v1/webhooks/public-intake") {
-      return handleWebhookIntake(request, env);
+      return handlePublicWebIngress(request, env);
     }
     if (url.pathname === "/webhooks/intake") {
       return handleWebhookIntake(request, env);
@@ -563,6 +563,10 @@ async function handleBatchTriage(
   }
 }
 
+/**
+ * Handles tokenless public intake from web forms.
+ * Enforces origin rules and tags sandbox escalation for zero-day faults.
+ */
 async function handlePublicWebIngress(
   request: Request,
   env: Env,
