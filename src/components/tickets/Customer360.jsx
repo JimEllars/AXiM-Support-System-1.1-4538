@@ -37,6 +37,14 @@ export default function Customer360({ customerId, ticketId }) {
     fetchCustomerData();
   }, [customerId, ticketId]);
 
+  if (!customerId) {
+    return (
+      <div className="p-8 border border-zinc-800 rounded-3xl bg-zinc-900/20 text-zinc-500 text-center text-sm font-bold uppercase tracking-widest">
+        No Customer Profile Linked
+      </div>
+    );
+  }
+
   if (loading) {
       return (
           <div className="glass-panel rounded-[2.5rem] p-8 border-zinc-800 shadow-2xl flex items-center justify-center min-h-[400px]">

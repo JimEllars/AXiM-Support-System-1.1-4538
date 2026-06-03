@@ -93,7 +93,6 @@ export const onyxService = {
               payload: metrics
           });
           if (error) throw error;
-          console.log("Telemetry synced to AXiM Core successfully.");
           return { success: true };
       } catch (e) {
           console.error("Failed to sync telemetry:", e);

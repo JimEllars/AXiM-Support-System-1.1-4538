@@ -28,7 +28,7 @@ const {
   FiMessageSquare,
   FiUserPlus,
   FiChevronDown,
-  FiAlertCircle,
+  FiAlertCircle, FiAlertTriangle, FiPaperclip, FiDownload,
 } = FiIcons;
 
 export default function TicketDetail() {
@@ -46,6 +46,7 @@ export default function TicketDetail() {
   const [mentionQuery, setMentionQuery] = useState("");
   const [mentionIndex, setMentionIndex] = useState(-1);
   const [showHandoffMenu, setShowHandoffMenu] = useState(false);
+  const [attachments, setAttachments] = useState([]);
 
   const updateTypingStatus = useTicketStore(
     (state) => state.updateTypingStatus,
@@ -67,7 +68,7 @@ export default function TicketDetail() {
   useEffect(() => {
     const fetchDetails = async () => {
       setLoading(true);
-      const [ticketRes, msgsRes, telemRes] = await Promise.all([
+      const [ticketRes, msgsRes, telemRes, attachmentsRes] = await Promise.all([
         supabase
           .from("support_tickets")
           .select("*, contacts_ax2024(*)")
@@ -83,10 +84,12 @@ export default function TicketDetail() {
           .select("*")
           .eq("ticket_id", id)
           .single(),
+        supabase.storage.from('ticket_attachments').list(id + '/intake')
       ]);
 
       if (ticketRes.data) setTicket(ticketRes.data);
       if (msgsRes.data) setMessages(msgsRes.data);
+      if (attachmentsRes.data) setAttachments(attachmentsRes.data);
       if (telemRes.data) {
         setTelemetry(telemRes.data);
       } else if (ticketRes.data) {
@@ -532,9 +535,38 @@ export default function TicketDetail() {
                   )}
                 </div>
               </div>
+
               <p className="text-zinc-400 text-xl font-medium leading-relaxed max-w-4xl">
                 {ticket?.description}
               </p>
+
+              {attachments.length > 0 && (
+                <div className="mt-8 p-6 bg-zinc-950/40 rounded-3xl border border-zinc-800/50 backdrop-blur-xl">
+                  <div className="flex items-center gap-2 mb-4">
+                    <SafeIcon icon={FiPaperclip} className="text-zinc-500" />
+                    <h4 className="text-xs font-black text-zinc-400 uppercase tracking-widest">
+                      Customer Attachments
+                    </h4>
+                  </div>
+                  <div className="flex flex-wrap gap-4">
+                    {attachments.map((file) => (
+                      <a
+                        key={file.name}
+                        href={supabase.storage.from('ticket_attachments').getPublicUrl(id + '/intake/' + file.name).data.publicUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="flex items-center gap-3 px-5 py-3 bg-zinc-900 border border-zinc-700/50 rounded-2xl hover:bg-zinc-800 hover:border-cyan-500/50 transition-all group"
+                      >
+                        <SafeIcon icon={FiPaperclip} className="text-zinc-500 group-hover:text-cyan-400" />
+                        <span className="text-sm font-medium text-zinc-300 group-hover:text-white truncate max-w-[200px]">
+                          {file.name}
+                        </span>
+                        <SafeIcon icon={FiDownload} className="text-zinc-600 group-hover:text-cyan-400 ml-2" />
+                      </a>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
 
             {telemetry?.confidence_score >= 75 &&
@@ -561,6 +593,16 @@ export default function TicketDetail() {
                   </button>
                 </div>
               )}
+
+
+            {ticket?.metadata?.requires_sandbox_escalation === true && (
+              <div className="mx-12 mt-8 p-4 rounded-2xl bg-amber-500/10 border border-amber-500/50 flex items-center gap-4 text-amber-400">
+                <SafeIcon icon={FiAlertTriangle} className="text-xl" />
+                <span className="text-sm font-black uppercase tracking-widest">
+                  TIER 3 ESCALATION ACTIVE: Onyx confidence &lt; 85%. Sandbox Action Agent deployed for autonomous debugging.
+                </span>
+              </div>
+            )}
 
             <div className="p-12 min-h-[500px] bg-zinc-950/20 space-y-12">
               {isInvestigating && (
