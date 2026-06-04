@@ -14,6 +14,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { onyxService } from "../services/onyxService";
 import toast from "react-hot-toast";
 import { useTicketStore } from "../store/useTicketStore";
+import { useAuthStore } from "../store/useAuthStore";
 
 const {
   FiTerminal,
@@ -32,6 +33,7 @@ const {
 } = FiIcons;
 
 export default function TicketDetail() {
+  const { user } = useAuthStore();
   const { id } = useParams();
   const navigate = useNavigate();
   const [ticket, setTicket] = useState(null);
@@ -53,10 +55,10 @@ export default function TicketDetail() {
   );
 
   const currentAgent = {
-    agentId: "dash-user-1",
-    name: "Greta (Local)",
-    role: "Senior Architect",
-    color: "bg-cyan-500",
+    agentId: user?.id || 'unknown-agent',
+    name: user?.email ? user.email.split('@')[0] : 'System Agent',
+    role: 'Support Engineer',
+    color: 'bg-cyan-500',
   };
 
   const [teamMembers, setTeamMembers] = useState([
@@ -149,7 +151,7 @@ export default function TicketDetail() {
       return;
     }
 
-    const systemMessage = `Ticket claimed by ${currentAgent.name}.`;
+    const systemMessage = `Case manually claimed by ${currentAgent.name}.`;
     const newMessage = {
       ticket_id: id,
       message_body: systemMessage,
@@ -284,7 +286,7 @@ export default function TicketDetail() {
       ticket_id: id,
       message_body: reply,
       is_internal_note: isInternal,
-      sender_id: "agent_user", // In real app, this would be auth.uid()
+      sender_id: user?.id || "agent_user", // In real app, this would be auth.uid()
     };
 
     const { error } = await supabase.from("ticket_messages").insert(newMessage);
