@@ -14,6 +14,9 @@ const createMockSupabase = () => ({
   auth: {
     getUser: () => Promise.resolve({ data: { user: null }, error: null }),
     getSession: () => Promise.resolve({ data: { session: null }, error: null }),
+    signInWithPassword: () => Promise.resolve({ data: { session: { access_token: 'mock-token' }, user: { id: 'mock-id', email: 'mock@axim.us.com' } }, error: null }),
+    signOut: () => Promise.resolve({ error: null }),
+    onAuthStateChange: () => ({ data: { subscription: { unsubscribe: () => {} } } }),
   },
   mock: true
 });
