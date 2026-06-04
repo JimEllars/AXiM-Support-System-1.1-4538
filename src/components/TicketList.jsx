@@ -122,17 +122,34 @@ export default function TicketList({ onSelectTicket }) {
     );
   }
 
+
   if (filteredTickets.length === 0) {
-    return (
-      <div className="p-16 flex flex-col items-center justify-center border-2 border-dashed border-zinc-800 rounded-[2rem] bg-zinc-950/50">
-        <div className="w-16 h-16 rounded-2xl bg-zinc-900 border border-zinc-800 flex items-center justify-center text-zinc-600 mb-4">
-          <SafeIcon icon={FiSearch} className="text-2xl" />
-        </div>
-        <h3 className="text-white font-black text-xl tracking-tight">No Cases Match Protocol</h3>
-        <p className="text-zinc-500 font-medium text-sm mt-2">Adjust your Onyx Command Hub query.</p>
-      </div>
-    );
+    if (searchQuery) {
+        return (
+          <div className="p-16 flex flex-col items-center justify-center border-2 border-dashed border-zinc-800 rounded-[2rem] bg-zinc-950/50">
+            <div className="w-16 h-16 rounded-2xl bg-zinc-900 border border-zinc-800 flex items-center justify-center text-zinc-600 mb-4">
+              <SafeIcon icon={FiSearch} className="text-2xl" />
+            </div>
+            <h3 className="text-white font-black text-xl tracking-tight">No Cases Match Protocol</h3>
+            <p className="text-zinc-500 font-medium text-sm mt-2">Adjust your Onyx Command Hub query.</p>
+          </div>
+        );
+    } else {
+        // Find assigned department from user tickets or context,
+        // For now let's grab it from the first ticket if any exist, or fallback to 'General Support'
+        const dept = tickets.length > 0 && tickets[0].assigned_department ? tickets[0].assigned_department : "your department";
+        return (
+          <div className="p-16 flex flex-col items-center justify-center border-2 border-dashed border-emerald-900/50 rounded-[2rem] bg-emerald-950/10">
+            <div className="w-16 h-16 rounded-2xl bg-emerald-950 border border-emerald-900 flex items-center justify-center text-emerald-500 mb-4 shadow-[0_0_20px_rgba(16,185,129,0.2)]">
+              <SafeIcon icon={FiIcons.FiCheckCircle} className="text-2xl" />
+            </div>
+            <h3 className="text-emerald-400 font-black text-xl tracking-tight">System Optimal</h3>
+            <p className="text-emerald-500/70 font-medium text-sm mt-2 uppercase tracking-widest text-[10px]">No Active Incidents in [{dept}]</p>
+          </div>
+        );
+    }
   }
+
 
   return (
     <>
