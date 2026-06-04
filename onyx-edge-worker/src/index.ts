@@ -113,11 +113,8 @@ function logEnd(supabase: any, logCtx: any, startTime: number) {
 
 function logErr(supabase: any, logCtx: any, err: any) {
   logToEvents(supabase, logCtx, "error", "Request error", {
-    error:
-      err && typeof err === "object" && err.message
-        ? String(err.message)
-        : String(err || "Unknown Error"),
-    stack: err && typeof err === "object" && err.stack ? String(err.stack) : "",
+    error: err instanceof Error ? err.message : String(err),
+    stack: err instanceof Error ? err.stack : "",
   });
 }
 
@@ -358,7 +355,7 @@ async function handleTicketIngestion(
   } catch (error: any) {
     logErr(supabase, logCtx, error);
 
-    return new Response(JSON.stringify({ error: error.message }), {
+    return new Response(JSON.stringify({ error: error instanceof Error ? error.message : String(error) }), {
       status: 500,
       headers: {
         "Content-Type": "application/json",
@@ -452,7 +449,7 @@ async function handleVectorSearch(
   } catch (e: any) {
     logErr(supabase, logCtx, e);
 
-    return new Response(JSON.stringify({ error: e.message }), { status: 500 });
+    return new Response(JSON.stringify({ error: e instanceof Error ? e.message : String(e) }), { status: 500 });
   }
 }
 
@@ -555,7 +552,7 @@ async function handleBatchTriage(
   } catch (error: any) {
     logErr(supabase, logCtx, error);
 
-    return new Response(JSON.stringify({ error: error.message }), {
+    return new Response(JSON.stringify({ error: error instanceof Error ? error.message : String(error) }), {
       status: 500,
       headers: {
         "Content-Type": "application/json",
@@ -573,6 +570,14 @@ async function handlePublicWebIngress(
   request: Request,
   env: Env,
 ): Promise<Response> {
+  const contentLength = request.headers.get("content-length");
+  if (contentLength && parseInt(contentLength) > 5 * 1024 * 1024) {
+    return new Response(JSON.stringify({ error: "Payload exceeds maximum allowed size of 5MB." }), {
+        status: 413,
+        headers: { "Content-Type": "application/json", ...getCorsHeaders(env, request) }
+    });
+  }
+
   const origin = request.headers.get("Origin");
   const allowedOrigins = env.ALLOWED_ORIGINS
     ? env.ALLOWED_ORIGINS.split(",")
@@ -606,6 +611,14 @@ async function handleWebhookIntake(
   request: Request,
   env: Env,
 ): Promise<Response> {
+  const contentLength = request.headers.get("content-length");
+  if (contentLength && parseInt(contentLength) > 5 * 1024 * 1024) {
+    return new Response(JSON.stringify({ error: "Payload exceeds maximum allowed size of 5MB." }), {
+        status: 413,
+        headers: { "Content-Type": "application/json", ...getCorsHeaders(env, request) }
+    });
+  }
+
   const supabase = createClient(
     env.SUPABASE_URL,
     env.SUPABASE_SERVICE_ROLE_KEY,
@@ -955,7 +968,7 @@ async function handleWebhookIntake(
   } catch (error: any) {
     logErr(supabase, logCtx, error);
 
-    return new Response(JSON.stringify({ error: error.message }), {
+    return new Response(JSON.stringify({ error: error instanceof Error ? error.message : String(error) }), {
       status: 500,
       headers: {
         "Content-Type": "application/json",
@@ -1169,7 +1182,7 @@ async function handleToolCommand(
   } catch (error: any) {
     logErr(supabase, logCtx, error);
 
-    return new Response(JSON.stringify({ error: error.message }), {
+    return new Response(JSON.stringify({ error: error instanceof Error ? error.message : String(error) }), {
       status: 500,
       headers: {
         "Content-Type": "application/json",
@@ -1341,7 +1354,7 @@ async function handleExecuteAction(
   } catch (error: any) {
     logErr(supabase, logCtx, error);
 
-    return new Response(JSON.stringify({ error: error.message }), {
+    return new Response(JSON.stringify({ error: error instanceof Error ? error.message : String(error) }), {
       status: 500,
       headers: {
         "Content-Type": "application/json",
@@ -1454,7 +1467,7 @@ Applied the correct configuration and verified functionality.
   } catch (error: any) {
     logErr(supabase, logCtx, error);
 
-    return new Response(JSON.stringify({ error: error.message }), {
+    return new Response(JSON.stringify({ error: error instanceof Error ? error.message : String(error) }), {
       status: 500,
       headers: { "Content-Type": "application/json" },
     });
@@ -1626,7 +1639,7 @@ AXiM Support (Onyx Auto-Draft)`;
   } catch (e: any) {
     logErr(supabase, logCtx, e);
 
-    return new Response(JSON.stringify({ error: e.message }), { status: 500 });
+    return new Response(JSON.stringify({ error: e instanceof Error ? e.message : String(e) }), { status: 500 });
   }
 }
 
@@ -1786,7 +1799,7 @@ Draft a concise, professional reply:`;
   } catch (error: any) {
     logErr(supabase, logCtx, error);
 
-    return new Response(JSON.stringify({ error: error.message }), {
+    return new Response(JSON.stringify({ error: error instanceof Error ? error.message : String(error) }), {
       status: 500,
       headers: { ...getCorsHeaders(env, request) },
     });

@@ -7,7 +7,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { useTicketStore } from '../store/useTicketStore';
 import SLABadge from './tickets/SLABadge';
 
-const { FiCircle, FiCheckCircle, FiClock, FiAlertCircle, FiSearch, FiCheckSquare, FiSquare, FiGlobe, FiMail, FiMessageSquare } = FiIcons;
+const { FiCircle, FiCheckCircle, FiClock, FiAlertCircle, FiSearch, FiCheckSquare, FiSquare, FiRefreshCw, FiGlobe, FiMail, FiMessageSquare } = FiIcons;
 
 const statusStyles = {
   open: { icon: FiCircle, color: 'text-cyan-400', border: 'border-cyan-500/50', bg: 'bg-cyan-500/10' },
@@ -74,10 +74,19 @@ export default function TicketList({ onSelectTicket }) {
   useEffect(() => {
     fetchTickets();
     const unsubscribe = subscribeToTickets();
+
+    // Poll for new tickets every 30 seconds to catch public ingress
+    const intervalId = setInterval(() => {
+        if (!isTriaging) {
+            fetchTickets();
+        }
+    }, 30000);
+
     return () => {
       unsubscribe();
+      clearInterval(intervalId);
     };
-  }, []);
+  }, [isTriaging, fetchTickets]);
 
 
   const filteredTickets = tickets.filter((ticket) => {
@@ -126,7 +135,24 @@ export default function TicketList({ onSelectTicket }) {
   }
 
   return (
-    <div className="space-y-3">
+    <>
+      <div className="flex justify-between items-center mb-4 px-2">
+        <h2 className="text-zinc-400 font-bold tracking-widest text-sm uppercase flex items-center gap-2">
+          Inbox Pipeline
+        </h2>
+        <button
+          onClick={() => {
+            if (!isTriaging && !isLoading) {
+              fetchTickets();
+            }
+          }}
+          className="text-zinc-500 hover:text-cyan-400 transition-colors p-2 rounded-xl hover:bg-zinc-800/50"
+          title="Manual Refresh"
+        >
+          <SafeIcon icon={FiRefreshCw} className={`text-lg ${isLoading ? 'animate-spin text-cyan-400' : ''}`} />
+        </button>
+      </div>
+      <div className="space-y-3">
       <AnimatePresence>
         {filteredTickets.map((ticket) => {
           const style = statusStyles[ticket.status] || statusStyles.open;
@@ -226,5 +252,6 @@ export default function TicketList({ onSelectTicket }) {
         )}
       </AnimatePresence>
     </div>
+    </>
   );
 }

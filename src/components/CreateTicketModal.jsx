@@ -4,6 +4,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import SafeIcon from '../common/SafeIcon';
 import * as FiIcons from 'react-icons/fi';
 import { onyxService } from '../services/onyxService';
+import toast from 'react-hot-toast';
 
 const { FiX, FiSend, FiLoader, FiCpu, FiTerminal, FiPlus } = FiIcons;
 
@@ -81,6 +82,30 @@ export default function CreateTicketModal({ isOpen, onClose, onSuccess }) {
                   value={form.description}
                   onChange={e => setForm({ ...form, description: e.target.value })}
                   placeholder="PROVIDE_DETAILED_LOGS_OR_CONTEXT..."
+                />
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-[10px] font-black text-zinc-500 uppercase tracking-[0.3em] flex items-center gap-2">
+                  <SafeIcon icon={FiTerminal} className="text-cyan-500" /> Attachment
+                </label>
+                <input
+                  type="file"
+                  className="w-full px-6 py-4 bg-zinc-950 border border-zinc-800 rounded-2xl focus:border-cyan-500/50 outline-none transition-all text-zinc-300 file:mr-4 file:py-2 file:px-4 file:rounded-xl file:border-0 file:text-sm file:font-semibold file:bg-zinc-800 file:text-cyan-400 hover:file:bg-zinc-700"
+                  onChange={e => {
+                    if (e.target.files && e.target.files.length > 0) {
+                      const file = e.target.files[0];
+                      if (file.size > 5242880) { // 5MB
+                        toast.error("File must be under 5MB.");
+                        e.target.value = null;
+                        return;
+                      } else {
+                        setForm({ ...form, attachment: file });
+                      }
+                    } else {
+                      setForm({ ...form, attachment: null });
+                    }
+                  }}
                 />
               </div>
 
