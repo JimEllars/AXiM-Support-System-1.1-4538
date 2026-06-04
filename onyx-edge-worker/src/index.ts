@@ -12,6 +12,7 @@ const WebhookIntakeSchema = z.object({
   description: z.string().optional(),
   customer_email: z.string().email(),
   customer_name: z.string().optional(),
+  source: z.string().optional(),
   priority: z.enum(["low", "medium", "high", "urgent"]).optional(),
 });
 
@@ -595,9 +596,8 @@ async function handlePublicWebIngress(
     method: request.method,
     headers: newHeaders,
     body: request.body,
-    // @ts-ignore - Required by CF Workers when passing a ReadableStream
-    duplex: 'half',
-  });
+    duplex: 'half' // Required by Cloudflare for stream passing
+  } as RequestInit);
 
   return handleWebhookIntake(newRequest, env);
 }
