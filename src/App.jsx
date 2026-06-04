@@ -8,6 +8,7 @@ import Login from './pages/Login';
 import AppLayout from './components/layout/AppLayout';
 import { Toaster } from 'react-hot-toast';
 import { useAuthStore } from './store/useAuthStore';
+import { useTicketStore } from './store/useTicketStore';
 import { supabase } from './lib/supabaseClient';
 
 const queryClient = new QueryClient();
@@ -30,8 +31,13 @@ function App() {
     // Listen for auth changes
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, session) => {
+    } = supabase.auth.onAuthStateChange((event, session) => {
       setSession(session);
+
+      if (event === 'SIGNED_OUT') {
+        useAuthStore.getState().signOut();
+        useTicketStore.setState({ tickets: [], selectedTicketIds: [] });
+      }
     });
 
     return () => subscription.unsubscribe();
