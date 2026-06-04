@@ -1,16 +1,41 @@
 import React, { useEffect } from 'react';
-import { BrowserRouter, Routes, Route } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import '@questlabs/react-sdk/dist/style.css';
 import Dashboard from './pages/Dashboard';
 import TicketDetail from './pages/TicketDetail';
+import Login from './pages/Login';
 import AppLayout from './components/layout/AppLayout';
 import { Toaster } from 'react-hot-toast';
-import { useTicketStore } from './store/useTicketStore';
+import { useAuthStore } from './store/useAuthStore';
+import { supabase } from './lib/supabaseClient';
 
 const queryClient = new QueryClient();
 
+const ProtectedRoute = ({ children }) => {
+  const { session } = useAuthStore();
+  if (!session) return <Navigate to="/login" replace />;
+  return children;
+};
+
 function App() {
+  const { setSession } = useAuthStore();
+
+  useEffect(() => {
+    // Check initial session
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setSession(session);
+    });
+
+    // Listen for auth changes
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, session) => {
+      setSession(session);
+    });
+
+    return () => subscription.unsubscribe();
+  }, [setSession]);
 
   useEffect(() => {
     const handleKeyPress = (e) => {
@@ -41,12 +66,25 @@ function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <BrowserRouter>
-        <AppLayout>
-          <Routes>
-            <Route path="/" element={<Dashboard />} />
-            <Route path="/ticket/:id" element={<TicketDetail />} />
-          </Routes>
-        </AppLayout>
+        <Routes>
+          <Route path="/login" element={<Login />} />
+
+          <Route path="/" element={
+            <ProtectedRoute>
+              <AppLayout>
+                <Dashboard />
+              </AppLayout>
+            </ProtectedRoute>
+          } />
+
+          <Route path="/ticket/:id" element={
+            <ProtectedRoute>
+              <AppLayout>
+                <TicketDetail />
+              </AppLayout>
+            </ProtectedRoute>
+          } />
+        </Routes>
         <Toaster position="bottom-right" />
       </BrowserRouter>
     </QueryClientProvider>
