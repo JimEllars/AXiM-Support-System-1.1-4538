@@ -104,11 +104,11 @@ function createLogContext(request: Request): LogContext {
   };
 }
 
-function logEnd(supabase: any, logCtx: any, startTime: number) {
+function logEnd(supabase: any, logCtx: any, startTime: number, ctx: any) {
   const duration = Date.now() - startTime;
-  logToEvents(supabase, logCtx, "performance_metric", "Request end", {
+  ctx.waitUntil(logToEvents(supabase, logCtx, "performance_metric", "Request end", {
     execution_time_ms: duration,
-  });
+  }).catch(console.error));
 }
 
 function logErr(supabase: any, logCtx: any, err: any) {
@@ -153,18 +153,15 @@ export interface Env {
   CORE_API_URL: string;
 }
 
-async function handleHealthCheck(
-  env: Env,
-  request: Request,
-): Promise<Response> {
+async function handleHealthCheck(env: Env, request: Request, ctx: any): Promise<Response> {
   const supabase = createClient(
     env.SUPABASE_URL,
     env.SUPABASE_SERVICE_ROLE_KEY,
   );
   const logCtx = createLogContext(request);
-  logToEvents(supabase, logCtx, "performance_metric", "Request start", {
+  ctx.waitUntil(logToEvents(supabase, logCtx, "performance_metric", "Request start", {
     headers: request.headers,
-  }).then(() => {}, console.error);
+  }).catch(console.error));
   const startTime = Date.now();
 
   const checks = {
@@ -201,7 +198,7 @@ async function handleHealthCheck(
 
   const allHealthy = Object.values(checks).every(Boolean);
 
-  logEnd(supabase, logCtx, startTime);
+  logEnd(supabase, logCtx, startTime, ctx);
   return new Response(
     JSON.stringify({
       status: allHealthy ? "healthy" : "degraded",
@@ -219,7 +216,7 @@ async function handleHealthCheck(
 }
 
 export default {
-  async fetch(request: Request, env: Env): Promise<Response> {
+  async fetch(request: Request, env: Env, ctx: any): Promise<Response> {
     const url = new URL(request.url);
 
     // 1. CORS Preflight
@@ -242,67 +239,64 @@ export default {
       request.method === "GET" &&
       url.pathname === "/api/v1/onyx-bridge/stream"
     ) {
-      return handleOnyxBridgeStream(request, env);
+      return handleOnyxBridgeStream(request, env, ctx);
     }
 
     if (url.pathname === "/api/v1/onyx-bridge/draft") {
-      return handleAutoDraft(request, env);
+      return handleAutoDraft(request, env, ctx);
     }
 
     if (url.pathname === "/vector-search") {
-      return handleVectorSearch(request, env);
+      return handleVectorSearch(request, env, ctx);
     }
 
     if (url.pathname === "/api/v1/onyx/generate-suggestion") {
-      return handleGenerateSuggestion(request, env);
+      return handleGenerateSuggestion(request, env, ctx);
     }
 
     if (url.pathname === "/batch-triage") {
-      return handleBatchTriage(request, env);
+      return handleBatchTriage(request, env, ctx);
     }
 
     if (url.pathname === "/api/v1/webhooks/ticket-resolved") {
-      return handleTicketResolved(request, env);
+      return handleTicketResolved(request, env, ctx);
     }
 
     if (url.pathname === "/api/v1/webhooks/public-ingress") {
-      return handlePublicWebIngress(request, env);
+      return handlePublicWebIngress(request, env, ctx);
     }
 
     if (url.pathname === "/api/v1/webhooks/public-intake") {
-      return handlePublicWebIngress(request, env);
+      return handlePublicWebIngress(request, env, ctx);
     }
     if (url.pathname === "/webhooks/intake") {
-      return handleWebhookIntake(request, env);
+      return handleWebhookIntake(request, env, ctx);
     }
 
     if (url.pathname === "/api/v1/actions/resolve") {
-      return handleExecuteAction(request, env);
+      return handleExecuteAction(request, env, ctx);
     }
 
     if (url.pathname === "/health" || url.pathname === "/api/v1/health") {
-      return handleHealthCheck(env, request);
+      return handleHealthCheck(env, request, ctx);
     }
 
     // Default route (ticket ingestion)
-    return handleTicketIngestion(request, env);
+    return handleTicketIngestion(request, env, ctx);
   },
 };
 
 // --- Route Handlers ---
 
-async function handleTicketIngestion(
-  request: Request,
-  env: Env,
-): Promise<Response> {
+async function handleTicketIngestion(request: Request, env: Env, ctx: any): Promise<Response> {
   const supabase = createClient(
     env.SUPABASE_URL,
     env.SUPABASE_SERVICE_ROLE_KEY,
   );
   const logCtx = createLogContext(request);
-  logToEvents(supabase, logCtx, "performance_metric", "Request start", {
+  ctx.waitUntil(logToEvents(supabase, logCtx, "performance_metric", "Request start", {
     headers: request.headers,
-  }).then(() => {}, console.error);
+  }).catch(console.error));
   const startTime = Date.now();
 
   const authHeader = request.headers.get("Authorization");
@@ -314,69 +308,73 @@ async function handleTicketIngestion(
     const ticketData: any = await request.json();
     const { subject, description, customer_id } = ticketData;
 
-    const onyxAnalysis = await analyzeWithOnyx(
-      subject,
-      description,
-      env.ANTHROPIC_API_KEY,
-    );
-
     const { data: ticket, error: ticketError } = await supabase
       .from("support_tickets")
       .insert({
         subject,
         description,
         customer_id,
-        priority: onyxAnalysis.priority,
-        status: "open",
+        priority: "medium", // Default
+        status: "open", // Default
       })
       .select()
       .single();
 
     if (ticketError) throw ticketError;
 
-    supabase.from("ticket_ai_telemetry").insert({
-      ticket_id: ticket.id,
-      analyzed_sentiment: onyxAnalysis.sentiment,
-      suggested_category: onyxAnalysis.category,
-      auto_response_draft: onyxAnalysis.draft,
-      confidence_score: onyxAnalysis.confidence,
-    }).then(() => {}, console.error);
+    const response = new Response(JSON.stringify(ticket), {
+      headers: { "Content-Type": "application/json", ...getCorsHeaders(env, request) },
+    });
 
-    logEnd(supabase, logCtx, startTime);
-    return new Response(
-      JSON.stringify({ success: true, ticket_id: ticket.id }),
-      {
-        headers: {
-          "Content-Type": "application/json",
-          ...getCorsHeaders(env, request),
-        },
-      },
-    );
+    ctx.waitUntil((async () => {
+        try {
+            const onyxAnalysis = await analyzeWithOnyx(
+              subject,
+              description,
+              env.ANTHROPIC_API_KEY,
+            );
+
+            const { error: updateError } = await supabase
+              .from("support_tickets")
+              .update({
+                priority: onyxAnalysis.priority,
+              })
+              .eq("id", ticket.id);
+            if (updateError) throw updateError;
+
+            const { error: aiError } = await supabase.from("ticket_ai_telemetry").insert({
+              ticket_id: ticket.id,
+              analyzed_sentiment: onyxAnalysis.sentiment,
+              suggested_category: onyxAnalysis.category,
+              auto_response_draft: onyxAnalysis.draft,
+              confidence_score: onyxAnalysis.confidence,
+            });
+            if (aiError) console.error(aiError);
+        } catch(err) {
+            console.error("Background AI processing failed:", err);
+            logErr(supabase, logCtx, err);
+        } finally {
+            logEnd(supabase, logCtx, startTime, ctx);
+        }
+    })());
+
+    return response;
+
   } catch (error: any) {
     logErr(supabase, logCtx, error);
-
-    return new Response(JSON.stringify({ error: error instanceof Error ? error.message : String(error) }), {
-      status: 500,
-      headers: {
-        "Content-Type": "application/json",
-        ...getCorsHeaders(env, request),
-      },
-    });
+    return new Response(JSON.stringify({ error: error.message }), { status: 500, headers: getCorsHeaders(env, request) });
   }
 }
 
-async function handleVectorSearch(
-  request: Request,
-  env: Env,
-): Promise<Response> {
+async function handleVectorSearch(request: Request, env: Env, ctx: any): Promise<Response> {
   const supabase = createClient(
     env.SUPABASE_URL,
     env.SUPABASE_SERVICE_ROLE_KEY,
   );
   const logCtx = createLogContext(request);
-  logToEvents(supabase, logCtx, "performance_metric", "Request start", {
+  ctx.waitUntil(logToEvents(supabase, logCtx, "performance_metric", "Request start", {
     headers: request.headers,
-  }).then(() => {}, console.error);
+  }).catch(console.error));
   const startTime = Date.now();
 
   const authHeader = request.headers.get("Authorization");
@@ -439,7 +437,7 @@ async function handleVectorSearch(
       relevance: Math.round(item.similarity * 100),
     }));
 
-    logEnd(supabase, logCtx, startTime);
+    logEnd(supabase, logCtx, startTime, ctx);
     return new Response(JSON.stringify(results), {
       headers: {
         "Content-Type": "application/json",
@@ -453,18 +451,15 @@ async function handleVectorSearch(
   }
 }
 
-async function handleBatchTriage(
-  request: Request,
-  env: Env,
-): Promise<Response> {
+async function handleBatchTriage(request: Request, env: Env, ctx: any): Promise<Response> {
   const supabase = createClient(
     env.SUPABASE_URL,
     env.SUPABASE_SERVICE_ROLE_KEY,
   );
   const logCtx = createLogContext(request);
-  logToEvents(supabase, logCtx, "performance_metric", "Request start", {
+  ctx.waitUntil(logToEvents(supabase, logCtx, "performance_metric", "Request start", {
     headers: request.headers,
-  }).then(() => {}, console.error);
+  }).catch(console.error));
   const startTime = Date.now();
 
   const authHeader = request.headers.get("Authorization");
@@ -566,10 +561,7 @@ async function handleBatchTriage(
  * Handles tokenless public intake from web forms.
  * Enforces origin rules and tags sandbox escalation for zero-day faults.
  */
-async function handlePublicWebIngress(
-  request: Request,
-  env: Env,
-): Promise<Response> {
+async function handlePublicWebIngress(request: Request, env: Env, ctx: any): Promise<Response> {
   const contentLength = request.headers.get("content-length");
   if (contentLength && parseInt(contentLength) > 5 * 1024 * 1024) {
     return new Response(JSON.stringify({ error: "Payload exceeds maximum allowed size of 5MB." }), {
@@ -597,6 +589,10 @@ async function handlePublicWebIngress(
   newHeaders.set("Authorization", `Bearer ${env.AXIM_ONYX_SECRET}`);
   newHeaders.set("X-Axim-Default-Source", "website");
 
+  if (contentLength) {
+    newHeaders.set("content-length", contentLength);
+  }
+
   const newRequest = new Request(request.url, {
     method: request.method,
     headers: newHeaders,
@@ -604,13 +600,10 @@ async function handlePublicWebIngress(
     duplex: 'half' // Required by Cloudflare for stream passing
   } as RequestInit);
 
-  return handleWebhookIntake(newRequest, env);
+  return handleWebhookIntake(newRequest, env, ctx);
 }
 
-async function handleWebhookIntake(
-  request: Request,
-  env: Env,
-): Promise<Response> {
+async function handleWebhookIntake(request: Request, env: Env, ctx: any): Promise<Response> {
   const contentLength = request.headers.get("content-length");
   if (contentLength && parseInt(contentLength) > 5 * 1024 * 1024) {
     return new Response(JSON.stringify({ error: "Payload exceeds maximum allowed size of 5MB." }), {
@@ -624,9 +617,9 @@ async function handleWebhookIntake(
     env.SUPABASE_SERVICE_ROLE_KEY,
   );
   const logCtx = createLogContext(request);
-  logToEvents(supabase, logCtx, "performance_metric", "Request start", {
+  ctx.waitUntil(logToEvents(supabase, logCtx, "performance_metric", "Request start", {
     headers: request.headers,
-  }).then(() => {}, console.error);
+  }).catch(console.error));
   const startTime = Date.now();
 
   const clientIP = request.headers.get("CF-Connecting-IP") || "unknown";
@@ -712,108 +705,69 @@ async function handleWebhookIntake(
             },
           );
         }
-        const arrayBuffer = await file.arrayBuffer();
-        const buffer = new Uint8Array(arrayBuffer);
-        const fileExt = file.name.split(".").pop() || "bin";
-        const fileName = `${crypto.randomUUID()}.${fileExt}`;
-        const filePath = `intake/${fileName}`;
+
+        const buffer = await file.arrayBuffer();
+        attachmentBase64 = btoa(String.fromCharCode(...new Uint8Array(buffer)));
         attachmentMime = file.type;
 
-        // For small files, we can extract base64 directly to pass to Claude
-        if (
-          buffer.length < 5 * 1024 * 1024 &&
-          attachmentMime.startsWith("image/")
-        ) {
-          // < 5MB
-          attachmentBase64 = btoa(
-            String.fromCharCode.apply(null, Array.from(buffer)),
-          );
-        }
-
-        // Upload to Supabase Storage
-        normalizedData.pendingFile = { buffer, filePath, type: file.type };
+        // Store file details to upload after ticket creation
+        normalizedData.pendingFile = {
+          buffer,
+          type: file.type,
+          name: file.name,
+          filePath: `${Date.now()}_${file.name}`,
+        };
       }
     } else {
-      const rawPayload: any = await request.json();
+      // Handle standard JSON payload
+      const payload: any = await request.json();
       normalizedData = {
-        subject:
-          rawPayload.subject ||
-          rawPayload.title ||
-          rawPayload.inquiry_subject ||
-          "External Intake Webhook",
+        subject: payload.subject || payload.title || "External Intake Webhook",
         description:
-          rawPayload.description ||
-          rawPayload.body ||
-          rawPayload.message ||
-          JSON.stringify(rawPayload),
+          payload.description || payload.body || payload.message || "",
         customer_email:
-          rawPayload.customer_email || rawPayload.email || rawPayload.sender,
-        source: rawPayload.source || request.headers.get("X-Axim-Default-Source") || "webhook",
-        customer_name: rawPayload.customer_name || rawPayload.name,
-        tags: rawPayload.tags || [],
+          payload.customer_email || payload.email || payload.sender,
+        source: payload.source || request.headers.get("X-Axim-Default-Source") || "webhook",
+        customer_name: payload.customer_name || payload.name,
+        tags: payload.tags || [],
       };
     }
 
-    try {
-      WebhookIntakeSchema.parse(normalizedData);
-    } catch (zodError) {
-      if (zodError instanceof z.ZodError) {
-        return new Response(
-          JSON.stringify({
-            error: "Payload validation failed",
-            details: zodError.issues,
-          }),
-          {
-            status: 400,
-            headers: {
-              "Content-Type": "application/json",
-              ...getCorsHeaders(env, request),
-            },
-          },
-        );
-      }
-      throw zodError;
-    }
-
     if (!normalizedData.customer_email) {
-      return new Response(JSON.stringify({ error: "Missing customer email" }), {
-        status: 400,
-        headers: {
-          "Content-Type": "application/json",
-          ...getCorsHeaders(env, request),
+      return new Response(
+        JSON.stringify({ error: "Missing required field: customer_email" }),
+        {
+          status: 400,
+          headers: {
+            "Content-Type": "application/json",
+            ...getCorsHeaders(env, request),
+          },
         },
-      });
+      );
     }
 
-    // 1. Customer Upsert Logic
-    let customerId;
-    let customerTags: string[] = [];
-    const { data: existingCustomer, error: lookupError } = await supabase
+    // 1. Upsert Customer (Synchronous)
+    const { data: customerData, error: customerError } = await supabase
       .from("contacts_ax2024")
       .select("id, tags")
       .eq("email", normalizedData.customer_email)
-      .single();
+      .maybeSingle();
 
-    if (lookupError && lookupError.code !== "PGRST116") {
-      // PGRST116 is not found
-      throw lookupError;
-    }
+    if (customerError) throw customerError;
 
-    if (existingCustomer) {
-      customerId = existingCustomer.id;
-      customerTags = existingCustomer.tags || [];
-    } else {
-      // Create new customer
+    let customerId = customerData?.id;
+    let customerTags = customerData?.tags || [];
+
+    if (!customerId) {
       const { data: newCustomer, error: insertError } = await supabase
         .from("contacts_ax2024")
         .insert({
           email: normalizedData.customer_email,
-          name:
-            normalizedData.customer_name ||
-            normalizedData.customer_email.split("@")[0],
-          tags: normalizedData.tags || [],
+          name: normalizedData.customer_name || "Unknown Sender",
+          role: "customer",
+          tags: normalizedData.tags,
         })
-        .select("id, tags")
+        .select()
         .single();
 
       if (insertError) throw insertError;
@@ -821,89 +775,9 @@ async function handleWebhookIntake(
       customerTags = newCustomer.tags || [];
     }
 
-    // Analyze and insert
-    const onyxAnalysis = await analyzeWithOnyx(
-      normalizedData.subject,
-      normalizedData.description,
-      env.ANTHROPIC_API_KEY,
-      attachmentBase64,
-      attachmentMime,
-    );
-
-    let initialStatus = "open";
-    let onyxResponseDraft = onyxAnalysis.draft;
-
-    let priority = onyxAnalysis.priority;
+    // 2. Synchronous Core Ticket Creation
     let slaBreachAt = new Date();
     slaBreachAt.setHours(slaBreachAt.getHours() + 24); // Default 24h SLA
-
-    const isVIP =
-      customerTags.includes("VIP") || customerTags.includes("Enterprise");
-    if (isVIP) {
-      priority = "urgent";
-      slaBreachAt = new Date();
-      slaBreachAt.setHours(slaBreachAt.getHours() + 1); // 1h SLA for VIP
-    }
-
-    // Sentinel Logic: Run vector search and attempt deflection
-
-    let embedding = [];
-    try {
-      const embedRes = await fetch(
-        `${env.CORE_API_URL || "https://api.axim-core.internal"}/functions/v1/generate-embedding`,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${env.AXIM_SERVICE_KEY}`,
-          },
-          body: JSON.stringify({
-            input: `${normalizedData.subject} ${normalizedData.description || ""}`,
-          }),
-        },
-      );
-      if (embedRes.ok) {
-        const embedData: any = await embedRes.json();
-        if (embedData.embedding) embedding = embedData.embedding;
-      } else {
-        logErr(
-          supabase,
-          logCtx,
-          new Error("Embedding API error: " + (await embedRes.text())),
-        );
-        throw new Error("Failed to fetch embedding from Core");
-      }
-    } catch (err) {
-      logErr(supabase, logCtx, err);
-      throw new Error("Embedding generation failed");
-    }
-
-    const { data: searchResults, error: searchError } = await supabase.rpc(
-      "match_kb_articles",
-      {
-        query_embedding: embedding,
-        match_threshold: 0.5,
-        match_count: 3,
-      },
-    );
-
-    let context = "";
-    if (!searchError && searchResults && searchResults.length > 0) {
-      context = searchResults
-        .map((r: any) => `Title: ${r.title}\nContent: ${r.content}`)
-        .join("\n\n");
-    }
-
-    // If confidence > 90%, deflect
-    if (onyxAnalysis.confidence > 90) {
-      initialStatus = "pending"; // Changed to pending_user via pending status per enum
-    }
-
-    let metadata = {
-        source: normalizedData.source,
-        tags: normalizedData.tags,
-        ...(onyxAnalysis.confidence < 85 ? { requires_sandbox_escalation: true } : {})
-    };
 
     const { data: ticket, error: ticketError } = await supabase
       .from("support_tickets")
@@ -911,52 +785,21 @@ async function handleWebhookIntake(
         subject: normalizedData.subject,
         description: normalizedData.description,
         customer_id: customerId,
-        priority: priority,
+        priority: "medium", // Default priority
+        status: "open", // Default status
         sla_breach_at: slaBreachAt.toISOString(),
-        status: initialStatus,
-        metadata: metadata,
+        metadata: {
+            source: normalizedData.source,
+            tags: normalizedData.tags,
+        },
       })
       .select()
       .single();
 
     if (ticketError) throw ticketError;
 
-    // Upload attachment now that we have ticket id
-    if (normalizedData.pendingFile) {
-      const file = normalizedData.pendingFile;
-      const fullPath = `${ticket.id}/${file.filePath}`;
-      const { error: uploadError } = await supabase.storage
-        .from("ticket_attachments")
-        .upload(fullPath, file.buffer, {
-          contentType: file.type,
-          upsert: false,
-        });
-      if (uploadError) logErr(supabase, logCtx, uploadError);
-    }
-
-    if (initialStatus === "pending" && onyxResponseDraft) {
-      // Insert deflected response
-      const { error: messageError } = await supabase
-        .from("ticket_messages")
-        .insert({
-          ticket_id: ticket.id,
-          sender_id: "onyx_system", // Need to make sender_id Onyx. Update schema or use an AI id
-          message_body: onyxResponseDraft,
-          is_internal_note: false,
-        });
-      if (messageError) logErr(supabase, logCtx, messageError);
-    }
-
-    supabase.from("ticket_ai_telemetry").insert({
-      ticket_id: ticket.id,
-      analyzed_sentiment: onyxAnalysis.sentiment,
-      suggested_category: onyxAnalysis.category,
-      auto_response_draft: onyxAnalysis.draft,
-      confidence_score: onyxAnalysis.confidence,
-    }).then(() => {}, console.error);
-
-    logEnd(supabase, logCtx, startTime);
-    return new Response(
+    // 3. Immediately Return 200 OK Response
+    const response = new Response(
       JSON.stringify({ success: true, ticket_id: ticket.id }),
       {
         headers: {
@@ -965,6 +808,146 @@ async function handleWebhookIntake(
         },
       },
     );
+
+    // 4. Background AI Analysis and Database Updates
+    ctx.waitUntil((async () => {
+        try {
+            // Upload attachment now that we have ticket id
+            if (normalizedData.pendingFile) {
+              const file = normalizedData.pendingFile;
+              const fullPath = `${ticket.id}/${file.filePath}`;
+              const { error: uploadError } = await supabase.storage
+                .from("ticket_attachments")
+                .upload(fullPath, file.buffer, {
+                  contentType: file.type,
+                  upsert: false,
+                });
+              if (uploadError) logErr(supabase, logCtx, uploadError);
+            }
+
+            // Analyze and insert
+            const onyxAnalysis = await analyzeWithOnyx(
+              normalizedData.subject,
+              normalizedData.description,
+              env.ANTHROPIC_API_KEY,
+              attachmentBase64,
+              attachmentMime,
+            );
+
+            let initialStatus = "open";
+            let onyxResponseDraft = onyxAnalysis.draft;
+
+            let priority = onyxAnalysis.priority;
+            let updatedSlaBreachAt = new Date();
+            updatedSlaBreachAt.setHours(updatedSlaBreachAt.getHours() + 24); // Default 24h SLA
+
+            const isVIP = customerTags.includes("VIP") || customerTags.includes("Enterprise");
+            if (isVIP) {
+              priority = "urgent";
+              updatedSlaBreachAt = new Date();
+              updatedSlaBreachAt.setHours(updatedSlaBreachAt.getHours() + 1); // 1h SLA for VIP
+            }
+
+            // Sentinel Logic: Run vector search and attempt deflection
+            let embedding: any[] = [];
+            try {
+              const embedRes = await fetch(
+                `${env.CORE_API_URL || "https://api.axim-core.internal"}/functions/v1/generate-embedding`,
+                {
+                  method: "POST",
+                  headers: {
+                    "Content-Type": "application/json",
+                    Authorization: `Bearer ${env.AXIM_SERVICE_KEY}`,
+                  },
+                  body: JSON.stringify({
+                    input: `${normalizedData.subject} ${normalizedData.description || ""}`,
+                  }),
+                },
+              );
+              if (embedRes.ok) {
+                const embedData: any = await embedRes.json();
+                if (embedData.embedding) embedding = embedData.embedding;
+              } else {
+                logErr(supabase, logCtx, new Error("Embedding API error: " + (await embedRes.text())));
+              }
+            } catch (err) {
+              logErr(supabase, logCtx, err);
+            }
+
+            if (embedding.length > 0) {
+              const { data: searchResults, error: searchError } = await supabase.rpc(
+                "match_kb_articles",
+                {
+                  query_embedding: embedding,
+                  match_threshold: 0.5,
+                  match_count: 3,
+                },
+              );
+
+              let context = "";
+              if (!searchError && searchResults && searchResults.length > 0) {
+                context = searchResults
+                  .map((r: any) => `Title: ${r.title}\nContent: ${r.content}`)
+                  .join("\n\n");
+              }
+            }
+
+            // If confidence > 90%, deflect
+            if (onyxAnalysis.confidence > 90) {
+              initialStatus = "pending"; // Changed to pending_user via pending status per enum
+            }
+
+            let metadata = {
+                source: normalizedData.source,
+                tags: normalizedData.tags,
+                ...(onyxAnalysis.confidence < 85 ? { requires_sandbox_escalation: true } : {})
+            };
+
+            // Update the ticket
+            const { error: updateError } = await supabase
+              .from("support_tickets")
+              .update({
+                priority: priority,
+                status: initialStatus,
+                sla_breach_at: updatedSlaBreachAt.toISOString(),
+                metadata: metadata,
+              })
+              .eq("id", ticket.id);
+
+            if (updateError) throw updateError;
+
+            if (initialStatus === "pending" && onyxResponseDraft) {
+              // Insert deflected response
+              const { error: messageError } = await supabase
+                .from("ticket_messages")
+                .insert({
+                  ticket_id: ticket.id,
+                  sender_id: "onyx_system", // Need to make sender_id Onyx. Update schema or use an AI id
+                  message_body: onyxResponseDraft,
+                  is_internal_note: false,
+                });
+              if (messageError) logErr(supabase, logCtx, messageError);
+            }
+
+            const { error: aiTelemetryError } = await supabase.from("ticket_ai_telemetry").insert({
+              ticket_id: ticket.id,
+              analyzed_sentiment: onyxAnalysis.sentiment,
+              suggested_category: onyxAnalysis.category,
+              auto_response_draft: onyxAnalysis.draft,
+              confidence_score: onyxAnalysis.confidence,
+            });
+            if (aiTelemetryError) console.error(aiTelemetryError);
+
+        } catch (err) {
+            console.error("Background AI processing failed:", err);
+            logErr(supabase, logCtx, err);
+        } finally {
+            logEnd(supabase, logCtx, startTime, ctx);
+        }
+    })());
+
+    return response;
+
   } catch (error: any) {
     logErr(supabase, logCtx, error);
 
@@ -1076,19 +1059,16 @@ const ONYX_TOOLS = [
   },
 ];
 
-async function handleToolCommand(
-  request: Request,
-  env: Env,
-): Promise<Response> {
+async function handleToolCommand(request: Request, env: Env, ctx: any): Promise<Response> {
   const supabase = createClient(
     env.SUPABASE_URL,
     env.SUPABASE_SERVICE_ROLE_KEY,
   );
   const logCtx = createLogContext(request);
   const startTime = Date.now();
-  logToEvents(supabase, logCtx, "performance_metric", "Request start", {
+  ctx.waitUntil(logToEvents(supabase, logCtx, "performance_metric", "Request start", {
     headers: request.headers,
-  }).then(() => {}, console.error);
+  }).catch(console.error));
 
   const authHeader = request.headers.get("Authorization");
   if (authHeader !== `Bearer ${env.AXIM_ONYX_SECRET}`) {
@@ -1155,7 +1135,7 @@ async function handleToolCommand(
 
       if (msgError) throw msgError;
 
-      logEnd(supabase, logCtx, startTime);
+      logEnd(supabase, logCtx, startTime, ctx);
       return new Response(
         JSON.stringify({ success: true, action_proposed: true }),
         {
@@ -1169,7 +1149,7 @@ async function handleToolCommand(
 
     // Default response if no tool is used
 
-    logEnd(supabase, logCtx, startTime);
+    logEnd(supabase, logCtx, startTime, ctx);
     return new Response(
       JSON.stringify({ success: true, action_proposed: false }),
       {
@@ -1192,18 +1172,15 @@ async function handleToolCommand(
   }
 }
 
-async function handleExecuteAction(
-  request: Request,
-  env: Env,
-): Promise<Response> {
+async function handleExecuteAction(request: Request, env: Env, ctx: any): Promise<Response> {
   const supabase = createClient(
     env.SUPABASE_URL,
     env.SUPABASE_SERVICE_ROLE_KEY,
   );
   const logCtx = createLogContext(request);
-  logToEvents(supabase, logCtx, "performance_metric", "Request start", {
+  ctx.waitUntil(logToEvents(supabase, logCtx, "performance_metric", "Request start", {
     headers: request.headers,
-  }).then(() => {}, console.error);
+  }).catch(console.error));
   const startTime = Date.now();
 
   const clientIP = request.headers.get("CF-Connecting-IP") || "unknown";
@@ -1268,7 +1245,7 @@ async function handleExecuteAction(
 
     // Idempotency check
     if (hitlLog.status === "executed") {
-      logEnd(supabase, logCtx, startTime);
+      logEnd(supabase, logCtx, startTime, ctx);
       return new Response(
         JSON.stringify({
           success: true,
@@ -1341,7 +1318,7 @@ async function handleExecuteAction(
       .update({ status: "executed" })
       .eq("id", hitlLogId);
 
-    logEnd(supabase, logCtx, startTime);
+    logEnd(supabase, logCtx, startTime, ctx);
     return new Response(
       JSON.stringify({ success: true, executed: true, proxied: true }),
       {
@@ -1364,19 +1341,16 @@ async function handleExecuteAction(
   }
 }
 
-async function handleTicketResolved(
-  request: Request,
-  env: Env,
-): Promise<Response> {
+async function handleTicketResolved(request: Request, env: Env, ctx: any): Promise<Response> {
   const supabase = createClient(
     env.SUPABASE_URL,
     env.SUPABASE_SERVICE_ROLE_KEY,
   );
   const logCtx = createLogContext(request);
   const startTime = Date.now();
-  logToEvents(supabase, logCtx, "performance_metric", "Request start", {
+  ctx.waitUntil(logToEvents(supabase, logCtx, "performance_metric", "Request start", {
     headers: request.headers,
-  }).then(() => {}, console.error);
+  }).catch(console.error));
 
   // This is called via Supabase DB Webhook when a ticket status changes to 'resolved'
   // The webhook payload structure depends on Supabase, usually contains 'record' and 'old_record'
@@ -1457,7 +1431,7 @@ Applied the correct configuration and verified functionality.
       .update({ rca_generated: true })
       .eq("id", record.id);
 
-    logEnd(supabase, logCtx, startTime);
+    logEnd(supabase, logCtx, startTime, ctx);
     return new Response(
       JSON.stringify({ success: true, rca_generated: true }),
       {
@@ -1474,18 +1448,15 @@ Applied the correct configuration and verified functionality.
   }
 }
 
-async function handleOnyxBridgeStream(
-  request: Request,
-  env: Env,
-): Promise<Response> {
+async function handleOnyxBridgeStream(request: Request, env: Env, ctx: any): Promise<Response> {
   const supabase = createClient(
     env.SUPABASE_URL,
     env.SUPABASE_SERVICE_ROLE_KEY,
   );
   const logCtx = createLogContext(request);
-  logToEvents(supabase, logCtx, "performance_metric", "Request start", {
+  ctx.waitUntil(logToEvents(supabase, logCtx, "performance_metric", "Request start", {
     headers: request.headers,
-  }).then(() => {}, console.error);
+  }).catch(console.error));
   const startTime = Date.now();
 
   const url = new URL(request.url);
@@ -1595,16 +1566,16 @@ async function handleOnyxBridgeStream(
   });
 }
 
-async function handleAutoDraft(request: Request, env: Env): Promise<Response> {
+async function handleAutoDraft(request: Request, env: Env, ctx: any): Promise<Response> {
   const supabase = createClient(
     env.SUPABASE_URL,
     env.SUPABASE_SERVICE_ROLE_KEY,
   );
   const logCtx = createLogContext(request);
   const startTime = Date.now();
-  logToEvents(supabase, logCtx, "performance_metric", "Request start", {
+  ctx.waitUntil(logToEvents(supabase, logCtx, "performance_metric", "Request start", {
     headers: request.headers,
-  }).then(() => {}, console.error);
+  }).catch(console.error));
 
   const authHeader = request.headers.get("Authorization");
   if (authHeader !== `Bearer ${env.AXIM_ONYX_SECRET}`) {
@@ -1643,18 +1614,15 @@ AXiM Support (Onyx Auto-Draft)`;
   }
 }
 
-async function handleGenerateSuggestion(
-  request: Request,
-  env: Env,
-): Promise<Response> {
+async function handleGenerateSuggestion(request: Request, env: Env, ctx: any): Promise<Response> {
   const supabase = createClient(
     env.SUPABASE_URL,
     env.SUPABASE_SERVICE_ROLE_KEY,
   );
   const logCtx = createLogContext(request);
-  logToEvents(supabase, logCtx, "performance_metric", "Request start", {
+  ctx.waitUntil(logToEvents(supabase, logCtx, "performance_metric", "Request start", {
     headers: request.headers,
-  }).then(() => {}, console.error);
+  }).catch(console.error));
   const startTime = Date.now();
 
   const authHeader = request.headers.get("Authorization");
@@ -1789,7 +1757,7 @@ Draft a concise, professional reply:`;
       draft = `Based on the context:\n${contextText}\n\nWe are investigating the issue "${subject}".`;
     }
 
-    logEnd(supabase, logCtx, startTime);
+    logEnd(supabase, logCtx, startTime, ctx);
     return new Response(JSON.stringify({ draft }), {
       headers: {
         "Content-Type": "application/json",
