@@ -111,11 +111,11 @@ function logEnd(supabase: any, logCtx: any, startTime: number, ctx: any) {
   }).catch(console.error));
 }
 
-function logErr(supabase: any, logCtx: any, err: any) {
-  logToEvents(supabase, logCtx, "error", "Request error", {
+function logErr(supabase: any, logCtx: any, err: any, ctx: any) {
+  ctx?.waitUntil(logToEvents(supabase, logCtx, "error", "Request error", {
     error: err instanceof Error ? err.message : String(err),
     stack: err instanceof Error ? err.stack : "",
-  });
+  }).catch(console.error));
 }
 
 async function logToEvents(
@@ -176,7 +176,7 @@ async function handleHealthCheck(env: Env, request: Request, ctx: any): Promise<
       .limit(1);
     checks.database = !error;
   } catch (e: any) {
-    logErr(supabase, logCtx, e);
+    logErr(supabase, logCtx, e, ctx);
 
     checks.database = false;
   }
@@ -191,7 +191,7 @@ async function handleHealthCheck(env: Env, request: Request, ctx: any): Promise<
     );
     checks.coreApi = coreRes.ok;
   } catch (e: any) {
-    logErr(supabase, logCtx, e);
+    logErr(supabase, logCtx, e, ctx);
 
     checks.coreApi = false;
   }
@@ -352,7 +352,7 @@ async function handleTicketIngestion(request: Request, env: Env, ctx: any): Prom
             if (aiError) console.error(aiError);
         } catch(err) {
             console.error("Background AI processing failed:", err);
-            logErr(supabase, logCtx, err);
+            logErr(supabase, logCtx, err, ctx);
         } finally {
             logEnd(supabase, logCtx, startTime, ctx);
         }
@@ -361,7 +361,7 @@ async function handleTicketIngestion(request: Request, env: Env, ctx: any): Prom
     return response;
 
   } catch (error: any) {
-    logErr(supabase, logCtx, error);
+    logErr(supabase, logCtx, error, ctx);
     return new Response(JSON.stringify({ error: error.message }), { status: 500, headers: getCorsHeaders(env, request) });
   }
 }
@@ -406,11 +406,12 @@ async function handleVectorSearch(request: Request, env: Env, ctx: any): Promise
           supabase,
           logCtx,
           new Error("Embedding API error: " + (await embedRes.text())),
+          ctx
         );
         throw new Error("Failed to fetch embedding from Core");
       }
     } catch (err) {
-      logErr(supabase, logCtx, err);
+      logErr(supabase, logCtx, err, ctx);
       throw new Error("Embedding generation failed");
     }
 
@@ -445,7 +446,7 @@ async function handleVectorSearch(request: Request, env: Env, ctx: any): Promise
       },
     });
   } catch (e: any) {
-    logErr(supabase, logCtx, e);
+    logErr(supabase, logCtx, e, ctx);
 
     return new Response(JSON.stringify({ error: e instanceof Error ? e.message : String(e) }), { status: 500 });
   }
@@ -545,7 +546,7 @@ async function handleBatchTriage(request: Request, env: Env, ctx: any): Promise<
       },
     );
   } catch (error: any) {
-    logErr(supabase, logCtx, error);
+    logErr(supabase, logCtx, error, ctx);
 
     return new Response(JSON.stringify({ error: error instanceof Error ? error.message : String(error) }), {
       status: 500,
@@ -822,7 +823,7 @@ async function handleWebhookIntake(request: Request, env: Env, ctx: any): Promis
                   contentType: file.type,
                   upsert: false,
                 });
-              if (uploadError) logErr(supabase, logCtx, uploadError);
+              if (uploadError) logErr(supabase, logCtx, uploadError, ctx);
             }
 
             // Analyze and insert
@@ -868,10 +869,10 @@ async function handleWebhookIntake(request: Request, env: Env, ctx: any): Promis
                 const embedData: any = await embedRes.json();
                 if (embedData.embedding) embedding = embedData.embedding;
               } else {
-                logErr(supabase, logCtx, new Error("Embedding API error: " + (await embedRes.text())));
+                logErr(supabase, logCtx, new Error("Embedding API error: " + (await embedRes.text())), ctx);
               }
             } catch (err) {
-              logErr(supabase, logCtx, err);
+              logErr(supabase, logCtx, err, ctx);
             }
 
             if (embedding.length > 0) {
@@ -926,7 +927,7 @@ async function handleWebhookIntake(request: Request, env: Env, ctx: any): Promis
                   message_body: onyxResponseDraft,
                   is_internal_note: false,
                 });
-              if (messageError) logErr(supabase, logCtx, messageError);
+              if (messageError) logErr(supabase, logCtx, messageError, ctx);
             }
 
             const { error: aiTelemetryError } = await supabase.from("ticket_ai_telemetry").insert({
@@ -940,7 +941,7 @@ async function handleWebhookIntake(request: Request, env: Env, ctx: any): Promis
 
         } catch (err) {
             console.error("Background AI processing failed:", err);
-            logErr(supabase, logCtx, err);
+            logErr(supabase, logCtx, err, ctx);
         } finally {
             logEnd(supabase, logCtx, startTime, ctx);
         }
@@ -949,7 +950,7 @@ async function handleWebhookIntake(request: Request, env: Env, ctx: any): Promis
     return response;
 
   } catch (error: any) {
-    logErr(supabase, logCtx, error);
+    logErr(supabase, logCtx, error, ctx);
 
     return new Response(JSON.stringify({ error: error instanceof Error ? error.message : String(error) }), {
       status: 500,
@@ -1160,7 +1161,7 @@ async function handleToolCommand(request: Request, env: Env, ctx: any): Promise<
       },
     );
   } catch (error: any) {
-    logErr(supabase, logCtx, error);
+    logErr(supabase, logCtx, error, ctx);
 
     return new Response(JSON.stringify({ error: error instanceof Error ? error.message : String(error) }), {
       status: 500,
@@ -1329,7 +1330,7 @@ async function handleExecuteAction(request: Request, env: Env, ctx: any): Promis
       },
     );
   } catch (error: any) {
-    logErr(supabase, logCtx, error);
+    logErr(supabase, logCtx, error, ctx);
 
     return new Response(JSON.stringify({ error: error instanceof Error ? error.message : String(error) }), {
       status: 500,
@@ -1439,7 +1440,7 @@ Applied the correct configuration and verified functionality.
       },
     );
   } catch (error: any) {
-    logErr(supabase, logCtx, error);
+    logErr(supabase, logCtx, error, ctx);
 
     return new Response(JSON.stringify({ error: error instanceof Error ? error.message : String(error) }), {
       status: 500,
@@ -1549,9 +1550,9 @@ async function handleOnyxBridgeStream(request: Request, env: Env, ctx: any): Pro
 
       controller?.close();
     } catch (e: any) {
-      logErr(supabase, logCtx, e);
+      logErr(supabase, logCtx, e, ctx);
 
-      logErr(supabase, logCtx, e);
+      logErr(supabase, logCtx, e, ctx);
       controller?.error(e);
     }
   })();
@@ -1608,7 +1609,7 @@ AXiM Support (Onyx Auto-Draft)`;
       },
     });
   } catch (e: any) {
-    logErr(supabase, logCtx, e);
+    logErr(supabase, logCtx, e, ctx);
 
     return new Response(JSON.stringify({ error: e instanceof Error ? e.message : String(e) }), { status: 500 });
   }
@@ -1670,11 +1671,12 @@ async function handleGenerateSuggestion(request: Request, env: Env, ctx: any): P
           supabase,
           logCtx,
           new Error("Embedding API error: " + (await embedRes.text())),
+          ctx
         );
         throw new Error("Failed to fetch embedding from Core");
       }
     } catch (err) {
-      logErr(supabase, logCtx, err);
+      logErr(supabase, logCtx, err, ctx);
       throw new Error("Embedding generation failed");
     }
 
@@ -1742,12 +1744,14 @@ Draft a concise, professional reply:`;
             supabase,
             logCtx,
             new Error("Anthropic Error: " + (await anthropicRes.text())),
+            ctx
+
           );
           throw new Error("Anthropic API returned non-OK status.");
         }
       } catch (err: any) {
         clearTimeout(timeoutId);
-        logErr(supabase, logCtx, err);
+        logErr(supabase, logCtx, err, ctx);
 
         // Engineered fallback boundary
         draft = `[AUTO-FALLBACK: AI Generation Timeout]\n\nBased on the primary knowledge base findings, we have identified the following context for your issue:\n\n${contextText}\n\nOur support team will review this information and follow up shortly.`;
@@ -1765,7 +1769,7 @@ Draft a concise, professional reply:`;
       },
     });
   } catch (error: any) {
-    logErr(supabase, logCtx, error);
+    logErr(supabase, logCtx, error, ctx);
 
     return new Response(JSON.stringify({ error: error instanceof Error ? error.message : String(error) }), {
       status: 500,
