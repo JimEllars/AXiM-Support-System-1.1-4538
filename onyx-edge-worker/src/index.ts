@@ -164,7 +164,7 @@ async function handleHealthCheck(
   const logCtx = createLogContext(request);
   logToEvents(supabase, logCtx, "performance_metric", "Request start", {
     headers: request.headers,
-  });
+  }).then(() => {}, console.error);
   const startTime = Date.now();
 
   const checks = {
@@ -302,7 +302,7 @@ async function handleTicketIngestion(
   const logCtx = createLogContext(request);
   logToEvents(supabase, logCtx, "performance_metric", "Request start", {
     headers: request.headers,
-  });
+  }).then(() => {}, console.error);
   const startTime = Date.now();
 
   const authHeader = request.headers.get("Authorization");
@@ -334,13 +334,13 @@ async function handleTicketIngestion(
 
     if (ticketError) throw ticketError;
 
-    await supabase.from("ticket_ai_telemetry").insert({
+    supabase.from("ticket_ai_telemetry").insert({
       ticket_id: ticket.id,
       analyzed_sentiment: onyxAnalysis.sentiment,
       suggested_category: onyxAnalysis.category,
       auto_response_draft: onyxAnalysis.draft,
       confidence_score: onyxAnalysis.confidence,
-    });
+    }).then(() => {}, console.error);
 
     logEnd(supabase, logCtx, startTime);
     return new Response(
@@ -376,7 +376,7 @@ async function handleVectorSearch(
   const logCtx = createLogContext(request);
   logToEvents(supabase, logCtx, "performance_metric", "Request start", {
     headers: request.headers,
-  });
+  }).then(() => {}, console.error);
   const startTime = Date.now();
 
   const authHeader = request.headers.get("Authorization");
@@ -464,7 +464,7 @@ async function handleBatchTriage(
   const logCtx = createLogContext(request);
   logToEvents(supabase, logCtx, "performance_metric", "Request start", {
     headers: request.headers,
-  });
+  }).then(() => {}, console.error);
   const startTime = Date.now();
 
   const authHeader = request.headers.get("Authorization");
@@ -626,7 +626,7 @@ async function handleWebhookIntake(
   const logCtx = createLogContext(request);
   logToEvents(supabase, logCtx, "performance_metric", "Request start", {
     headers: request.headers,
-  });
+  }).then(() => {}, console.error);
   const startTime = Date.now();
 
   const clientIP = request.headers.get("CF-Connecting-IP") || "unknown";
@@ -947,13 +947,13 @@ async function handleWebhookIntake(
       if (messageError) logErr(supabase, logCtx, messageError);
     }
 
-    await supabase.from("ticket_ai_telemetry").insert({
+    supabase.from("ticket_ai_telemetry").insert({
       ticket_id: ticket.id,
       analyzed_sentiment: onyxAnalysis.sentiment,
       suggested_category: onyxAnalysis.category,
       auto_response_draft: onyxAnalysis.draft,
       confidence_score: onyxAnalysis.confidence,
-    });
+    }).then(() => {}, console.error);
 
     logEnd(supabase, logCtx, startTime);
     return new Response(
@@ -1086,9 +1086,9 @@ async function handleToolCommand(
   );
   const logCtx = createLogContext(request);
   const startTime = Date.now();
-  await logToEvents(supabase, logCtx, "performance_metric", "Request start", {
+  logToEvents(supabase, logCtx, "performance_metric", "Request start", {
     headers: request.headers,
-  });
+  }).then(() => {}, console.error);
 
   const authHeader = request.headers.get("Authorization");
   if (authHeader !== `Bearer ${env.AXIM_ONYX_SECRET}`) {
@@ -1203,7 +1203,7 @@ async function handleExecuteAction(
   const logCtx = createLogContext(request);
   logToEvents(supabase, logCtx, "performance_metric", "Request start", {
     headers: request.headers,
-  });
+  }).then(() => {}, console.error);
   const startTime = Date.now();
 
   const clientIP = request.headers.get("CF-Connecting-IP") || "unknown";
@@ -1374,9 +1374,9 @@ async function handleTicketResolved(
   );
   const logCtx = createLogContext(request);
   const startTime = Date.now();
-  await logToEvents(supabase, logCtx, "performance_metric", "Request start", {
+  logToEvents(supabase, logCtx, "performance_metric", "Request start", {
     headers: request.headers,
-  });
+  }).then(() => {}, console.error);
 
   // This is called via Supabase DB Webhook when a ticket status changes to 'resolved'
   // The webhook payload structure depends on Supabase, usually contains 'record' and 'old_record'
@@ -1485,7 +1485,7 @@ async function handleOnyxBridgeStream(
   const logCtx = createLogContext(request);
   logToEvents(supabase, logCtx, "performance_metric", "Request start", {
     headers: request.headers,
-  });
+  }).then(() => {}, console.error);
   const startTime = Date.now();
 
   const url = new URL(request.url);
@@ -1602,9 +1602,9 @@ async function handleAutoDraft(request: Request, env: Env): Promise<Response> {
   );
   const logCtx = createLogContext(request);
   const startTime = Date.now();
-  await logToEvents(supabase, logCtx, "performance_metric", "Request start", {
+  logToEvents(supabase, logCtx, "performance_metric", "Request start", {
     headers: request.headers,
-  });
+  }).then(() => {}, console.error);
 
   const authHeader = request.headers.get("Authorization");
   if (authHeader !== `Bearer ${env.AXIM_ONYX_SECRET}`) {
@@ -1654,7 +1654,7 @@ async function handleGenerateSuggestion(
   const logCtx = createLogContext(request);
   logToEvents(supabase, logCtx, "performance_metric", "Request start", {
     headers: request.headers,
-  });
+  }).then(() => {}, console.error);
   const startTime = Date.now();
 
   const authHeader = request.headers.get("Authorization");

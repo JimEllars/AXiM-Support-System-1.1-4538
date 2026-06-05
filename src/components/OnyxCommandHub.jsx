@@ -96,6 +96,9 @@ export default function OnyxCommandHub() {
 
   return (
     <div className="relative mb-10">
+
+
+
       <motion.div 
         animate={{ 
           borderColor: isFocused ? '#22d3ee' : '#27272a',
@@ -125,6 +128,33 @@ export default function OnyxCommandHub() {
         </div>
       </motion.div>
       
+
+      {/* AUTO-HEAL ACTION LOG (TIER 1 AUTOMATION STUBS) */}
+      <div className="mt-4 bg-black border border-zinc-800/50 rounded-2xl p-4 overflow-hidden relative">
+        <div className="absolute top-0 left-0 w-1 h-full bg-cyan-500/50"></div>
+        <div className="text-[10px] font-black text-cyan-500 uppercase tracking-widest mb-3 flex items-center gap-2">
+          <div className="w-1.5 h-1.5 rounded-full bg-cyan-500 animate-pulse"></div>
+          Tier 1 Auto-Heal Feed
+        </div>
+        <div className="font-mono text-xs text-zinc-500 space-y-1.5">
+          <div className="flex items-start gap-3">
+            <span className="text-zinc-700 shrink-0">14:02:00</span>
+            <span className="text-emerald-400">SUCCESS</span>
+            <span>Token Cache Cleared for Node 4</span>
+          </div>
+          <div className="flex items-start gap-3">
+            <span className="text-zinc-700 shrink-0">14:05:12</span>
+            <span className="text-fuchsia-400">AUTOMATED</span>
+            <span>Auto-Draft sent for Ticket #992</span>
+          </div>
+          <div className="flex items-start gap-3">
+            <span className="text-zinc-700 shrink-0">14:08:45</span>
+            <span className="text-cyan-400">ROUTING</span>
+            <span>Anomaly tracked to vector_kb for Ticket #995</span>
+          </div>
+        </div>
+      </div>
+
       <AnimatePresence>
         {isFocused && searchQuery.length > 0 && !isProcessing && (
           <motion.div 

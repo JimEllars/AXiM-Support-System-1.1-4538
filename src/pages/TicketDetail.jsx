@@ -134,6 +134,46 @@ export default function TicketDetail() {
     };
   }, [id]);
 
+
+  const handleLiftQuarantine = async () => {
+    try {
+      const { error } = await supabase.rpc('lift_node_quarantine', { ticket_id: id });
+      if (error) throw error;
+
+      const systemMessage = "SYSTEM_EXEC: Quarantine lifted and keys re-issued by " + currentAgent.name + ".";
+      const newMessage = {
+        ticket_id: id,
+        message_body: systemMessage,
+        is_internal_note: true,
+        sender_id: "system",
+      };
+
+      await supabase.from("ticket_messages").insert(newMessage);
+
+      setTicket(prev => ({
+        ...prev,
+        status: prev.status === 'quarantined' ? 'open' : prev.status,
+        metadata: { ...prev.metadata, quarantined: false }
+      }));
+
+      toast.success("Quarantine lifted successfully", {
+        style: {
+          background: "#18181b",
+          color: "#10b981",
+          border: "1px solid #047857",
+        },
+      });
+    } catch (err) {
+      toast.error("Failed to lift quarantine", {
+        style: {
+          background: "#18181b",
+          color: "#f43f5e",
+          border: "1px solid #9f1239",
+        },
+      });
+    }
+  };
+
   const handleClaimTicket = async () => {
     const { error: updateError } = await supabase
       .from("support_tickets")
@@ -328,6 +368,32 @@ export default function TicketDetail() {
   return (
     <div className="min-h-screen bg-black selection:bg-fuchsia-500/30">
       <div className="max-w-[1700px] mx-auto p-12 grid grid-cols-1 lg:grid-cols-12 gap-10">
+
+        {/* QUARANTINE BANNER */}
+        {(ticket?.status === 'quarantined' || ticket?.metadata?.quarantined) && (
+          <motion.div
+            initial={{ opacity: 0, y: -20 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="w-full bg-rose-500/10 border-2 border-rose-500/50 rounded-3xl p-6 mb-8 flex items-center justify-between shadow-[0_0_30px_rgba(244,63,94,0.2)] animate-pulse col-span-full"
+          >
+            <div className="flex items-center gap-4">
+              <div className="w-12 h-12 bg-rose-500 rounded-2xl flex items-center justify-center text-black shadow-lg">
+                <SafeIcon icon={FiAlertTriangle} className="text-2xl" />
+              </div>
+              <div>
+                <h3 className="text-rose-500 font-black text-xl tracking-widest uppercase">SYSTEM QUARANTINED</h3>
+                <p className="text-rose-400/80 font-medium text-sm">This node has been suspended by the data layer due to critical exceptions.</p>
+              </div>
+            </div>
+            <button
+              onClick={handleLiftQuarantine}
+              className="bg-rose-500 hover:bg-rose-400 text-black px-6 py-3 rounded-xl font-black text-xs uppercase tracking-widest transition-all shadow-[0_0_20px_rgba(244,63,94,0.4)]"
+            >
+              Lift Quarantine & Re-issue Keys
+            </button>
+          </motion.div>
+        )}
+
         {/* Main Workspace */}
         <div className="lg:col-span-8 space-y-8">
           <button
