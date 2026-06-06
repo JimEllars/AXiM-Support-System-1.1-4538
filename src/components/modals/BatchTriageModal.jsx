@@ -30,7 +30,6 @@ export default function BatchTriageModal({ isOpen, onClose }) {
             throw new Error(result.error || "Batch triage failed.");
         }
     } catch (e) {
-        console.error(e);
         toast.error("Onyx failed to process batch triage.");
         onClose();
     } finally {

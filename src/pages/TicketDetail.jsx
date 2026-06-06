@@ -837,38 +837,46 @@ export default function TicketDetail() {
                     </div>
                   </div>
                 </div>
-                <div className="space-y-10">
-                  <div className="bg-zinc-950/50 p-8 rounded-3xl border border-zinc-800">
-                    <label className="text-[10px] font-black text-zinc-600 uppercase tracking-[0.4em] block mb-6">
-                      Sentiment
-                    </label>
-                    <div className="flex items-center gap-5 text-3xl font-black text-white capitalize">
-                      <div className="p-3 bg-fuchsia-500/10 rounded-xl text-fuchsia-400">
-                        <SafeIcon icon={FiActivity} />
+                {(!telemetry || !telemetry.confidence_score) ? (
+                  <div className="flex items-center justify-center p-12 bg-zinc-950/50 rounded-3xl border border-zinc-800">
+                    <div className="animate-pulse text-fuchsia-400 text-xs font-black tracking-widest uppercase">
+                      Onyx Neural Processing Active...
+                    </div>
+                  </div>
+                ) : (
+                  <div className="space-y-10">
+                    <div className="bg-zinc-950/50 p-8 rounded-3xl border border-zinc-800">
+                      <label className="text-[10px] font-black text-zinc-600 uppercase tracking-[0.4em] block mb-6">
+                        Sentiment
+                      </label>
+                      <div className="flex items-center gap-5 text-3xl font-black text-white capitalize">
+                        <div className="p-3 bg-fuchsia-500/10 rounded-xl text-fuchsia-400">
+                          <SafeIcon icon={FiActivity} />
+                        </div>
+                        {telemetry.analyzed_sentiment || "Neutral"}
                       </div>
-                      {telemetry?.analyzed_sentiment || "Neutral"}
+                    </div>
+                    <div className="bg-zinc-950/50 p-8 rounded-3xl border border-zinc-800">
+                      <label className="text-[10px] font-black text-zinc-600 uppercase tracking-[0.4em] block mb-6">
+                        Confidence
+                      </label>
+                      <div className="flex items-end justify-between mb-6">
+                        <span className="text-5xl font-black text-white mono-font tracking-tighter">
+                          {telemetry.confidence_score || 0}%
+                        </span>
+                      </div>
+                      <div className="w-full bg-zinc-900 h-2.5 rounded-full overflow-hidden border border-zinc-800">
+                        <motion.div
+                          initial={{ width: 0 }}
+                          animate={{
+                            width: `${telemetry.confidence_score || 0}%`,
+                          }}
+                          className="h-full bg-gradient-to-r from-fuchsia-500 to-cyan-400 shadow-[0_0_20px_rgba(34,211,238,0.6)]"
+                        />
+                      </div>
                     </div>
                   </div>
-                  <div className="bg-zinc-950/50 p-8 rounded-3xl border border-zinc-800">
-                    <label className="text-[10px] font-black text-zinc-600 uppercase tracking-[0.4em] block mb-6">
-                      Confidence
-                    </label>
-                    <div className="flex items-end justify-between mb-6">
-                      <span className="text-5xl font-black text-white mono-font tracking-tighter">
-                        {telemetry?.confidence_score || 0}%
-                      </span>
-                    </div>
-                    <div className="w-full bg-zinc-900 h-2.5 rounded-full overflow-hidden border border-zinc-800">
-                      <motion.div
-                        initial={{ width: 0 }}
-                        animate={{
-                          width: `${telemetry?.confidence_score || 0}%`,
-                        }}
-                        className="h-full bg-gradient-to-r from-fuchsia-500 to-cyan-400 shadow-[0_0_20px_rgba(34,211,238,0.6)]"
-                      />
-                    </div>
-                  </div>
-                </div>
+                )}
               </motion.div>
               <KBSidebar
                 subject={ticket?.subject}

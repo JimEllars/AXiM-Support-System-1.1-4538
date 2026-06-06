@@ -74,7 +74,6 @@ export default function ActionProposalBlock({ hitlLogId }) {
             });
         }
     } catch (e) {
-        console.error(e);
         toast.error('Failed to update action');
         setLog({ ...log, status: 'pending' }); // Revert
     }
