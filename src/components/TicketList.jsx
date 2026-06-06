@@ -1,6 +1,6 @@
 import { onyxService } from '../services/onyxService';
 import toast from 'react-hot-toast';
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import SafeIcon from '../common/SafeIcon';
 import * as FiIcons from 'react-icons/fi';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -35,6 +35,26 @@ const SkeletonLoader = () => (
 export default function TicketList({ onSelectTicket }) {
   const { tickets, isLoading, fetchTickets, subscribeToTickets, searchQuery, selectedTicketIds, toggleSelectedTicketId } = useTicketStore();
   const [isTriaging, setIsTriaging] = useState(false);
+  const previousTicketCount = useRef(tickets.length);
+
+  // Tab notification effect
+  useEffect(() => {
+    if (tickets.length > previousTicketCount.current) {
+        document.title = "(1) New Urgent Ticket - AXiM Support";
+    }
+    previousTicketCount.current = tickets.length;
+  }, [tickets.length]);
+
+  // Reset title on focus
+  useEffect(() => {
+    const handleFocus = () => {
+        document.title = "AXiM Support System";
+        previousTicketCount.current = tickets.length;
+    };
+    window.addEventListener('focus', handleFocus);
+    return () => window.removeEventListener('focus', handleFocus);
+  }, [tickets.length]);
+
   const handleBatchTriage = async () => {
     if (selectedTicketIds.length === 0 || isTriaging) return;
     setIsTriaging(true);

@@ -24,8 +24,16 @@ function App() {
 
   useEffect(() => {
     // Check initial session
-    supabase.auth.getSession().then(({ data: { session } }) => {
+        supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session);
+      if (session?.user) {
+        supabase.from('team_profiles').upsert({
+            id: session.user.id,
+            email: session.user.email,
+            full_name: session.user.email.split('@')[0],
+            department: 'General Support'
+        }).then(() => {}, console.error);
+      }
     });
 
     // Listen for auth changes
@@ -34,9 +42,16 @@ function App() {
     } = supabase.auth.onAuthStateChange((event, session) => {
       setSession(session);
 
-      if (event === 'SIGNED_OUT') {
+            if (event === 'SIGNED_OUT') {
         useAuthStore.getState().signOut();
         useTicketStore.setState({ tickets: [], selectedTicketIds: [] });
+      } else if (session?.user) {
+        supabase.from('team_profiles').upsert({
+            id: session.user.id,
+            email: session.user.email,
+            full_name: session.user.email.split('@')[0],
+            department: 'General Support'
+        }).then(() => {}, console.error);
       }
     });
 
