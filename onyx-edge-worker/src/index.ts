@@ -207,7 +207,68 @@ async function handleHealthCheck(env: Env, request: Request, ctx: any): Promise<
   );
 }
 
+
+async function handleSLASweep(env: Env) {
+  try {
+    const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
+    const now = new Date().toISOString();
+
+    const { data: breachedTickets, error: fetchError } = await supabase
+      .from('support_tickets')
+      .select('id')
+      .in('status', ['open', 'pending'])
+      .lt('sla_breach_at', now);
+
+    if (fetchError) {
+      console.error('[handleSLASweep] Error fetching breached tickets:', fetchError);
+      return;
+    }
+
+    if (!breachedTickets || breachedTickets.length === 0) {
+      console.log('[handleSLASweep] No breached tickets found.');
+      return;
+    }
+
+    console.log(`[handleSLASweep] Found ${breachedTickets.length} breached tickets. Escalating...`);
+
+    for (const ticket of breachedTickets) {
+      // Escalate priority
+      const { error: updateError } = await supabase
+        .from('support_tickets')
+        .update({ priority: 'urgent' })
+        .eq('id', ticket.id);
+
+      if (updateError) {
+        console.error(`[handleSLASweep] Error updating ticket ${ticket.id}:`, updateError);
+        continue;
+      }
+
+      // Inject system message
+      const { error: messageError } = await supabase
+        .from('ticket_messages')
+        .insert({
+          ticket_id: ticket.id,
+          sender_id: 'system',
+          sender_type: 'system',
+          content: 'SYSTEM ALERT: SLA Breached. Ticket automatically escalated to URGENT priority.',
+          is_internal: true
+        });
+
+      if (messageError) {
+        console.error(`[handleSLASweep] Error inserting message for ticket ${ticket.id}:`, messageError);
+      }
+    }
+
+    console.log('[handleSLASweep] SLA sweep completed successfully.');
+  } catch (error) {
+    console.error('[handleSLASweep] Unhandled exception in SLA sweep:', error);
+  }
+}
+
 export default {
+  async scheduled(event: ScheduledEvent, env: Env, ctx: any) {
+    ctx.waitUntil(handleSLASweep(env));
+  },
   async fetch(request: Request, env: Env, ctx: any): Promise<Response> {
     const url = new URL(request.url);
 

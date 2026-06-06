@@ -16,3 +16,6 @@ SUPABASE_URL = "https://your-supabase-project.supabase.co"
 # - AXIM_ONYX_SECRET
 # - ANTHROPIC_API_KEY
 # - AXIM_SERVICE_KEY
+
+[triggers]
+crons = ["*/5 * * * *"]
