@@ -61,16 +61,12 @@ export default function TicketDetail() {
     color: 'bg-cyan-500',
   };
 
-  const [teamMembers, setTeamMembers] = useState([
-    { id: "1", name: "Ada Lovelace", role: "admin" },
-    { id: "2", name: "Alan Turing", role: "support" },
-    { id: "3", name: "Grace Hopper", role: "support" },
-  ]);
+    const [teamMembers, setTeamMembers] = useState([]);
 
   useEffect(() => {
     const fetchDetails = async () => {
       setLoading(true);
-      const [ticketRes, msgsRes, telemRes, attachmentsRes] = await Promise.all([
+            const [ticketRes, msgsRes, telemRes, attachmentsRes, teamProfilesRes] = await Promise.all([
         supabase
           .from("support_tickets")
           .select("*, contacts_ax2024(*)")
@@ -86,12 +82,20 @@ export default function TicketDetail() {
           .select("*")
           .eq("ticket_id", id)
           .single(),
-        supabase.storage.from('ticket_attachments').list(id + '/intake')
+        supabase.storage.from('ticket_attachments').list(id + '/intake'),
+        supabase.from("team_profiles").select("*")
       ]);
 
       if (ticketRes.data) setTicket(ticketRes.data);
       if (msgsRes.data) setMessages(msgsRes.data);
       if (attachmentsRes.data) setAttachments(attachmentsRes.data);
+      if (teamProfilesRes.data) {
+        setTeamMembers(teamProfilesRes.data.map(profile => ({
+          id: profile.id,
+          name: profile.full_name || profile.email,
+          role: profile.department
+        })));
+      }
       if (telemRes.data) {
         setTelemetry(telemRes.data);
       } else if (ticketRes.data) {
