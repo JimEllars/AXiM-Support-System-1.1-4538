@@ -1,45 +1,74 @@
-import React, { useMemo, useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import ReactECharts from 'echarts-for-react';
-import { useTicketStore } from '../../store/useTicketStore';
+import { supabase } from '../../lib/supabaseClient';
 import { onyxService } from '../../services/onyxService';
 
 export default function SupportMetrics() {
-  const { tickets } = useTicketStore();
+  const [metrics, setMetrics] = useState({
+    activeQueue: 0,
+    escalations: 0,
+    aiDeflectionRate: 0,
+    volumeTrend: [0,0,0,0,0,0,0]
+  });
 
-  const metrics = useMemo(() => {
-    if (!tickets || tickets.length === 0) return { resolutionRate: 0, avgHandleTime: 0, volumeTrend: [0,0,0,0,0,0,0] };
-
-    const resolvedTickets = tickets.filter(t => t.status === 'resolved' || t.status === 'closed');
-    const resolutionRate = (resolvedTickets.length / tickets.length) * 100;
-
-    // Mock avg handle time logic - in real app, we'd subtract closed_at from created_at
-    const avgHandleTime = resolvedTickets.length > 0 ? 14 : 0;
-
-    // Mock trend
-    const volumeTrend = [
-        Math.floor(Math.random() * 50) + 50,
-        Math.floor(Math.random() * 50) + 100,
-        Math.floor(Math.random() * 50) + 120,
-        Math.floor(Math.random() * 50) + 80,
-        Math.floor(Math.random() * 50) + 90,
-        tickets.length,
-        Math.floor(Math.random() * 50) + 110,
-    ];
-
-    return {
-        resolutionRate: resolutionRate.toFixed(1),
-        avgHandleTime,
-        volumeTrend,
-        onyxAutomationPercentage: 85.4 // Simulated Onyx contribution
-    };
-  }, [tickets]);
-
-  // Sync to Core daily (simulated on mount for demo purposes)
   useEffect(() => {
-    if (metrics.resolutionRate > 0) {
-        onyxService.syncTelemetryToCore(metrics).catch(() => {});
+    let isMounted = true;
+
+    async function fetchMetrics() {
+      try {
+        // Active Queue Size
+        const { count: openCount } = await supabase
+          .from('support_tickets')
+          .select('*', { count: 'exact', head: true })
+          .eq('status', 'open');
+
+        // Escalations
+        const { count: escalatedCount } = await supabase
+          .from('support_tickets')
+          .select('*', { count: 'exact', head: true })
+          .eq('priority', 'escalated');
+
+        // AI Deflection Rate
+        // 1. Total tickets in last 24h
+        const yesterday = new Date();
+        yesterday.setDate(yesterday.getDate() - 1);
+        const yesterdayIso = yesterday.toISOString();
+
+        const { count: totalRecent } = await supabase
+          .from('support_tickets')
+          .select('*', { count: 'exact', head: true })
+          .gte('created_at', yesterdayIso);
+
+        // 2. Deflected tickets in last 24h
+        const { count: deflectedCount } = await supabase
+          .from('ticket_ai_telemetry')
+          .select('*', { count: 'exact', head: true })
+          .gte('created_at', yesterdayIso)
+          .gt('confidence_score', 90);
+
+        const aiRate = totalRecent > 0 && deflectedCount !== null
+          ? ((deflectedCount / totalRecent) * 100).toFixed(1)
+          : 0;
+
+        if (isMounted) {
+          setMetrics({
+            activeQueue: openCount || 0,
+            escalations: escalatedCount || 0,
+            aiDeflectionRate: aiRate,
+            volumeTrend: [10, 20, 15, 30, 25, openCount || 0, 5] // Mock trend for now
+          });
+        }
+      } catch (error) {
+        console.error("Failed to fetch live metrics:", error);
+      }
     }
-  }, [metrics]);
+
+    fetchMetrics();
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
 
   const option = {
     backgroundColor: 'transparent',
@@ -77,24 +106,26 @@ export default function SupportMetrics() {
   return (
     <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
       <div className="glass-panel p-6 rounded-2xl">
-        <p className="text-zinc-500 text-xs font-bold uppercase tracking-widest">Resolution Rate</p>
-        <h3 className="text-3xl font-black text-emerald-400 mt-2">{metrics.resolutionRate}%</h3>
-        <div className="mt-2 text-[10px] text-zinc-500 font-medium">SYSTEM OPTIMIZED</div>
+        <p className="text-zinc-500 text-xs font-bold uppercase tracking-widest">Active Queue</p>
+        <h3 className="text-3xl font-black text-cyan-400 mt-2">{metrics.activeQueue}</h3>
+        <div className="mt-2 text-[10px] text-cyan-500/80 font-medium tracking-widest">OPEN CASES</div>
       </div>
       
-      <div className="glass-panel p-6 rounded-2xl border-l-2 border-l-fuchsia-500/50">
-        <p className="text-zinc-500 text-xs font-bold uppercase tracking-widest">Avg Response</p>
-        <h3 className="text-3xl font-black text-fuchsia-500 mt-2">{metrics.avgHandleTime}<span className="text-lg">m</span></h3>
-        <div className="mt-2 text-[10px] text-fuchsia-400/80 font-bold flex items-center gap-1">
-          <div className="w-1.5 h-1.5 rounded-full bg-fuchsia-500 animate-pulse" />
-          ONYX ACTIVE ({metrics.onyxAutomationPercentage}%)
+      <div className="glass-panel p-6 rounded-2xl border-l-2 border-l-rose-500/50">
+        <p className="text-zinc-500 text-xs font-bold uppercase tracking-widest">Escalations</p>
+        <h3 className="text-3xl font-black text-rose-500 mt-2">{metrics.escalations}</h3>
+        <div className="mt-2 text-[10px] text-rose-500/80 font-medium tracking-widest flex items-center gap-1">
+          <div className="w-1.5 h-1.5 rounded-full bg-rose-500 animate-pulse" />
+          REQUIRES ATTENTION
         </div>
       </div>
 
-      <div className="glass-panel p-6 rounded-2xl">
-        <p className="text-zinc-500 text-xs font-bold uppercase tracking-widest mb-2">Volume Trend</p>
-        <div className="h-[60px]">
-          <ReactECharts option={option} style={{ height: '100%', width: '100%' }} />
+      <div className="glass-panel p-6 rounded-2xl border-l-2 border-l-fuchsia-500/50">
+        <p className="text-zinc-500 text-xs font-bold uppercase tracking-widest">AI Deflection</p>
+        <h3 className="text-3xl font-black text-fuchsia-400 mt-2">{metrics.aiDeflectionRate}%</h3>
+        <div className="mt-2 text-[10px] text-fuchsia-400/80 font-bold flex items-center gap-1 tracking-widest">
+          <div className="w-1.5 h-1.5 rounded-full bg-fuchsia-500 animate-pulse" />
+          ONYX AUTOMATION 24H
         </div>
       </div>
     </div>

@@ -94,16 +94,9 @@ export default function TicketList({ onSelectTicket }) {
     fetchTickets();
     const unsubscribe = subscribeToTickets();
 
-    // Poll for new tickets every 30 seconds to catch public ingress
-    const intervalId = setInterval(() => {
-        if (!isTriaging) {
-            fetchTickets();
-        }
-    }, 30000);
 
     return () => {
       unsubscribe();
-      clearInterval(intervalId);
     };
   }, [isTriaging, fetchTickets]);
 
