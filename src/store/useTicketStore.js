@@ -80,7 +80,6 @@ export const useTicketStore = create((set, get) => ({
 
       set({ tickets: data || [], isLoading: false });
     } catch (error) {
-      console.error(error);
       toast.error("Failed to synchronize queue: " + error.message, {
         style: {
           background: "#18181b",

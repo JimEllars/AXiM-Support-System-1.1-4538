@@ -108,14 +108,14 @@ function logEnd(supabase: any, logCtx: any, startTime: number, ctx: any) {
   const duration = Date.now() - startTime;
   ctx.waitUntil(logToEvents(supabase, logCtx, "performance_metric", "Request end", {
     execution_time_ms: duration,
-  }).catch(console.error));
+  }).catch(() => {}));
 }
 
 function logErr(supabase: any, logCtx: any, err: any, ctx: any) {
   ctx?.waitUntil(logToEvents(supabase, logCtx, "error", "Request error", {
     error: err instanceof Error ? err.message : String(err),
     stack: err instanceof Error ? err.stack : "",
-  }).catch(console.error));
+  }).catch(() => {}));
 }
 
 async function logToEvents(
@@ -125,14 +125,6 @@ async function logToEvents(
   message: string,
   metadata?: any,
 ) {
-  console.log(
-    JSON.stringify({
-      level: type === "error" ? "ERROR" : "INFO",
-      ...context,
-      message,
-      metadata,
-    }),
-  );
   await supabase.from("events_ax2024").insert({
     type: type,
     payload: {
@@ -161,7 +153,7 @@ async function handleHealthCheck(env: Env, request: Request, ctx: any): Promise<
   const logCtx = createLogContext(request);
   ctx.waitUntil(logToEvents(supabase, logCtx, "performance_metric", "Request start", {
     headers: request.headers,
-  }).catch(console.error));
+  }).catch(() => {}));
   const startTime = Date.now();
 
   const checks = {
@@ -296,7 +288,7 @@ async function handleTicketIngestion(request: Request, env: Env, ctx: any): Prom
   const logCtx = createLogContext(request);
   ctx.waitUntil(logToEvents(supabase, logCtx, "performance_metric", "Request start", {
     headers: request.headers,
-  }).catch(console.error));
+  }).catch(() => {}));
   const startTime = Date.now();
 
   const authHeader = request.headers.get("Authorization");
@@ -349,9 +341,8 @@ async function handleTicketIngestion(request: Request, env: Env, ctx: any): Prom
               auto_response_draft: onyxAnalysis.draft,
               confidence_score: onyxAnalysis.confidence,
             });
-            if (aiError) console.error(aiError);
+
         } catch(err) {
-            console.error("Background AI processing failed:", err);
             logErr(supabase, logCtx, err, ctx);
         } finally {
             logEnd(supabase, logCtx, startTime, ctx);
@@ -374,7 +365,7 @@ async function handleVectorSearch(request: Request, env: Env, ctx: any): Promise
   const logCtx = createLogContext(request);
   ctx.waitUntil(logToEvents(supabase, logCtx, "performance_metric", "Request start", {
     headers: request.headers,
-  }).catch(console.error));
+  }).catch(() => {}));
   const startTime = Date.now();
 
   const authHeader = request.headers.get("Authorization");
@@ -460,7 +451,7 @@ async function handleBatchTriage(request: Request, env: Env, ctx: any): Promise<
   const logCtx = createLogContext(request);
   ctx.waitUntil(logToEvents(supabase, logCtx, "performance_metric", "Request start", {
     headers: request.headers,
-  }).catch(console.error));
+  }).catch(() => {}));
   const startTime = Date.now();
 
   const authHeader = request.headers.get("Authorization");
@@ -620,7 +611,7 @@ async function handleWebhookIntake(request: Request, env: Env, ctx: any): Promis
   const logCtx = createLogContext(request);
   ctx.waitUntil(logToEvents(supabase, logCtx, "performance_metric", "Request start", {
     headers: request.headers,
-  }).catch(console.error));
+  }).catch(() => {}));
   const startTime = Date.now();
 
   const clientIP = request.headers.get("CF-Connecting-IP") || "unknown";
@@ -937,10 +928,9 @@ async function handleWebhookIntake(request: Request, env: Env, ctx: any): Promis
               auto_response_draft: onyxAnalysis.draft,
               confidence_score: onyxAnalysis.confidence,
             });
-            if (aiTelemetryError) console.error(aiTelemetryError);
+
 
         } catch (err) {
-            console.error("Background AI processing failed:", err);
             logErr(supabase, logCtx, err, ctx);
         } finally {
             logEnd(supabase, logCtx, startTime, ctx);
@@ -1022,7 +1012,6 @@ async function analyzeWithOnyx(
     clearTimeout(timeoutId);
 
     if (!response.ok) {
-      console.error("Anthropic API error:", await response.text());
       return defaultFallback;
     }
 
@@ -1040,7 +1029,6 @@ async function analyzeWithOnyx(
       confidence: parsed.confidence || defaultFallback.confidence,
     };
   } catch (error) {
-    console.error("Failed to analyze with Onyx, using fallback:", error);
     return defaultFallback;
   }
 }
@@ -1104,7 +1092,7 @@ async function handleToolCommand(request: Request, env: Env, ctx: any): Promise<
   const startTime = Date.now();
   ctx.waitUntil(logToEvents(supabase, logCtx, "performance_metric", "Request start", {
     headers: request.headers,
-  }).catch(console.error));
+  }).catch(() => {}));
 
   const authHeader = request.headers.get("Authorization");
   if (authHeader !== `Bearer ${env.AXIM_ONYX_SECRET}`) {
@@ -1216,7 +1204,7 @@ async function handleExecuteAction(request: Request, env: Env, ctx: any): Promis
   const logCtx = createLogContext(request);
   ctx.waitUntil(logToEvents(supabase, logCtx, "performance_metric", "Request start", {
     headers: request.headers,
-  }).catch(console.error));
+  }).catch(() => {}));
   const startTime = Date.now();
 
   const clientIP = request.headers.get("CF-Connecting-IP") || "unknown";
@@ -1386,7 +1374,7 @@ async function handleTicketResolved(request: Request, env: Env, ctx: any): Promi
   const startTime = Date.now();
   ctx.waitUntil(logToEvents(supabase, logCtx, "performance_metric", "Request start", {
     headers: request.headers,
-  }).catch(console.error));
+  }).catch(() => {}));
 
   // This is called via Supabase DB Webhook when a ticket status changes to 'resolved'
   // The webhook payload structure depends on Supabase, usually contains 'record' and 'old_record'
@@ -1453,14 +1441,12 @@ async function handleTicketResolved(request: Request, env: Env, ctx: any): Promi
       clearTimeout(timeoutId);
 
       if (!response.ok) {
-        console.error("Anthropic API error for RCA:", await response.text());
         throw new Error("Failed to generate RCA");
       }
 
       const data: any = await response.json();
       rcaMarkdown = data.content[0].text;
     } catch (error) {
-      console.error("Failed to generate RCA with Anthropic, using fallback:", error);
       rcaMarkdown = `
 # Root Cause Analysis: ${record.subject}
 
@@ -1530,7 +1516,7 @@ async function handleOnyxBridgeStream(request: Request, env: Env, ctx: any): Pro
   const logCtx = createLogContext(request);
   ctx.waitUntil(logToEvents(supabase, logCtx, "performance_metric", "Request start", {
     headers: request.headers,
-  }).catch(console.error));
+  }).catch(() => {}));
   const startTime = Date.now();
 
   const url = new URL(request.url);
@@ -1649,7 +1635,7 @@ async function handleAutoDraft(request: Request, env: Env, ctx: any): Promise<Re
   const startTime = Date.now();
   ctx.waitUntil(logToEvents(supabase, logCtx, "performance_metric", "Request start", {
     headers: request.headers,
-  }).catch(console.error));
+  }).catch(() => {}));
 
   const authHeader = request.headers.get("Authorization");
   if (authHeader !== `Bearer ${env.AXIM_ONYX_SECRET}`) {
@@ -1696,7 +1682,7 @@ async function handleGenerateSuggestion(request: Request, env: Env, ctx: any): P
   const logCtx = createLogContext(request);
   ctx.waitUntil(logToEvents(supabase, logCtx, "performance_metric", "Request start", {
     headers: request.headers,
-  }).catch(console.error));
+  }).catch(() => {}));
   const startTime = Date.now();
 
   const authHeader = request.headers.get("Authorization");

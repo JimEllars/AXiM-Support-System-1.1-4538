@@ -64,7 +64,6 @@ export default function TicketList({ onSelectTicket }) {
             id: toastId,
             style: { background: '#18181b', color: '#f43f5e', border: '1px solid #9f1239' }
         });
-        console.error("Batch triage error:", error);
     } finally {
         setIsTriaging(false);
     }

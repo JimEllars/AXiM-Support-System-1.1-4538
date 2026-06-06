@@ -42,7 +42,6 @@ export const onyxService = {
         });
         return await response.json();
     } catch (e) {
-        console.error("Failed to generate auto-draft:", e);
         return { draft: "Failed to generate draft." };
     }
   },
@@ -65,7 +64,6 @@ export const onyxService = {
         });
         return response.json();
     } catch (e) {
-        console.error("Vector search failed:", e);
         return [];
     }
   },
@@ -95,7 +93,6 @@ export const onyxService = {
           if (error) throw error;
           return { success: true };
       } catch (e) {
-          console.error("Failed to sync telemetry:", e);
           return { success: false, error: e };
       }
   },
@@ -112,9 +109,7 @@ export const onyxService = {
             if (data.action_proposed) {
                  return { intent: 'TOOL_PROPOSAL', success: true };
             }
-        } catch (e) {
-            console.error("Tool command failed:", e);
-        }
+        } catch (e) { /* silent catch */ }
     }
     const q = query.toLowerCase();
     return new Promise(resolve => {

@@ -73,12 +73,14 @@ function App() {
     let timeout;
 
     const logoutUser = () => {
-      useAuthStore.getState().signOut();
-      useTicketStore.setState({ tickets: [], selectedTicketIds: [] });
-      import('react-hot-toast').then(({ default: toast }) => {
-        toast("Session expired due to inactivity.");
-      });
-      // We rely on the ProtectedRoute to redirect to /login when session is gone
+      const { session, signOut } = useAuthStore.getState();
+      if (session) {
+        signOut();
+        useTicketStore.setState({ tickets: [], selectedTicketIds: [] });
+        import('react-hot-toast').then(({ default: toast }) => {
+          toast.error("Session expired due to inactivity.");
+        });
+      }
     };
 
     const resetTimer = () => {

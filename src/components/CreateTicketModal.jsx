@@ -22,9 +22,7 @@ export default function CreateTicketModal({ isOpen, onClose, onSuccess }) {
       });
       onSuccess();
       onClose();
-    } catch (err) {
-      console.error(err);
-    } finally {
+    } catch (err) { /* silent catch */ } finally {
       setLoading(false);
     }
   };

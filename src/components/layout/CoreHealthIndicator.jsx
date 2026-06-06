@@ -18,14 +18,11 @@ export default function CoreHealthIndicator() {
           const data = await res.json();
           setIsOnline(data.status === 'healthy' || data.status === 'degraded');
 
-          if (data.status === 'degraded') {
-            console.warn('[CoreHealth] System degraded:', data.checks);
-          }
+          if (data.status === 'degraded') { /* silent block */ }
         } else {
           setIsOnline(false);
         }
       } catch (error) {
-        console.error('[CoreHealth] Health check failed:', error);
         setIsOnline(false);
       }
     };

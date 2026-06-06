@@ -37,7 +37,7 @@ export default function SupportMetrics() {
   // Sync to Core daily (simulated on mount for demo purposes)
   useEffect(() => {
     if (metrics.resolutionRate > 0) {
-        onyxService.syncTelemetryToCore(metrics).catch(console.error);
+        onyxService.syncTelemetryToCore(metrics).catch(() => {});
     }
   }, [metrics]);
 
