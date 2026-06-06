@@ -69,6 +69,35 @@ function App() {
     return () => window.removeEventListener('keydown', handleKeyPress);
   }, []);
 
+  useEffect(() => {
+    let timeout;
+
+    const logoutUser = () => {
+      useAuthStore.getState().signOut();
+      useTicketStore.setState({ tickets: [], selectedTicketIds: [] });
+      import('react-hot-toast').then(({ default: toast }) => {
+        toast("Session expired due to inactivity.");
+      });
+      // We rely on the ProtectedRoute to redirect to /login when session is gone
+    };
+
+    const resetTimer = () => {
+      clearTimeout(timeout);
+      timeout = setTimeout(logoutUser, 15 * 60 * 1000); // 15 minutes
+    };
+
+    const events = ['mousemove', 'keydown', 'mousedown', 'touchstart'];
+    events.forEach(event => window.addEventListener(event, resetTimer));
+
+    // Initialize timer
+    resetTimer();
+
+    return () => {
+      clearTimeout(timeout);
+      events.forEach(event => window.removeEventListener(event, resetTimer));
+    };
+  }, []);
+
   return (
     <QueryClientProvider client={queryClient}>
       <BrowserRouter>

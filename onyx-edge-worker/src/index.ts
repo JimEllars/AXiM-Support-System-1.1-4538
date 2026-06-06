@@ -971,43 +971,78 @@ async function analyzeWithOnyx(
   imageBase64?: string | null,
   imageMime?: string | null,
 ) {
-  // Stubbed logic for AXiM Triage, would call Claude here with image if present
-  // Claude 3 API payload example:
-  /*
-    const messages = [
-        {
-            role: 'user',
-            content: [
-                { type: 'text', text: `Subject: ${subject}\nDescription: ${description}` }
-            ]
-        }
-    ];
-    if (imageBase64 && imageMime) {
-        messages[0].content.push({
-            type: 'image',
-            source: {
-                type: 'base64',
-                media_type: imageMime,
-                data: imageBase64
-            }
-        });
-    }
-  */
-
-  return {
-    priority: description.toLowerCase().includes("urgent")
-      ? "urgent"
-      : "medium",
-    sentiment: description.toLowerCase().includes("angry")
-      ? "negative"
-      : "neutral",
+  const defaultFallback = {
+    priority: description.toLowerCase().includes("urgent") ? "urgent" : "medium",
+    sentiment: description.toLowerCase().includes("angry") ? "negative" : "neutral",
     category: "technical_support",
-    draft:
-      "Hello, Onyx AI has received your request regarding " +
-      subject +
-      ". A human agent will be with you shortly.",
-    confidence: Math.floor(Math.random() * 20) + 80, // 80-99
+    draft: "Hello, Onyx AI has received your request regarding " + subject + "\n\nWe are analyzing the issue.",
+    confidence: 50,
   };
+
+  try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 15000);
+
+    const messages = [
+      {
+        role: "user",
+        content: [
+          { type: "text", text: `Subject: ${subject}\nDescription: ${description}` }
+        ] as any[]
+      }
+    ];
+
+    if (imageBase64 && imageMime) {
+      messages[0].content.push({
+        type: "image",
+        source: {
+          type: "base64",
+          media_type: imageMime,
+          data: imageBase64
+        }
+      });
+    }
+
+    const response = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "x-api-key": apiKey,
+        "anthropic-version": "2023-06-01",
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        model: "claude-3-haiku-20240307",
+        max_tokens: 1024,
+        system: "You are the AXiM Support Triage AI. You MUST return your response STRICTLY as a stringified JSON object matching this exact schema:\n{\n  \"priority\": \"low\" | \"medium\" | \"high\" | \"urgent\",\n  \"sentiment\": \"positive\" | \"neutral\" | \"negative\",\n  \"category\": \"string\",\n  \"draft\": \"string\",\n  \"confidence\": number\n}",
+        messages: messages
+      }),
+      signal: controller.signal
+    });
+
+    clearTimeout(timeoutId);
+
+    if (!response.ok) {
+      console.error("Anthropic API error:", await response.text());
+      return defaultFallback;
+    }
+
+    const data: any = await response.json();
+    let textRes = data.content[0].text;
+    textRes = textRes.replace(/```json/g, '').replace(/```/g, '').trim();
+
+    const parsed = JSON.parse(textRes);
+
+    return {
+      priority: parsed.priority || defaultFallback.priority,
+      sentiment: parsed.sentiment || defaultFallback.sentiment,
+      category: parsed.category || defaultFallback.category,
+      draft: parsed.draft || defaultFallback.draft,
+      confidence: parsed.confidence || defaultFallback.confidence,
+    };
+  } catch (error) {
+    console.error("Failed to analyze with Onyx, using fallback:", error);
+    return defaultFallback;
+  }
 }
 
 const ONYX_TOOLS = [
@@ -1265,7 +1300,7 @@ async function handleExecuteAction(request: Request, env: Env, ctx: any): Promis
 
     // Step 1: The AXiM Core API Proxy Handshake
     // Proxy the request through the AXiM Core Ecosystem Vault
-    console.log(`Proxying execution of ${hitlLog.tool_type} to AXiM Core`);
+
 
     const coreProxyUrl = env.CORE_API_URL
       ? `${env.CORE_API_URL}/functions/v1/api-proxy`
@@ -1388,8 +1423,45 @@ async function handleTicketResolved(request: Request, env: Env, ctx: any): Promi
         .join("\n") || "";
 
     // Call Claude 3 Haiku for RCA
-    // Mock RCA generation:
-    const rcaMarkdown = `
+    // Call Claude 3 Haiku for RCA
+    let rcaMarkdown = "";
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 15000);
+
+      const response = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: {
+          "x-api-key": env.ANTHROPIC_API_KEY,
+          "anthropic-version": "2023-06-01",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          model: "claude-3-haiku-20240307",
+          max_tokens: 2000,
+          system: "You are an expert technical support engineer. You write professional Root Cause Analysis (RCA) documents in Markdown format.",
+          messages: [
+            {
+              role: "user",
+              content: `Please generate a comprehensive Root Cause Analysis for the following ticket.\n\nSubject: ${record.subject}\n\nThread History:\n${threadText}\n\nThe output MUST be entirely in Markdown format.`
+            }
+          ]
+        }),
+        signal: controller.signal
+      });
+
+      clearTimeout(timeoutId);
+
+      if (!response.ok) {
+        console.error("Anthropic API error for RCA:", await response.text());
+        throw new Error("Failed to generate RCA");
+      }
+
+      const data: any = await response.json();
+      rcaMarkdown = data.content[0].text;
+    } catch (error) {
+      console.error("Failed to generate RCA with Anthropic, using fallback:", error);
+      rcaMarkdown = `
 # Root Cause Analysis: ${record.subject}
 
 ## Problem
@@ -1404,6 +1476,7 @@ Configuration error in the core system.
 ## Resolution
 Applied the correct configuration and verified functionality.
 `;
+    }
 
     // 1. Push to AXiM Core memory_banks (Ecosystem Fusion)
     await supabase.from("memory_banks").insert({
