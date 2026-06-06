@@ -42,6 +42,7 @@ export default function TicketDetail() {
   const [isInvestigating, setIsInvestigating] = useState(false);
   const [reply, setReply] = useState("");
   const [isInternal, setIsInternal] = useState(false);
+  const [isLifting, setIsLifting] = useState(false);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState("intelligence");
   const [showMentionMenu, setShowMentionMenu] = useState(false);
@@ -140,6 +141,8 @@ export default function TicketDetail() {
 
 
   const handleLiftQuarantine = async () => {
+    if (isLifting) return;
+    setIsLifting(true);
     try {
       const { error } = await supabase.rpc('lift_node_quarantine', { ticket_id: id });
       if (error) throw error;
@@ -160,6 +163,7 @@ export default function TicketDetail() {
         metadata: { ...prev.metadata, quarantined: false }
       }));
 
+      setIsLifting(false);
       toast.success("Quarantine lifted successfully", {
         style: {
           background: "#18181b",
@@ -168,6 +172,7 @@ export default function TicketDetail() {
         },
       });
     } catch (err) {
+      setIsLifting(false);
       toast.error("Failed to lift quarantine", {
         style: {
           background: "#18181b",
@@ -391,9 +396,10 @@ export default function TicketDetail() {
             </div>
             <button
               onClick={handleLiftQuarantine}
-              className="bg-rose-500 hover:bg-rose-400 text-black px-6 py-3 rounded-xl font-black text-xs uppercase tracking-widest transition-all shadow-[0_0_20px_rgba(244,63,94,0.4)]"
+              disabled={isLifting}
+              className={`bg-rose-500 hover:bg-rose-400 text-black px-6 py-3 rounded-xl font-black text-xs uppercase tracking-widest transition-all shadow-[0_0_20px_rgba(244,63,94,0.4)] ${isLifting ? "opacity-50 cursor-not-allowed" : ""}`}
             >
-              Lift Quarantine & Re-issue Keys
+              {isLifting ? "Lifting..." : "Lift Quarantine & Re-issue Keys"}
             </button>
           </motion.div>
         )}

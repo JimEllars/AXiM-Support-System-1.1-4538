@@ -10,6 +10,7 @@ const { FiZap, FiCheck, FiX } = FiIcons;
 export default function ActionProposalBlock({ hitlLogId }) {
   const [log, setLog] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [isExecuting, setIsExecuting] = useState(false);
   const { isCoreOnline } = useTicketStore();
 
   React.useEffect(() => {
@@ -27,7 +28,9 @@ export default function ActionProposalBlock({ hitlLogId }) {
     fetchLog();
   }, [hitlLogId]);
 
-  const handleAction = async (action) => {
+  const handleExecuteAction = async (action) => {
+    if (isExecuting) return;
+    setIsExecuting(true);
     if (!log) return;
     const newStatus = action === 'approve' ? 'approved' : 'rejected';
 
@@ -44,7 +47,7 @@ export default function ActionProposalBlock({ hitlLogId }) {
 
         if (action === 'approve') {
             const ONYX_WORKER_URL = import.meta.env.VITE_ONYX_WORKER_URL;
-            const ONYX_SECRET = "onyx_local_dev_secret";
+            const ONYX_SECRET = import.meta.env.VITE_ONYX_SECRET;
 
             const res = await fetch(`${ONYX_WORKER_URL}/api/v1/actions/resolve`, {
                 method: 'POST',
@@ -76,6 +79,8 @@ export default function ActionProposalBlock({ hitlLogId }) {
     } catch (e) {
         toast.error('Failed to update action');
         setLog({ ...log, status: 'pending' }); // Revert
+    } finally {
+        setIsExecuting(false);
     }
   };
 
@@ -124,14 +129,14 @@ export default function ActionProposalBlock({ hitlLogId }) {
         )}
         <div className="flex gap-3 mt-4">
             <button
-                onClick={() => handleAction('approve')}
+                onClick={() => handleExecuteAction('approve')}
                 disabled={!isCoreOnline}
                 className={`flex items-center gap-2 px-4 py-2 ${!isCoreOnline ? 'bg-zinc-700 text-zinc-500 cursor-not-allowed' : 'bg-cyan-500 hover:bg-cyan-400 text-zinc-950'} font-bold rounded-lg transition-colors text-sm`}
             >
                 <SafeIcon icon={FiCheck} /> Approve & Execute
             </button>
             <button
-                onClick={() => handleAction('reject')}
+                onClick={() => handleExecuteAction('reject')}
                 disabled={!isCoreOnline}
                 className={`flex items-center gap-2 px-4 py-2 ${!isCoreOnline ? 'bg-zinc-800/50 text-zinc-600 cursor-not-allowed' : 'bg-zinc-800 hover:bg-zinc-700 text-zinc-300'} font-medium rounded-lg transition-colors text-sm`}
             >
