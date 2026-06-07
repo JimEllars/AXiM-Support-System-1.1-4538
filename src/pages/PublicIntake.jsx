@@ -56,23 +56,68 @@ export default function PublicIntake() {
     setIsSubmitting(true);
     setSubmitResult(null);
 
-    const submitData = new FormData();
-    submitData.append('customer_name', formData.customer_name);
-    submitData.append('customer_email', formData.customer_email);
-    submitData.append('workflow_category', formData.workflow_category);
-    submitData.append('subject', formData.subject);
-    submitData.append('description', formData.description);
-    submitData.append('source', 'website');
-
-    if (file && file.size > 0) {
-      submitData.append('attachment', file);
-    }
-
     try {
+      // Prepare JSON payload
+      const payloadObj = {
+        customer_name: formData.customer_name,
+        customer_email: formData.customer_email,
+        workflow_category: formData.workflow_category,
+        subject: formData.subject,
+        description: formData.description,
+        source: 'website'
+      };
+
+      // Client-Side AES-256-GCM Encryption
+      const secretKey = import.meta.env.VITE_ONYX_SECRET || 'PLACEHOLDER_SECRET_FOR_DEV_IF_NEEDED';
+      const secretBuffer = new TextEncoder().encode(secretKey);
+      const hashBuffer = await window.crypto.subtle.digest('SHA-256', secretBuffer);
+
+      const key = await window.crypto.subtle.importKey(
+        "raw",
+        hashBuffer,
+        { name: "AES-GCM" },
+        false,
+        ["encrypt"]
+      );
+
+      const iv = window.crypto.getRandomValues(new Uint8Array(12));
+      const payloadString = JSON.stringify(payloadObj);
+      const dataBuffer = new TextEncoder().encode(payloadString);
+
+      const encryptedBuffer = await window.crypto.subtle.encrypt(
+        { name: "AES-GCM", iv: iv },
+        key,
+        dataBuffer
+      );
+
+      const encryptedBase64 = btoa(String.fromCharCode(...new Uint8Array(encryptedBuffer)));
+      const ivBase64 = btoa(String.fromCharCode(...iv));
+
+      let bodyToSend;
+      let headersToSend = {};
+
+      if (file && file.size > 0) {
+        // If there is an attachment, we must use FormData, but we can send the encrypted payload as fields
+        const submitData = new FormData();
+        submitData.append('encrypted_payload', encryptedBase64);
+        submitData.append('iv', ivBase64);
+        submitData.append('attachment', file);
+        bodyToSend = submitData;
+      } else {
+        // If no attachment, send as pure JSON
+        bodyToSend = JSON.stringify({
+          encrypted_payload: encryptedBase64,
+          iv: ivBase64
+        });
+        headersToSend = {
+          'Content-Type': 'application/json'
+        };
+      }
+
       const response = await fetch(`${ONYX_WORKER_URL}/api/v1/webhooks/public-ingress`, {
         method: 'POST',
-        // Note: fetch will automatically set Content-Type to multipart/form-data with the correct boundary
-        body: submitData
+        headers: headersToSend,
+        body: bodyToSend
       });
 
       const data = await response.json();

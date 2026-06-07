@@ -4,6 +4,7 @@ import * as FiIcons from 'react-icons/fi';
 import { supabase } from '../../lib/supabaseClient';
 import toast from 'react-hot-toast';
 import { useTicketStore } from '../../store/useTicketStore';
+import { useAuthStore } from '../../store/useAuthStore';
 
 const { FiZap, FiCheck, FiX } = FiIcons;
 
@@ -13,6 +14,8 @@ export default function ActionProposalBlock({ hitlLog }) {
   const [loading, setLoading] = useState(!hitlLog);
   const [isExecuting, setIsExecuting] = useState(false);
   const { isCoreOnline } = useTicketStore();
+  const { user } = useAuthStore();
+  const agentName = user?.email ? user.email.split('@')[0] : 'Agent';
 
   React.useEffect(() => {
     if (hitlLog) {
@@ -72,12 +75,11 @@ export default function ActionProposalBlock({ hitlLog }) {
             });
 
             // Insert system message about action completion
-            await supabase.from('support_messages').insert({
+            await supabase.from('ticket_messages').insert({
                 ticket_id: log.ticket_id,
                 sender_id: 'system',
-                sender_type: 'system',
-                content: `ACTION LOG: [${log.tool_type}] approved by [Greta] and executed successfully. Transaction ID: ${resultData.transaction_id || 'TX-N/A'}`,
-                is_internal: true
+                message_body: `ACTION LOG: [${agentName}] approved [${log.tool_type}] which executed successfully.`,
+                is_internal_note: true
             });
 
             setLog(prev => ({ ...prev, execution_result: resultData }));
