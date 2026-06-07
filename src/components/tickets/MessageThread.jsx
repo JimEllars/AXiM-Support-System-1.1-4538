@@ -74,7 +74,7 @@ export default function MessageThread({ messages }) {
                 {msg.message_body}
               </p>
               {msg.metadata?.hitl_log_id && (
-                  <ActionProposalBlock hitlLogId={msg.metadata.hitl_log_id} />
+                  <ActionProposalBlock hitlLog={{ id: msg.metadata.hitl_log_id }} />
               )}
             </div>
           </div>

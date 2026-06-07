@@ -7,14 +7,25 @@ import { useTicketStore } from '../../store/useTicketStore';
 
 const { FiZap, FiCheck, FiX } = FiIcons;
 
-export default function ActionProposalBlock({ hitlLogId }) {
-  const [log, setLog] = useState(null);
-  const [loading, setLoading] = useState(true);
+export default function ActionProposalBlock({ hitlLog }) {
+  const hitlLogId = hitlLog?.id;
+  const [log, setLog] = useState(hitlLog || null);
+  const [loading, setLoading] = useState(!hitlLog);
   const [isExecuting, setIsExecuting] = useState(false);
   const { isCoreOnline } = useTicketStore();
 
   React.useEffect(() => {
+    if (hitlLog) {
+      setLog(hitlLog);
+      setLoading(false);
+      return;
+    }
+
     async function fetchLog() {
+      if (!hitlLogId) {
+        setLoading(false);
+        return;
+      }
       const { data, error } = await supabase
         .from('hitl_audit_logs')
         .select('*')
@@ -26,7 +37,7 @@ export default function ActionProposalBlock({ hitlLogId }) {
       setLoading(false);
     }
     fetchLog();
-  }, [hitlLogId]);
+  }, [hitlLogId, hitlLog]);
 
   const handleExecuteAction = async (action) => {
     if (isExecuting) return;
@@ -48,7 +59,7 @@ export default function ActionProposalBlock({ hitlLogId }) {
         if (action === 'approve') {
             const ONYX_WORKER_URL = import.meta.env.VITE_ONYX_WORKER_URL;
             const ONYX_SECRET = import.meta.env.VITE_ONYX_SECRET;
-
+            setIsExecuting(true);
             const res = await fetch(`${ONYX_WORKER_URL}/api/v1/actions/resolve`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${ONYX_SECRET}` },
@@ -130,10 +141,10 @@ export default function ActionProposalBlock({ hitlLogId }) {
         <div className="flex gap-3 mt-4">
             <button
                 onClick={() => handleExecuteAction('approve')}
-                disabled={!isCoreOnline}
-                className={`flex items-center gap-2 px-4 py-2 ${!isCoreOnline ? 'bg-zinc-700 text-zinc-500 cursor-not-allowed' : 'bg-cyan-500 hover:bg-cyan-400 text-zinc-950'} font-bold rounded-lg transition-colors text-sm`}
+                disabled={!isCoreOnline || isExecuting}
+                className={`flex items-center gap-2 px-4 py-2 ${!isCoreOnline || isExecuting ? 'bg-zinc-700 text-zinc-500 cursor-not-allowed' : 'bg-cyan-500 hover:bg-cyan-400 text-zinc-950'} font-bold rounded-lg transition-colors text-sm`}
             >
-                <SafeIcon icon={FiCheck} /> Approve & Execute
+                <SafeIcon icon={FiCheck} /> {isExecuting ? 'Executing...' : 'Approve & Execute'}
             </button>
             <button
                 onClick={() => handleExecuteAction('reject')}

@@ -134,8 +134,42 @@ export default function TicketDetail() {
       )
       .subscribe();
 
+    const onyxPresenceChannel = supabase
+      .channel(`onyx_presence_${id}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "INSERT",
+          schema: "public",
+          table: "events_ax2024",
+          filter: `type=eq.onyx_presence`,
+        },
+        async (payload) => {
+          const { status, ticket_id } = payload.new.payload || {};
+          if (ticket_id === id) {
+            if (status === 'Thinking') {
+              updateTypingStatus('onyx_system', true);
+            } else if (status === 'Complete') {
+              updateTypingStatus('onyx_system', false);
+
+              // Refresh messages
+              const { data } = await supabase
+                .from("ticket_messages")
+                .select("*")
+                .eq("ticket_id", id)
+                .order("created_at", { ascending: true });
+              if (data) {
+                setMessages(data);
+              }
+            }
+          }
+        }
+      )
+      .subscribe();
+
     return () => {
       supabase.removeChannel(channel);
+      supabase.removeChannel(onyxPresenceChannel);
     };
   }, [id]);
 
