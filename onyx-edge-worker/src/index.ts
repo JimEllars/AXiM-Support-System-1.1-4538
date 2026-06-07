@@ -322,6 +322,10 @@ export default {
     if (url.pathname === "/api/v1/webhooks/public-intake") {
       return handlePublicWebIngress(request, env, ctx);
     }
+    if (url.pathname === "/api/v1/webhooks/egress") {
+      return handleMessageEgress(request, env, ctx);
+    }
+
     if (url.pathname === "/webhooks/intake") {
       return handleWebhookIntake(request, env, ctx);
     }
@@ -1895,5 +1899,83 @@ Draft a concise, professional reply:`;
       status: 500,
       headers: { ...getCorsHeaders(env, request) },
     });
+  }
+}
+
+async function handleMessageEgress(request: Request, env: Env, ctx: any): Promise<Response> {
+  const url = new URL(request.url);
+  if (url.searchParams.get("secret") !== env.AXIM_ONYX_SECRET) {
+    return new Response(JSON.stringify({ error: "Unauthorized" }), { status: 401, headers: { 'Content-Type': 'application/json' } });
+  }
+
+  try {
+    const payload = await request.json() as any;
+    const record = payload.record;
+
+    if (!record) {
+      return new Response(JSON.stringify({ error: "No record in payload" }), { status: 400, headers: { 'Content-Type': 'application/json' } });
+    }
+
+    if (record.is_internal_note === true || record.sender_id === 'system') {
+      return new Response(JSON.stringify({ success: true, ignored: true }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    }
+
+    const supabase = createClient(
+      env.SUPABASE_URL,
+      env.SUPABASE_SERVICE_ROLE_KEY,
+    );
+
+    const emailDispatch = async () => {
+      try {
+        const { data: ticket, error: ticketError } = await supabase
+          .from("support_tickets")
+          .select("customer_id, subject")
+          .eq("id", record.ticket_id)
+          .single();
+
+        if (ticketError || !ticket) {
+          console.error("Failed to fetch ticket for egress", ticketError);
+          return;
+        }
+
+        const { data: contact, error: contactError } = await supabase
+          .from("contacts_ax2024")
+          .select("email, name")
+          .eq("id", ticket.customer_id)
+          .single();
+
+        if (contactError || !contact) {
+          console.error("Failed to fetch contact for egress", contactError);
+          return;
+        }
+
+        const emailPayload = {
+          to: contact.email,
+          subject: `Re: ${ticket.subject}`,
+          body: record.message_body,
+        };
+
+        // Fire and forget generic external API placeholder
+        await fetch("https://api.resend.com/emails", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": "Bearer PLACEHOLDER", // Real app would use env var
+          },
+          body: JSON.stringify(emailPayload),
+        }).catch(err => console.error("Email dispatch failed", err));
+
+      } catch (err) {
+        console.error("Error in email dispatch background task", err);
+      }
+    };
+
+    ctx.waitUntil(emailDispatch());
+
+    return new Response(JSON.stringify({ success: true }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+
+  } catch (error: any) {
+    console.error("[handleMessageEgress] Error:", error);
+    return new Response(JSON.stringify({ error: "Internal server error" }), { status: 500, headers: { 'Content-Type': 'application/json' } });
   }
 }
