@@ -15,7 +15,7 @@ export default function ActionProposalBlock({ hitlLog }) {
   const [isExecuting, setIsExecuting] = useState(false);
   const { isCoreOnline } = useTicketStore();
   const { user } = useAuthStore();
-  const agentName = user?.email ? user.email.split('@')[0] : 'Agent';
+  const agentName = user?.email?.split('@')[0] || 'System Agent';
 
   React.useEffect(() => {
     if (hitlLog) {
@@ -76,7 +76,7 @@ export default function ActionProposalBlock({ hitlLog }) {
 
             // Insert system message about action completion
             await supabase.from('ticket_messages').insert({
-                ticket_id: log.ticket_id,
+                ticket_id: log.support_ticket_id,
                 sender_id: 'system',
                 message_body: `ACTION LOG: [${agentName}] approved [${log.tool_type}] which executed successfully.`,
                 is_internal_note: true
