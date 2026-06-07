@@ -6,6 +6,7 @@ import Dashboard from './pages/Dashboard';
 import TicketDetail from './pages/TicketDetail';
 import Login from './pages/Login';
 import PublicIntake from './pages/PublicIntake';
+import MemoryHub from './pages/MemoryHub';
 
 import AppLayout from './components/layout/AppLayout';
 import { Toaster } from 'react-hot-toast';
@@ -26,7 +27,7 @@ function App() {
 
   useEffect(() => {
     // Check initial session
-        supabase.auth.getSession().then(({ data: { session } }) => {
+    supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session);
       if (session?.user) {
         supabase.from('team_profiles').upsert({
@@ -44,7 +45,7 @@ function App() {
     } = supabase.auth.onAuthStateChange((event, session) => {
       setSession(session);
 
-            if (event === 'SIGNED_OUT') {
+      if (event === 'SIGNED_OUT') {
         useAuthStore.getState().signOut();
         useTicketStore.setState({ tickets: [], selectedTicketIds: [] });
       } else if (session?.user) {
@@ -124,7 +125,6 @@ function App() {
           <Route path="/login" element={<Login />} />
           <Route path="/submit" element={<PublicIntake />} />
 
-
           <Route path="/" element={
             <ProtectedRoute>
               <AppLayout>
@@ -137,6 +137,14 @@ function App() {
             <ProtectedRoute>
               <AppLayout>
                 <TicketDetail />
+              </AppLayout>
+            </ProtectedRoute>
+          } />
+
+          <Route path="/memory" element={
+            <ProtectedRoute>
+              <AppLayout>
+                <MemoryHub />
               </AppLayout>
             </ProtectedRoute>
           } />

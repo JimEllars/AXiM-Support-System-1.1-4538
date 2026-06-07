@@ -64,7 +64,7 @@ export default function PublicIntake() {
     submitData.append('description', formData.description);
     submitData.append('source', 'website');
 
-    if (file) {
+    if (file && file.size > 0) {
       submitData.append('attachment', file);
     }
 

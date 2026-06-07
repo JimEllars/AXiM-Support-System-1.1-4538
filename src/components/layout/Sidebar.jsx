@@ -7,12 +7,13 @@ import { useAuthStore } from '../../store/useAuthStore';
 import { supabase } from '../../lib/supabaseClient';
 import toast from 'react-hot-toast';
 
-const { FiGrid, FiActivity, FiUsers, FiSettings, FiZap, FiShield, FiCpu, FiLogOut } = FiIcons;
+const { FiGrid, FiActivity, FiUsers, FiSettings, FiZap, FiShield, FiCpu, FiLogOut, FiDatabase } = FiIcons;
 
 const NAV_ITEMS = [
   { id: 'dashboard', label: 'Command', path: '/', icon: FiGrid },
   { id: 'analytics', label: 'Intelligence', path: '/analytics', icon: FiActivity },
   { id: 'team', label: 'Neural Team', path: '/team', icon: FiUsers },
+  { id: 'memory', label: 'System Memory', path: '/memory', icon: FiDatabase },
   { id: 'settings', label: 'Onyx Config', path: '/settings', icon: FiSettings },
 ];
 

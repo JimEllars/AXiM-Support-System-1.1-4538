@@ -899,12 +899,65 @@ const { data: ticket, error: ticketError } = await supabase
             }
 
             // Analyze and insert
+            let embeddingForRag: any[] = [];
+            try {
+              const embedRes = await fetch(
+                `${env.CORE_API_URL || "https://api.axim-core.internal"}/functions/v1/generate-embedding`,
+                {
+                  method: "POST",
+                  headers: {
+                    "Content-Type": "application/json",
+                    Authorization: `Bearer ${env.AXIM_SERVICE_KEY}`,
+                  },
+                  body: JSON.stringify({
+                    input: `${normalizedData.subject} ${normalizedData.description || ""}`,
+                  }),
+                },
+              );
+              if (embedRes.ok) {
+                const embedData: any = await embedRes.json();
+                if (embedData.embedding) embeddingForRag = embedData.embedding;
+              }
+            } catch (err) {
+              logErr(supabase, logCtx, err, ctx);
+            }
+
+            let contextText = "";
+            if (embeddingForRag.length > 0) {
+              const { data: searchResults, error: searchError } = await supabase.rpc(
+                "match_memory_banks",
+                {
+                  query_embedding: embeddingForRag,
+                  match_threshold: 0.5,
+                  match_count: 3,
+                },
+              );
+
+              if (!searchError && searchResults && searchResults.length > 0) {
+                contextText = searchResults
+                  .map((r: any) => `Title: ${r.title}\nContent: ${r.content}`)
+                  .join("\n\n");
+              }
+            } else {
+               const { data: searchResults, error: searchError } = await supabase
+                .from("memory_banks")
+                .select("title, content")
+                .limit(3);
+
+              if (!searchError && searchResults && searchResults.length > 0) {
+                contextText = searchResults
+                  .map((r: any) => `Title: ${r.title}\nContent: ${r.content}`)
+                  .join("\n\n");
+              }
+            }
+
             const onyxAnalysis = await analyzeWithOnyx(
               normalizedData.subject,
               normalizedData.description,
               env.ANTHROPIC_API_KEY,
               attachmentBase64,
               attachmentMime,
+              contextText
             );
 
             let initialStatus = "open";
@@ -1041,6 +1094,7 @@ async function analyzeWithOnyx(
   apiKey: string,
   imageBase64?: string | null,
   imageMime?: string | null,
+  contextText?: string,
 ) {
   const defaultFallback = {
     priority: description.toLowerCase().includes("urgent") ? "urgent" : "medium",
@@ -1084,7 +1138,7 @@ async function analyzeWithOnyx(
       body: JSON.stringify({
         model: "claude-3-haiku-20240307",
         max_tokens: 1024,
-        system: "You are the AXiM Support Triage AI. You MUST return your response STRICTLY as a stringified JSON object matching this exact schema:\n{\n  \"priority\": \"low\" | \"medium\" | \"high\" | \"urgent\",\n  \"sentiment\": \"positive\" | \"neutral\" | \"negative\",\n  \"category\": \"string\",\n  \"draft\": \"string\",\n  \"confidence\": number\n}",
+        system: `You are the AXiM Support Triage AI. ${contextText ? `Here are the relevant AXiM operational guidelines for this issue:\n[Context]\n${contextText}\n[End Context]\nUse these guidelines to determine priority and draft a response.\n` : ""}You MUST return your response STRICTLY as a stringified JSON object matching this exact schema:\n{\n  "priority": "low" | "medium" | "high" | "urgent",\n  "sentiment": "positive" | "neutral" | "negative",\n  "category": "string",\n  "draft": "string",\n  "confidence": number\n}`,
         messages: messages
       }),
       signal: controller.signal
