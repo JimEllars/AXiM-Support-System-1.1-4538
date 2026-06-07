@@ -143,6 +143,7 @@ export interface Env {
   ANTHROPIC_API_KEY: string;
   AXIM_SERVICE_KEY: string;
   CORE_API_URL: string;
+  RESEND_API_KEY?: string;
 }
 
 async function handleHealthCheck(env: Env, request: Request, ctx: any): Promise<Response> {
@@ -2098,7 +2099,7 @@ async function handleMessageEgress(request: Request, env: Env, ctx: any): Promis
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            "Authorization": "Bearer PLACEHOLDER", // Real app would use env var
+            "Authorization": `Bearer ${env.RESEND_API_KEY}`,
           },
           body: JSON.stringify(emailPayload),
         }).catch(err => console.error("Email dispatch failed", err));
