@@ -780,17 +780,61 @@ async function handleWebhookIntake(request: Request, env: Env, ctx: any): Promis
     } else {
       // Handle standard JSON payload
       const payload: any = await request.json();
-      normalizedData = {
-        subject: payload.subject || payload.title || "External Intake Webhook",
-        description:
-          payload.description || payload.body || payload.message || "",
-        customer_email:
-          payload.customer_email || payload.email || payload.sender,
-        source: payload.source || request.headers.get("X-Axim-Default-Source") || "webhook",
-        customer_name: payload.customer_name || payload.name,
-        tags: payload.tags || [],
-        workflow_category: payload.workflow_category || "General Inquiry",
-      };
+
+      if (payload.encrypted_payload && payload.iv) {
+        try {
+          // The specification says "Use a SHA-256 hash of env.AXIM_ONYX_SECRET as the decryption key."
+          const secretBuffer = new TextEncoder().encode(env.AXIM_ONYX_SECRET);
+          const hashBuffer = await crypto.subtle.digest('SHA-256', secretBuffer);
+
+          const key = await crypto.subtle.importKey(
+            "raw",
+            hashBuffer,
+            { name: "AES-GCM" },
+            false,
+            ["decrypt"]
+          );
+
+          const ivBuffer = Uint8Array.from(atob(payload.iv), c => c.charCodeAt(0));
+          const dataBuffer = Uint8Array.from(atob(payload.encrypted_payload), c => c.charCodeAt(0));
+
+          const decryptedBuffer = await crypto.subtle.decrypt(
+            { name: "AES-GCM", iv: ivBuffer },
+            key,
+            dataBuffer
+          );
+
+          const decryptedStr = new TextDecoder().decode(decryptedBuffer);
+          const decryptedPayload = JSON.parse(decryptedStr);
+
+          normalizedData = {
+            subject: decryptedPayload.subject || decryptedPayload.title || "External Intake Webhook",
+            description: decryptedPayload.description || decryptedPayload.body || decryptedPayload.message || "",
+            customer_email: decryptedPayload.customer_email || decryptedPayload.email || decryptedPayload.sender,
+            source: decryptedPayload.source || request.headers.get("X-Axim-Default-Source") || "webhook",
+            customer_name: decryptedPayload.customer_name || decryptedPayload.name,
+            tags: decryptedPayload.tags || [],
+            workflow_category: decryptedPayload.workflow_category || "General Inquiry",
+          };
+        } catch (e) {
+          return new Response(JSON.stringify({ error: "Failed to decrypt payload" }), {
+            status: 400,
+            headers: { "Content-Type": "application/json", ...getCorsHeaders(env, request) }
+          });
+        }
+      } else {
+        normalizedData = {
+          subject: payload.subject || payload.title || "External Intake Webhook",
+          description:
+            payload.description || payload.body || payload.message || "",
+          customer_email:
+            payload.customer_email || payload.email || payload.sender,
+          source: payload.source || request.headers.get("X-Axim-Default-Source") || "webhook",
+          customer_name: payload.customer_name || payload.name,
+          tags: payload.tags || [],
+          workflow_category: payload.workflow_category || "General Inquiry",
+        };
+      }
     }
 
     if (!normalizedData.customer_email) {
@@ -1600,9 +1644,33 @@ Applied the correct configuration and verified functionality.
     }
 
     // 1. Push to AXiM Core memory_banks (Ecosystem Fusion)
+    let embeddingForMemory: any[] | null = null;
+    try {
+      const embedRes = await fetch(
+        `${env.CORE_API_URL || "https://api.axim-core.internal"}/functions/v1/generate-embedding`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${env.AXIM_SERVICE_KEY}`,
+          },
+          body: JSON.stringify({
+            input: `RCA: ${record.subject}\n\n${rcaMarkdown}`,
+          }),
+        },
+      );
+      if (embedRes.ok) {
+        const embedData: any = await embedRes.json();
+        if (embedData.embedding) embeddingForMemory = embedData.embedding;
+      }
+    } catch (err) {
+      logErr(supabase, logCtx, err, ctx);
+    }
+
     await supabase.from("memory_banks").insert({
       title: `RCA: ${record.subject}`,
       content: rcaMarkdown,
+      embedding: embeddingForMemory,
       metadata: {
         source: "support_system",
         partner: record.metadata?.partner || "unknown",
