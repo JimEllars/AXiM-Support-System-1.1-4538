@@ -40,7 +40,7 @@ export default function TicketList({ onSelectTicket }) {
   // Tab notification effect
   useEffect(() => {
     if (tickets.length > previousTicketCount.current) {
-        document.title = "(1) New Urgent Ticket - AXiM Support";
+        document.title = "(1) New Ticket - AXiM Support";
     }
     previousTicketCount.current = tickets.length;
   }, [tickets.length]);
@@ -101,20 +101,7 @@ export default function TicketList({ onSelectTicket }) {
   }, [isTriaging, fetchTickets]);
 
 
-  const filteredTickets = tickets.filter((ticket) => {
-    if (!searchQuery) return true;
-    const q = searchQuery.toLowerCase();
-    const customerName = ticket.contacts_ax2024?.name?.toLowerCase() || '';
-    return (
-      ticket.subject.toLowerCase().includes(q) ||
-      ticket.id.toLowerCase().includes(q) ||
-      ticket.priority.toLowerCase().includes(q) ||
-      ticket.status.toLowerCase().includes(q) ||
-      customerName.includes(q)
-    );
-  });
-
-  if (isLoading && tickets.length === 0) {
+    if (isLoading && tickets.length === 0) {
     return (
       <div className="space-y-3 relative">
         {[1, 2, 3, 4, 5].map(i => (
@@ -135,7 +122,7 @@ export default function TicketList({ onSelectTicket }) {
   }
 
 
-  if (filteredTickets.length === 0) {
+  if (tickets.length === 0) {
     if (searchQuery) {
         return (
           <div className="p-16 flex flex-col items-center justify-center border-2 border-dashed border-zinc-800 rounded-[2rem] bg-zinc-950/50">
@@ -183,7 +170,7 @@ export default function TicketList({ onSelectTicket }) {
       </div>
       <div className="space-y-3">
       <AnimatePresence>
-        {filteredTickets.map((ticket) => {
+        {tickets.map((ticket) => {
           const style = statusStyles[ticket.status] || statusStyles.open;
           const priorityColor = ticket.priority === 'escalated' ? 'text-rose-500' : ticket.priority === 'urgent' ? 'text-rose-500' : ticket.priority === 'high' ? 'text-amber-500' : 'text-zinc-500';
           const isEscalated = ticket.priority === 'escalated';

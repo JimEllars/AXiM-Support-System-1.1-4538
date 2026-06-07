@@ -10,7 +10,10 @@ export const useTicketStore = create((set, get) => ({
   selectedTicketId: null,
   setSelectedTicketId: (id) => set({ selectedTicketId: id }),
   searchQuery: "",
-  setSearchQuery: (query) => set({ searchQuery: query }),
+  setSearchQuery: (query) => {
+    set({ searchQuery: query });
+    get().fetchTickets(query);
+  },
   selectedTicketIds: [], // State for multi-select
   setSelectedTicketIds: (ids) => set({ selectedTicketIds: ids }),
   toggleSelectedTicketId: (id) =>
@@ -38,13 +41,23 @@ export const useTicketStore = create((set, get) => ({
       )
     })),
 
-  fetchTickets: async () => {
+  fetchTickets: async (query = "") => {
     set({ isLoading: true });
     try {
-      const { data, error } = await supabase
+      let q = supabase
         .from("support_tickets")
-        .select("*, contacts_ax2024(*)")
-        .order("created_at", { ascending: false });
+        .select("*, contacts_ax2024!inner(*)")
+        .order("created_at", { ascending: false })
+        .limit(50);
+
+      if (query && query.trim() !== '') {
+        const searchTerm = `%${query.trim()}%`;
+        q = q.or(
+          `subject.ilike.${searchTerm},id.ilike.${searchTerm},priority.ilike.${searchTerm},status.ilike.${searchTerm},contacts_ax2024.name.ilike.${searchTerm}`
+        );
+      }
+
+      const { data, error } = await q;
 
       if (error) throw error;
 
