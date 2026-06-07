@@ -1,9 +1,11 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import SafeIcon from '../../common/SafeIcon';
 import * as FiIcons from 'react-icons/fi';
 import { motion } from 'framer-motion';
 import { useAuthStore } from '../../store/useAuthStore';
+import { supabase } from '../../lib/supabaseClient';
+import toast from 'react-hot-toast';
 
 const { FiGrid, FiActivity, FiUsers, FiSettings, FiZap, FiShield, FiCpu, FiLogOut } = FiIcons;
 
@@ -18,6 +20,27 @@ export default function Sidebar() {
   const navigate = useNavigate();
   const location = useLocation();
   const { user, signOut } = useAuthStore();
+
+  const [isAway, setIsAway] = useState(false);
+
+  const handleStatusToggle = async () => {
+    const newStatus = isAway ? 'available' : 'away';
+    setIsAway(!isAway);
+    if (user?.id) {
+        try {
+            const { error } = await supabase.from('team_profiles').update({ status: newStatus }).eq('id', user.id);
+            if (error) throw error;
+            toast.success(`Agent status updated to ${newStatus.toUpperCase()}`, {
+                style: { background: '#18181b', color: '#10b981', border: '1px solid #047857' }
+            });
+        } catch (error) {
+            console.error('Failed to update status', error);
+            // Revert state on failure
+            setIsAway(isAway);
+        }
+    }
+  };
+
 
   const handleSignOut = async () => {
     await signOut();
@@ -63,16 +86,25 @@ export default function Sidebar() {
           <SafeIcon icon={FiCpu} />
         </div>
 
-        {/* User Identity & Logout */}
+                {/* User Identity, Status & Logout */}
         <div className="flex flex-col items-center gap-3 w-full border-t border-zinc-800 pt-6 group">
           {user?.email && (
             <div className="text-[10px] font-mono text-zinc-500 tracking-tighter truncate w-full px-2 text-center opacity-0 group-hover:opacity-100 transition-opacity absolute bottom-24 bg-zinc-900 py-1 rounded">
               {user.email.split('@')[0]}
             </div>
           )}
+
+          <button
+            onClick={handleStatusToggle}
+            className={`w-10 h-10 rounded-xl flex items-center justify-center transition-all relative ${isAway ? 'text-amber-500 bg-amber-500/10 border border-amber-500/50' : 'text-emerald-500 bg-emerald-500/10 border border-emerald-500/50'}`}
+            title={`Status: ${isAway ? 'Away' : 'Available'}`}
+          >
+            <div className={`w-3 h-3 rounded-full ${isAway ? 'bg-amber-500' : 'bg-emerald-500 shadow-[0_0_10px_rgba(16,185,129,0.5)]'}`} />
+          </button>
+
           <button
             onClick={handleSignOut}
-            className="w-10 h-10 rounded-xl flex items-center justify-center text-zinc-600 hover:bg-red-500/10 hover:text-red-500 transition-all relative"
+            className="w-10 h-10 rounded-xl flex items-center justify-center text-zinc-600 hover:bg-red-500/10 hover:text-red-500 transition-all relative mt-2"
             title="Sign Out"
           >
             <SafeIcon icon={FiLogOut} className="text-xl" />
