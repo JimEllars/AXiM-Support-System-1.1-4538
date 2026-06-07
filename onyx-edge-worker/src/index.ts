@@ -365,6 +365,7 @@ async function handleTicketIngestion(request: Request, env: Env, ctx: any): Prom
     const ticketData: any = await request.json();
     const { subject, description, customer_id } = ticketData;
 
+
     const { data: ticket, error: ticketError } = await supabase
       .from("support_tickets")
       .insert({
@@ -741,6 +742,7 @@ async function handleWebhookIntake(request: Request, env: Env, ctx: any): Promis
           rawPayload.customer_name ||
           rawPayload.name,
         tags: rawPayload.tags || [],
+        workflow_category: formData.get("workflow_category") || rawPayload.workflow_category || "General Inquiry",
       };
 
       // Process attachment if present
@@ -787,6 +789,7 @@ async function handleWebhookIntake(request: Request, env: Env, ctx: any): Promis
         source: payload.source || request.headers.get("X-Axim-Default-Source") || "webhook",
         customer_name: payload.customer_name || payload.name,
         tags: payload.tags || [],
+        workflow_category: payload.workflow_category || "General Inquiry",
       };
     }
 
@@ -836,9 +839,21 @@ async function handleWebhookIntake(request: Request, env: Env, ctx: any): Promis
     let slaBreachAt = new Date();
     slaBreachAt.setHours(slaBreachAt.getHours() + 24); // Default 24h SLA
 
-    const { data: ticket, error: ticketError } = await supabase
+
+    // Determine assigned_department based on workflow_category
+    let assignedDepartment = "General Support";
+    if (normalizedData.workflow_category === "Billing" || normalizedData.workflow_category === "Billing & Financial") {
+      assignedDepartment = "Financial_Systems";
+    } else if (normalizedData.workflow_category === "Legal" || normalizedData.workflow_category === "Legal & Compliance") {
+      assignedDepartment = "Legal_Operations";
+    } else if (normalizedData.workflow_category === "Technical Support") {
+      assignedDepartment = "Engineering";
+    }
+
+const { data: ticket, error: ticketError } = await supabase
       .from("support_tickets")
       .insert({
+        assigned_department: assignedDepartment,
         subject: normalizedData.subject,
         description: normalizedData.description,
         customer_id: customerId,
@@ -848,6 +863,7 @@ async function handleWebhookIntake(request: Request, env: Env, ctx: any): Promis
         metadata: {
             source: normalizedData.source,
             tags: normalizedData.tags,
+            workflow_category: normalizedData.workflow_category,
         },
       })
       .select()

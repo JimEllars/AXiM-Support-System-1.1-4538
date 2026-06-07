@@ -5,6 +5,8 @@ import '@questlabs/react-sdk/dist/style.css';
 import Dashboard from './pages/Dashboard';
 import TicketDetail from './pages/TicketDetail';
 import Login from './pages/Login';
+import PublicIntake from './pages/PublicIntake';
+
 import AppLayout from './components/layout/AppLayout';
 import { Toaster } from 'react-hot-toast';
 import { useAuthStore } from './store/useAuthStore';
@@ -120,6 +122,8 @@ function App() {
       <BrowserRouter>
         <Routes>
           <Route path="/login" element={<Login />} />
+          <Route path="/submit" element={<PublicIntake />} />
+
 
           <Route path="/" element={
             <ProtectedRoute>
