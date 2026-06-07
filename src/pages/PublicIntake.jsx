@@ -68,7 +68,7 @@ export default function PublicIntake() {
       };
 
       // Client-Side AES-256-GCM Encryption
-      const secretKey = import.meta.env.VITE_ONYX_SECRET || 'PLACEHOLDER_SECRET_FOR_DEV_IF_NEEDED';
+      const secretKey = import.meta.env.VITE_ONYX_SECRET;
       const secretBuffer = new TextEncoder().encode(secretKey);
       const hashBuffer = await window.crypto.subtle.digest('SHA-256', secretBuffer);
 
