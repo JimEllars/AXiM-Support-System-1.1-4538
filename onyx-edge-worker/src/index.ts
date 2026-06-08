@@ -649,22 +649,22 @@ async function handlePublicWebIngress(request: Request, env: Env, ctx: any): Pro
     );
   }
 
-  const newHeaders = new Headers(request.headers);
-  newHeaders.set("Authorization", `Bearer ${env.AXIM_ONYX_SECRET}`);
-  newHeaders.set("X-Axim-Default-Source", "website");
+  try {
+    const newHeaders = new Headers(request.headers);
+    newHeaders.set("Authorization", `Bearer ${env.AXIM_ONYX_SECRET}`);
+    newHeaders.set("X-Axim-Default-Source", "website");
 
-  if (contentLength) {
-    newHeaders.set("content-length", contentLength);
+    const newRequest = new Request(request.url, {
+      method: request.method,
+      headers: newHeaders,
+      body: request.body,
+      duplex: 'half' // Required by CF Workers
+    } as any);
+
+    return handleWebhookIntake(newRequest, env, ctx);
+  } catch (error: any) {
+    return new Response(JSON.stringify({ error: "Proxy routing failed" }), { status: 500, headers: getCorsHeaders(env, request) });
   }
-
-  const newRequest = new Request(request.url, {
-    method: request.method,
-    headers: newHeaders,
-    body: request.body,
-    duplex: 'half' // Required by Cloudflare for stream passing
-  } as RequestInit);
-
-  return handleWebhookIntake(newRequest, env, ctx);
 }
 
 async function handleWebhookIntake(request: Request, env: Env, ctx: any): Promise<Response> {
