@@ -49,13 +49,42 @@ export default function TicketList({ onSelectTicket }) {
     return true;
   });
 
-  // Tab notification effect
+
+  // Tab notification effect & Audio Alert
   useEffect(() => {
     if (tickets.length > previousTicketCount.current) {
         document.title = "(1) New Ticket - AXiM Support";
+
+        // Check if the new ticket is urgent or high priority
+        // Assuming the new ticket is typically at the start of the array or we can just check the first one if length increased
+        const newTicket = tickets[0];
+        if (newTicket && (newTicket.priority === 'urgent' || newTicket.priority === 'high')) {
+          try {
+            const AudioContext = window.AudioContext || window.webkitAudioContext;
+            if (AudioContext) {
+              const ctx = new AudioContext();
+              const oscillator = ctx.createOscillator();
+              const gainNode = ctx.createGain();
+
+              oscillator.type = 'sine';
+              oscillator.frequency.setValueAtTime(880, ctx.currentTime); // A5
+
+              gainNode.gain.setValueAtTime(0.1, ctx.currentTime);
+              gainNode.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.2);
+
+              oscillator.connect(gainNode);
+              gainNode.connect(ctx.destination);
+
+              oscillator.start();
+              oscillator.stop(ctx.currentTime + 0.2);
+            }
+          } catch (e) {
+            console.warn("Audio context failed to play (likely autoplay blocked):", e);
+          }
+        }
     }
     previousTicketCount.current = tickets.length;
-  }, [tickets.length]);
+  }, [tickets.length, tickets]);
 
   // Reset title on focus
   useEffect(() => {
