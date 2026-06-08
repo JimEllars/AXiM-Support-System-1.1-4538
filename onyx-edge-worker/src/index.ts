@@ -327,6 +327,11 @@ export default {
       return handleMessageEgress(request, env, ctx);
     }
 
+    if (url.pathname === '/api/v1/webhooks/feedback') {
+      return handleFeedbackIngress(request, env, ctx);
+    }
+
+
     if (url.pathname === "/webhooks/intake") {
       return handleWebhookIntake(request, env, ctx);
     }
@@ -2064,11 +2069,11 @@ async function handleMessageEgress(request: Request, env: Env, ctx: any): Promis
       env.SUPABASE_SERVICE_ROLE_KEY,
     );
 
-    const emailDispatch = async () => {
+        const emailDispatch = async () => {
       try {
         const { data: ticket, error: ticketError } = await supabase
           .from("support_tickets")
-          .select("customer_id, subject")
+          .select("customer_id, subject, status")
           .eq("id", record.ticket_id)
           .single();
 
@@ -2088,10 +2093,19 @@ async function handleMessageEgress(request: Request, env: Env, ctx: any): Promis
           return;
         }
 
+        let finalBody = record.message_body || record.body || "";
+
+        if (ticket.status === 'closed') {
+          finalBody += `
+
+---
+This case has been marked as closed. How did we do? Please let us know by visiting: https://axim.us.com/feedback?ticket_id=${record.ticket_id}`;
+        }
+
         const emailPayload = {
           to: contact.email,
           subject: `Re: ${ticket.subject}`,
-          body: record.message_body,
+          body: finalBody,
         };
 
         // Fire and forget generic external API placeholder
@@ -2109,6 +2123,7 @@ async function handleMessageEgress(request: Request, env: Env, ctx: any): Promis
       }
     };
 
+
     ctx.waitUntil(emailDispatch());
 
     return new Response(JSON.stringify({ success: true }), { status: 200, headers: { 'Content-Type': 'application/json' } });
@@ -2116,5 +2131,66 @@ async function handleMessageEgress(request: Request, env: Env, ctx: any): Promis
   } catch (error: any) {
     console.error("[handleMessageEgress] Error:", error);
     return new Response(JSON.stringify({ error: "Internal server error" }), { status: 500, headers: { 'Content-Type': 'application/json' } });
+  }
+}
+
+
+
+
+
+async function handleFeedbackIngress(request: Request, env: Env, ctx: any): Promise<Response> {
+  const cors = getCorsHeaders(env, request);
+  if (request.method === "OPTIONS") return new Response(null, { headers: cors });
+
+  try {
+    const payload = (await request.json()) as { ticket_id: string; rating: number; comments?: string };
+    const { ticket_id, rating, comments } = payload;
+
+    if (!ticket_id || typeof rating !== 'number') {
+      return new Response(JSON.stringify({ error: "Missing required fields: ticket_id and rating" }), { status: 400, headers: { ...cors, 'Content-Type': 'application/json' }});
+    }
+
+    const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
+    const { error: insertError } = await supabase
+      .from('product_feedback')
+      .insert({ ticket_id, rating, comments });
+
+    if (insertError) {
+      throw insertError;
+    }
+
+    if (rating <= 2) {
+      ctx.waitUntil((async () => {
+        try {
+          const { data: messages, error: msgError } = await supabase
+            .from('ticket_messages')
+            .select('*')
+            .eq('ticket_id', ticket_id)
+            .order('created_at', { ascending: true });
+
+          if (msgError || !messages) throw msgError;
+
+          const threadText = messages.map((m: any) => `[${m.sender_type || m.sender_id}] ${m.body}`).join('\n');
+
+          const systemPrompt = "Generate a Failure Analysis detailing why the customer was unsatisfied with this resolution, and propose a new operational rule to prevent this.";
+          const analysisResult = await analyzeWithOnyx("", threadText + "\n\nPROMPT: " + systemPrompt, env.ANTHROPIC_API_KEY);
+
+          await supabase.from('hitl_audit_logs').insert({
+            ticket_id,
+            status: 'pending',
+            action_required: 'Review Failure Analysis and update ecosystem memory if valid.',
+            tool_type: 'update_memory_bank',
+            proposed_payload: analysisResult
+          });
+        } catch (err) {
+          console.error("Failed to generate continuous learning failure analysis:", err);
+        }
+      })());
+    }
+
+    return new Response(JSON.stringify({ success: true, message: "Feedback recorded" }), { status: 200, headers: { ...cors, 'Content-Type': 'application/json' } });
+  } catch (err: any) {
+    console.error("Feedback Ingress Error:", err);
+    return new Response(JSON.stringify({ error: "Internal server error" }), { status: 500, headers: { ...getCorsHeaders(env, request), 'Content-Type': 'application/json' } });
   }
 }
