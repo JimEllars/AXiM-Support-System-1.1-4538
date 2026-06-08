@@ -5,6 +5,7 @@ import SafeIcon from '../common/SafeIcon';
 import * as FiIcons from 'react-icons/fi';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useTicketStore } from '../store/useTicketStore';
+import { useAuthStore } from '../store/useAuthStore';
 import SLABadge from './tickets/SLABadge';
 
 const { FiCircle, FiCheckCircle, FiClock, FiAlertCircle, FiSearch, FiCheckSquare, FiSquare, FiRefreshCw, FiGlobe, FiMail, FiMessageSquare } = FiIcons;
@@ -34,8 +35,19 @@ const SkeletonLoader = () => (
 
 export default function TicketList({ onSelectTicket }) {
   const { tickets, isLoading, fetchTickets, subscribeToTickets, searchQuery, selectedTicketIds, toggleSelectedTicketId } = useTicketStore();
+  const { user } = useAuthStore();
+  const [queueFilter, setQueueFilter] = useState('unassigned');
   const [isTriaging, setIsTriaging] = useState(false);
   const previousTicketCount = useRef(tickets.length);
+
+  // Filter tickets based on queue state and search query
+  const filteredTickets = tickets.filter(ticket => {
+    if (searchQuery) return true; // If there is a search query, ignore queue filter
+    if (queueFilter === 'unassigned') return !ticket.assigned_to;
+    if (queueFilter === 'my_queue') return ticket.assigned_to === user?.id;
+    if (queueFilter === 'all') return true;
+    return true;
+  });
 
   // Tab notification effect
   useEffect(() => {
@@ -48,18 +60,17 @@ export default function TicketList({ onSelectTicket }) {
   // Reset title on focus
   useEffect(() => {
     const handleFocus = () => {
-        document.title = "AXiM Support System";
-        previousTicketCount.current = tickets.length;
+      document.title = "AXiM Support System";
     };
     window.addEventListener('focus', handleFocus);
     return () => window.removeEventListener('focus', handleFocus);
-  }, [tickets.length]);
+  }, []);
 
   const handleBatchTriage = async () => {
-    if (selectedTicketIds.length === 0 || isTriaging) return;
+    if (selectedTicketIds.length === 0) return;
     setIsTriaging(true);
 
-    const toastId = toast.loading("Onyx is triaging selected cases...", {
+    const toastId = toast.loading(`Triaging ${selectedTicketIds.length} cases with Onyx...`, {
         style: { background: '#18181b', color: '#22d3ee', border: '1px solid #0891b2' }
     });
 
@@ -98,10 +109,10 @@ export default function TicketList({ onSelectTicket }) {
     return () => {
       unsubscribe();
     };
-  }, [isTriaging, fetchTickets]);
+  }, [isTriaging, fetchTickets, subscribeToTickets]);
 
 
-    if (isLoading && tickets.length === 0) {
+    if (isLoading && filteredTickets.length === 0) {
     return (
       <div className="space-y-3 relative">
         {[1, 2, 3, 4, 5].map(i => (
@@ -122,7 +133,7 @@ export default function TicketList({ onSelectTicket }) {
   }
 
 
-  if (tickets.length === 0) {
+  if (filteredTickets.length === 0) {
     if (searchQuery) {
         return (
           <div className="p-16 flex flex-col items-center justify-center border-2 border-dashed border-zinc-800 rounded-[2rem] bg-zinc-950/50">
@@ -134,17 +145,37 @@ export default function TicketList({ onSelectTicket }) {
           </div>
         );
     } else {
-        // Find assigned department from user tickets or context,
-        // For now let's grab it from the first ticket if any exist, or fallback to 'General Support'
-        const dept = tickets.length > 0 && tickets[0].assigned_department ? tickets[0].assigned_department : "your department";
+        const dept = filteredTickets.length > 0 && filteredTickets[0].assigned_department ? filteredTickets[0].assigned_department : "your department";
         return (
-          <div className="p-16 flex flex-col items-center justify-center border-2 border-dashed border-emerald-900/50 rounded-[2rem] bg-emerald-950/10">
-            <div className="w-16 h-16 rounded-2xl bg-emerald-950 border border-emerald-900 flex items-center justify-center text-emerald-500 mb-4 shadow-[0_0_20px_rgba(16,185,129,0.2)]">
-              <SafeIcon icon={FiIcons.FiCheckCircle} className="text-2xl" />
+          <>
+            <div className="flex bg-zinc-900/50 p-1 rounded-xl mb-6 border border-zinc-800">
+              <button
+                onClick={() => setQueueFilter('unassigned')}
+                className={`flex-1 py-2 text-xs font-bold uppercase tracking-wider rounded-lg transition-all ${queueFilter === 'unassigned' ? 'bg-zinc-800 text-cyan-400 shadow-md' : 'text-zinc-500 hover:text-zinc-300'}`}
+              >
+                Unassigned
+              </button>
+              <button
+                onClick={() => setQueueFilter('my_queue')}
+                className={`flex-1 py-2 text-xs font-bold uppercase tracking-wider rounded-lg transition-all ${queueFilter === 'my_queue' ? 'bg-zinc-800 text-fuchsia-400 shadow-md' : 'text-zinc-500 hover:text-zinc-300'}`}
+              >
+                My Queue
+              </button>
+              <button
+                onClick={() => setQueueFilter('all')}
+                className={`flex-1 py-2 text-xs font-bold uppercase tracking-wider rounded-lg transition-all ${queueFilter === 'all' ? 'bg-zinc-800 text-white shadow-md' : 'text-zinc-500 hover:text-zinc-300'}`}
+              >
+                All Cases
+              </button>
             </div>
-            <h3 className="text-emerald-400 font-black text-xl tracking-tight">System Optimal</h3>
-            <p className="text-emerald-500/70 font-medium text-sm mt-2 uppercase tracking-widest text-[10px]">No Active Incidents in [{dept}]</p>
-          </div>
+            <div className="p-16 flex flex-col items-center justify-center border-2 border-dashed border-emerald-900/50 rounded-[2rem] bg-emerald-950/10">
+              <div className="w-16 h-16 rounded-2xl bg-emerald-950 border border-emerald-900 flex items-center justify-center text-emerald-500 mb-4 shadow-[0_0_20px_rgba(16,185,129,0.2)]">
+                <SafeIcon icon={FiIcons.FiCheckCircle} className="text-2xl" />
+              </div>
+              <h3 className="text-emerald-400 font-black text-xl tracking-tight">System Optimal</h3>
+              <p className="text-emerald-500/70 font-medium text-sm mt-2 uppercase tracking-widest text-[10px]">No Active Incidents in [{dept}]</p>
+            </div>
+          </>
         );
     }
   }
@@ -152,6 +183,27 @@ export default function TicketList({ onSelectTicket }) {
 
   return (
     <>
+      <div className="flex bg-zinc-900/50 p-1 rounded-xl mb-6 border border-zinc-800">
+        <button
+          onClick={() => setQueueFilter('unassigned')}
+          className={`flex-1 py-2 text-xs font-bold uppercase tracking-wider rounded-lg transition-all ${queueFilter === 'unassigned' ? 'bg-zinc-800 text-cyan-400 shadow-md' : 'text-zinc-500 hover:text-zinc-300'}`}
+        >
+          Unassigned
+        </button>
+        <button
+          onClick={() => setQueueFilter('my_queue')}
+          className={`flex-1 py-2 text-xs font-bold uppercase tracking-wider rounded-lg transition-all ${queueFilter === 'my_queue' ? 'bg-zinc-800 text-fuchsia-400 shadow-md' : 'text-zinc-500 hover:text-zinc-300'}`}
+        >
+          My Queue
+        </button>
+        <button
+          onClick={() => setQueueFilter('all')}
+          className={`flex-1 py-2 text-xs font-bold uppercase tracking-wider rounded-lg transition-all ${queueFilter === 'all' ? 'bg-zinc-800 text-white shadow-md' : 'text-zinc-500 hover:text-zinc-300'}`}
+        >
+          All Cases
+        </button>
+      </div>
+
       <div className="flex justify-between items-center mb-4 px-2">
         <h2 className="text-zinc-400 font-bold tracking-widest text-sm uppercase flex items-center gap-2">
           Inbox Pipeline
@@ -170,7 +222,7 @@ export default function TicketList({ onSelectTicket }) {
       </div>
       <div className="space-y-3">
       <AnimatePresence>
-        {tickets.map((ticket) => {
+        {filteredTickets.map((ticket) => {
           const style = statusStyles[ticket.status] || statusStyles.open;
           const priorityColor = ticket.priority === 'escalated' ? 'text-rose-500' : ticket.priority === 'urgent' ? 'text-rose-500' : ticket.priority === 'high' ? 'text-amber-500' : 'text-zinc-500';
           const isEscalated = ticket.priority === 'escalated';
