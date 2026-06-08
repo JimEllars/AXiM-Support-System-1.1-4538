@@ -11,6 +11,7 @@ import AutoDraftWhisper from '../components/tickets/AutoDraftWhisper';
 import ActionProposalBlock from '../components/tickets/ActionProposalBlock';
 import OnyxInvestigationPanel from '../components/tickets/OnyxInvestigationPanel';
 import toast from 'react-hot-toast';
+import { supabase } from '../lib/supabaseClient';
 
 const { FiArrowLeft, FiClock, FiCheckCircle, FiCpu, FiMessageSquare, FiSend, FiLayout, FiActivity, FiGlobe, FiMail, FiZap, FiLock } = FiIcons;
 
@@ -26,6 +27,7 @@ export default function TicketDetail() {
   const [isInternal, setIsInternal] = useState(false);
   const [activeTab, setActiveTab] = useState('intelligence');
   const [telemetry, setTelemetry] = useState(null);
+  const [attachments, setAttachments] = useState([]);
 
   const [showMentionMenu, setShowMentionMenu] = useState(false);
   const [mentionQuery, setMentionQuery] = useState('');
@@ -62,6 +64,9 @@ export default function TicketDetail() {
             confidence_score: 85,
             key_entities: ['Login', 'Error 500']
         });
+        // Fetch Attachments
+        const { data: files } = await supabase.storage.from('ticket_attachments').list(id + '/intake');
+        if (files) setAttachments(files);
       } else {
         toast.error("Ticket not found");
         navigate('/');
@@ -157,6 +162,27 @@ export default function TicketDetail() {
               </button>
             </div>
           </motion.div>
+
+          {attachments.length > 0 && (
+            <div className="bg-zinc-900/50 border border-zinc-800 rounded-2xl p-4 mb-4 flex gap-4 overflow-x-auto">
+              {attachments.map((file, idx) => {
+                const url = supabase.storage.from('ticket_attachments').getPublicUrl(id + '/intake/' + file.name).data.publicUrl;
+                return (
+                  <a key={idx} href={url} target="_blank" rel="noreferrer" className="flex items-center gap-2 px-4 py-2 bg-zinc-800 hover:bg-zinc-700 rounded-xl transition-all border border-zinc-700 text-sm font-medium text-zinc-300">
+                    <SafeIcon icon={FiIcons.FiPaperclip} />
+                    {file.name}
+                  </a>
+                );
+              })}
+            </div>
+          )}
+
+          {ticket?.metadata?.requires_sandbox_escalation === true && (
+            <div className="bg-amber-950/30 border border-amber-500/50 text-amber-400 p-4 rounded-2xl flex items-center gap-3 mb-4">
+              <SafeIcon icon={FiIcons.FiAlertCircle} className="text-xl shrink-0" />
+              <span className="text-xs font-black uppercase tracking-widest">Tier 3 Escalation Active: Sandbox Action Agent deployed for autonomous debugging.</span>
+            </div>
+          )}
 
           <OnyxInvestigationPanel ticketId={ticket.id} />
           <AutoDraftWhisper ticketData={ticket} onApply={(draft) => setReply(draft)} />
