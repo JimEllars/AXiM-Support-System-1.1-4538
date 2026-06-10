@@ -9,6 +9,7 @@ import PublicIntake from './pages/PublicIntake';
 import MemoryHub from './pages/MemoryHub';
 
 import AppLayout from './components/layout/AppLayout';
+import ErrorBoundary from './components/layout/ErrorBoundary';
 import { Toaster } from 'react-hot-toast';
 import { useAuthStore } from './store/useAuthStore';
 import { useTicketStore } from './store/useTicketStore';
@@ -120,6 +121,7 @@ function App() {
 
   return (
     <QueryClientProvider client={queryClient}>
+      <ErrorBoundary>
       <BrowserRouter>
         <Routes>
           <Route path="/login" element={<Login />} />
@@ -151,6 +153,7 @@ function App() {
         </Routes>
         <Toaster position="bottom-right" />
       </BrowserRouter>
+      </ErrorBoundary>
     </QueryClientProvider>
   );
 }

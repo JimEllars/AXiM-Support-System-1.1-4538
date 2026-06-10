@@ -59,6 +59,9 @@ function getCorsHeaders(env: Env, request: Request) {
     "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
     "Access-Control-Allow-Headers": "Content-Type, Authorization",
     "Access-Control-Max-Age": "86400",
+    "X-Content-Type-Options": "nosniff",
+    "Strict-Transport-Security": "max-age=31536000; includeSubDomains",
+    "X-Frame-Options": "DENY"
   };
 }
 
@@ -209,6 +212,62 @@ async function handleHealthCheck(env: Env, request: Request, ctx: any): Promise<
 }
 
 
+
+async function handleStaleClosure(env: Env) {
+  try {
+    const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
+    const staleThreshold = new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString();
+
+    const { data: staleTickets, error: fetchError } = await supabase
+      .from('support_tickets')
+      .select('id')
+      .eq('status', 'pending')
+      .lt('updated_at', staleThreshold);
+
+    if (fetchError) {
+      console.error('[handleStaleClosure] Error fetching stale tickets:', fetchError);
+      return;
+    }
+
+    if (!staleTickets || staleTickets.length === 0) {
+      console.log('[handleStaleClosure] No stale tickets found.');
+      return;
+    }
+
+    console.log(`[handleStaleClosure] Found ${staleTickets.length} stale tickets. Closing...`);
+
+    for (const ticket of staleTickets) {
+      const { error: updateError } = await supabase
+        .from('support_tickets')
+        .update({ status: 'closed', updated_at: new Date().toISOString() })
+        .eq('id', ticket.id);
+
+      if (updateError) {
+        console.error(`[handleStaleClosure] Error updating ticket ${ticket.id}:`, updateError);
+        continue;
+      }
+
+      const { error: messageError } = await supabase
+        .from('ticket_messages')
+        .insert({
+          ticket_id: ticket.id,
+          sender_id: 'system',
+          sender_type: 'system',
+          content: 'SYSTEM AUTOMATION: Case automatically closed due to 48 hours of user inactivity.',
+          is_internal: true
+        });
+
+      if (messageError) {
+        console.error(`[handleStaleClosure] Error inserting message for ticket ${ticket.id}:`, messageError);
+      }
+    }
+
+    console.log('[handleStaleClosure] Stale closure sweep completed successfully.');
+  } catch (error) {
+    console.error('[handleStaleClosure] Unhandled exception in stale closure sweep:', error);
+  }
+}
+
 async function handleSLASweep(env: Env) {
   try {
     const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
@@ -268,7 +327,7 @@ async function handleSLASweep(env: Env) {
 
 export default {
   async scheduled(event: ScheduledEvent, env: Env, ctx: any) {
-    ctx.waitUntil(handleSLASweep(env));
+    ctx.waitUntil(Promise.all([handleSLASweep(env), handleStaleClosure(env)]));
   },
   async fetch(request: Request, env: Env, ctx: any): Promise<Response> {
     const url = new URL(request.url);
