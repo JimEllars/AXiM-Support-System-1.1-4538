@@ -413,6 +413,30 @@ async function handleTicketIngestion(request: Request, env: Env, ctx: any): Prom
               confidence_score: onyxAnalysis.confidence,
             });
 
+            // Tier 3 Sandbox Egress Dispatch
+            if (onyxAnalysis.confidence < 85) {
+              console.log(`[ESCALATION] Confidence ${onyxAnalysis.confidence} < 85. Dispatching to Sandbox.`);
+              const sandboxUrl = `${env.CORE_API_URL || "https://api.axim-core.internal"}/functions/v1/sandbox-dispatch`;
+
+              // Fire and forget fetch to avoid blocking the client response
+              fetch(sandboxUrl, {
+                method: "POST",
+                headers: {
+                  "Content-Type": "application/json",
+                  Authorization: `Bearer ${env.AXIM_SERVICE_KEY}`,
+                },
+                body: JSON.stringify({
+                  ticket_id: ticket.id,
+                  subject: subject,
+                  description: description,
+                  customer_email: ticketData.customer_email || "unknown@example.com",
+                }),
+              }).catch(err => {
+                // Log quietly if the sandbox egress fails
+                logErr(supabase, logCtx, new Error(`Sandbox dispatch failed: ${err.message}`), ctx);
+              });
+            }
+
         } catch(err) {
             logErr(supabase, logCtx, err, ctx);
         } finally {
@@ -1118,6 +1142,30 @@ const { data: ticket, error: ticketError } = await supabase
               confidence_score: onyxAnalysis.confidence,
             });
 
+            // Tier 3 Sandbox Egress Dispatch
+            if (onyxAnalysis.confidence < 85) {
+              console.log(`[ESCALATION] Confidence ${onyxAnalysis.confidence} < 85. Dispatching to Sandbox.`);
+              const sandboxUrl = `${env.CORE_API_URL || "https://api.axim-core.internal"}/functions/v1/sandbox-dispatch`;
+
+              // Fire and forget fetch to avoid blocking the client response
+              fetch(sandboxUrl, {
+                method: "POST",
+                headers: {
+                  "Content-Type": "application/json",
+                  Authorization: `Bearer ${env.AXIM_SERVICE_KEY}`,
+                },
+                body: JSON.stringify({
+                  ticket_id: ticket.id,
+                  subject: normalizedData.subject,
+                  description: normalizedData.description,
+                  customer_email: normalizedData.customer_email,
+                }),
+              }).catch(err => {
+                // Log quietly if the sandbox egress fails
+                logErr(supabase, logCtx, new Error(`Sandbox dispatch failed: ${err.message}`), ctx);
+              });
+            }
+
 
         } catch (err) {
             logErr(supabase, logCtx, err, ctx);
@@ -1600,61 +1648,41 @@ async function handleTicketResolved(request: Request, env: Env, ctx: any): Promi
         ?.map((m: any) => `[${m.sender_id}]: ${m.message_body}`)
         .join("\n") || "";
 
-    // Call Claude 3 Haiku for RCA
-    // Call Claude 3 Haiku for RCA
+        // Call Claude 3 Haiku for RCA
     let rcaMarkdown = "";
-    try {
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 15000);
+    if (env.ANTHROPIC_API_KEY) {
+      try {
+        const prompt = `You are Onyx Mk3. Generate a Root Cause Analysis for this resolved ticket.\nSubject: ${record.subject}\nThread:\n${threadText}\nOutput strictly in Markdown with ## Problem, ## Root Cause, and ## Resolution.`;
+        const anthropicRes = await fetch("https://api.anthropic.com/v1/messages", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "x-api-key": env.ANTHROPIC_API_KEY,
+            "anthropic-version": "2023-06-01",
+          },
+          body: JSON.stringify({
+            model: "claude-3-haiku-20240307",
+            max_tokens: 500,
+            messages: [{ role: "user", content: prompt }],
+          }),
+        });
 
-      const response = await fetch("https://api.anthropic.com/v1/messages", {
-        method: "POST",
-        headers: {
-          "x-api-key": env.ANTHROPIC_API_KEY,
-          "anthropic-version": "2023-06-01",
-          "content-type": "application/json",
-        },
-        body: JSON.stringify({
-          model: "claude-3-haiku-20240307",
-          max_tokens: 2000,
-          system: "You are an expert technical support engineer. You write professional Root Cause Analysis (RCA) documents in Markdown format.",
-          messages: [
-            {
-              role: "user",
-              content: `Please generate a comprehensive Root Cause Analysis for the following ticket.\n\nSubject: ${record.subject}\n\nDescription: ${record.description}\n\nThread History:\n${threadText}\n\nThe output MUST be entirely in Markdown format containing ## Problem, ## Root Cause, and ## Resolution.`
-            }
-          ]
-        }),
-        signal: controller.signal
-      });
-
-      clearTimeout(timeoutId);
-
-      if (!response.ok) {
-        throw new Error("Failed to generate RCA");
+        if (anthropicRes.ok) {
+          const data = await anthropicRes.json() as any;
+          rcaMarkdown = data.content[0].text;
+        } else {
+          throw new Error("Anthropic API failed");
+        }
+      } catch (err) {
+        logErr(supabase, logCtx, err as Error, ctx);
+        rcaMarkdown = `## Problem\n${record.subject}\n## Root Cause\nUnavailable (Engine Timeout)\n## Resolution\nResolved manually by operator.`;
       }
-
-      const data: any = await response.json();
-      rcaMarkdown = data.content[0].text;
-    } catch (error) {
-      rcaMarkdown = `
-# Root Cause Analysis: ${record.subject}
-
-## Problem
-Customer reported a critical issue.
-
-## Impact
-High impact for VIP customer.
-
-## Root Cause
-Configuration error in the core system.
-
-## Resolution
-Applied the correct configuration and verified functionality.
-`;
+    } else {
+      rcaMarkdown = `## Problem\n${record.subject}\n## Root Cause\nSystem operating in local dev mode. No RCA generated.\n## Resolution\nN/A`;
     }
 
     // 1. Push to AXiM Core memory_banks (Ecosystem Fusion)
+
     let embeddingForMemory: any[] | null = null;
     try {
       const embedRes = await fetch(
