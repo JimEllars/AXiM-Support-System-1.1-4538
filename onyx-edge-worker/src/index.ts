@@ -1077,6 +1077,26 @@ const { data: ticket, error: ticketError } = await supabase
 
             if (updateError) throw updateError;
 
+            if (onyxAnalysis.confidence < 85) {
+              const sandboxUrl = `${env.CORE_API_URL || "https://api.axim-core.internal"}/functions/v1/sandbox-dispatch`;
+              const controller = new AbortController();
+              const timeoutId = setTimeout(() => controller.abort(), 2000);
+              fetch(sandboxUrl, {
+                method: "POST",
+                headers: {
+                  "Content-Type": "application/json",
+                  "Authorization": `Bearer ${env.AXIM_SERVICE_KEY}`
+                },
+                body: JSON.stringify({
+                  ticket_id: ticket.id,
+                  subject: normalizedData.subject,
+                  description: normalizedData.description,
+                  customer_email: normalizedData.customer_email
+                }),
+                signal: controller.signal
+              }).catch(err => logErr(supabase, logCtx, err, ctx)).finally(() => clearTimeout(timeoutId));
+            }
+
             if (initialStatus === "pending" && onyxResponseDraft) {
               // Insert deflected response
               const { error: messageError } = await supabase
@@ -1601,7 +1621,7 @@ async function handleTicketResolved(request: Request, env: Env, ctx: any): Promi
           messages: [
             {
               role: "user",
-              content: `Please generate a comprehensive Root Cause Analysis for the following ticket.\n\nSubject: ${record.subject}\n\nThread History:\n${threadText}\n\nThe output MUST be entirely in Markdown format.`
+              content: `Please generate a comprehensive Root Cause Analysis for the following ticket.\n\nSubject: ${record.subject}\n\nDescription: ${record.description}\n\nThread History:\n${threadText}\n\nThe output MUST be entirely in Markdown format containing ## Problem, ## Root Cause, and ## Resolution.`
             }
           ]
         }),
