@@ -16,7 +16,11 @@ export default function OnyxInvestigationPanel({
   const [isActive, setIsActive] = useState(false);
 
   useEffect(() => {
-    if (!ticketId || !isInvestigating) return;
+    if (!ticketId || !isInvestigating) {
+      setLogs([]);
+      setIsActive(false);
+      return;
+    }
 
     // Subscribe to events_ax2024 for onyx_presence logs
     const channel = supabase
@@ -69,8 +73,10 @@ export default function OnyxInvestigationPanel({
 
     return () => {
       supabase.removeChannel(channel);
+      setLogs([]);
+      setIsActive(false);
     };
-  }, [ticketId]);
+  }, [ticketId, isInvestigating]);
 
   if (!isActive && logs.length === 0) return null;
 
