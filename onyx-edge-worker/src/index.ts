@@ -12,7 +12,6 @@ const WebhookIntakeSchema = z.object({
   description: z.string().optional(),
   customer_email: z.string().email(),
   customer_name: z.string().optional(),
-  source: z.string().optional(),
   priority: z.enum(["low", "medium", "high", "urgent"]).optional(),
 });
 
@@ -626,27 +625,11 @@ async function handleBatchTriage(request: Request, env: Env, ctx: any): Promise<
  * Enforces origin rules and tags sandbox escalation for zero-day faults.
  */
 async function handlePublicWebIngress(request: Request, env: Env, ctx: any): Promise<Response> {
-  const contentLength = request.headers.get("content-length");
-  if (contentLength && parseInt(contentLength) > 5 * 1024 * 1024) {
-    return new Response(JSON.stringify({ error: "Payload exceeds maximum allowed size of 5MB." }), {
-        status: 413,
-        headers: { "Content-Type": "application/json", ...getCorsHeaders(env, request) }
-    });
-  }
-
   const origin = request.headers.get("Origin");
-  const allowedOrigins = env.ALLOWED_ORIGINS
-    ? env.ALLOWED_ORIGINS.split(",")
-    : [];
+  const allowedOrigins = env.ALLOWED_ORIGINS ? env.ALLOWED_ORIGINS.split(",") : [];
 
   if (!origin || !allowedOrigins.includes(origin)) {
-    return new Response(
-      JSON.stringify({ error: "Forbidden: Invalid Origin" }),
-      {
-        status: 403,
-        headers: getCorsHeaders(env, request),
-      },
-    );
+    return new Response(JSON.stringify({ error: "Forbidden: Invalid Origin" }), { status: 403, headers: getCorsHeaders(env, request) });
   }
 
   try {
@@ -654,15 +637,17 @@ async function handlePublicWebIngress(request: Request, env: Env, ctx: any): Pro
     newHeaders.set("Authorization", `Bearer ${env.AXIM_ONYX_SECRET}`);
     newHeaders.set("X-Axim-Default-Source", "website");
 
+    // @ts-ignore - Required by CF Workers for ReadableStream body
     const newRequest = new Request(request.url, {
       method: request.method,
       headers: newHeaders,
       body: request.body,
-      duplex: 'half' // Required by CF Workers
-    } as any);
+      // @ts-ignore
+      duplex: 'half'
+    });
 
     return handleWebhookIntake(newRequest, env, ctx);
-  } catch (error: any) {
+  } catch (error) {
     return new Response(JSON.stringify({ error: "Proxy routing failed" }), { status: 500, headers: getCorsHeaders(env, request) });
   }
 }
