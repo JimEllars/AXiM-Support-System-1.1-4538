@@ -4,7 +4,7 @@
  */
 
 const ONYX_WORKER_URL = import.meta.env.VITE_ONYX_WORKER_URL;
-const ONYX_SECRET = "onyx_local_dev_secret"; // Matches worker auth
+const ONYX_SECRET = import.meta.env.VITE_ONYX_SECURE_KEY;
 
 export const onyxService = {
   async createTicket(ticketData) {
