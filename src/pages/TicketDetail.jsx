@@ -163,24 +163,35 @@ export default function TicketDetail() {
             </div>
           </motion.div>
 
-          {attachments.length > 0 && (
-            <div className="bg-zinc-900/50 border border-zinc-800 rounded-2xl p-4 mb-4 flex gap-4 overflow-x-auto">
-              {attachments.map((file, idx) => {
-                const url = supabase.storage.from('ticket_attachments').getPublicUrl(id + '/intake/' + file.name).data.publicUrl;
+          <p className="text-zinc-400 text-xl font-medium leading-relaxed max-w-4xl mb-4">{ticket?.description}</p>
+          {/* Attachments Tray */}
+          {attachments?.length > 0 && (
+            <div className="mt-6 flex flex-wrap gap-4 mb-4">
+              {attachments.map(file => {
+                const url = supabase.storage.from('ticket_attachments').getPublicUrl(`${id}/intake/${file.name}`).data.publicUrl;
                 return (
-                  <a key={idx} href={url} target="_blank" rel="noreferrer" className="flex items-center gap-2 px-4 py-2 bg-zinc-800 hover:bg-zinc-700 rounded-xl transition-all border border-zinc-700 text-sm font-medium text-zinc-300">
-                    <SafeIcon icon={FiIcons.FiPaperclip} />
-                    {file.name}
-                  </a>
+                <a
+                  key={file.name}
+                  href={url}
+                  target="_blank" rel="noopener noreferrer"
+                  className="flex items-center gap-2 px-4 py-2 bg-zinc-900 border border-zinc-700 rounded-xl hover:bg-zinc-800 transition-colors text-zinc-300 text-xs font-bold"
+                >
+                  <SafeIcon icon={FiIcons.FiPaperclip} />
+                  {file.name}
+                </a>
                 );
               })}
             </div>
           )}
 
-          {ticket?.metadata?.requires_sandbox_escalation === true && (
-            <div className="bg-amber-950/30 border border-amber-500/50 text-amber-400 p-4 rounded-2xl flex items-center gap-3 mb-4">
-              <SafeIcon icon={FiIcons.FiAlertCircle} className="text-xl shrink-0" />
-              <span className="text-xs font-black uppercase tracking-widest">Tier 3 Escalation Active: Sandbox Action Agent deployed for autonomous debugging.</span>
+          {/* Tier 3 Escalation Banner */}
+          {ticket?.metadata?.requires_sandbox_escalation && (
+            <div className="mt-8 mb-8 bg-amber-950/30 border border-amber-500/50 text-amber-400 p-4 rounded-2xl flex items-center gap-3 shadow-[0_0_15px_rgba(245,158,11,0.1)]">
+              <SafeIcon icon={FiIcons.FiAlertCircle} className="text-2xl shrink-0" />
+              <div>
+                <h4 className="text-xs font-black uppercase tracking-widest">Tier 3 Sandbox Escalation Active</h4>
+                <p className="text-[10px] opacity-80 font-medium mt-0.5">Onyx confidence &lt; 85%. Sandbox Action Agent deployed for autonomous debugging.</p>
+              </div>
             </div>
           )}
 
