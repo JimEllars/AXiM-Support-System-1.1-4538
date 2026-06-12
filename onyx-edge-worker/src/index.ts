@@ -143,6 +143,7 @@ export interface Env {
   AXIM_SERVICE_KEY: string;
   CORE_API_URL: string;
   RESEND_API_KEY?: string;
+  RESEND_FROM_EMAIL?: string;
 }
 
 async function handleHealthCheck(env: Env, request: Request, ctx: any): Promise<Response> {
@@ -608,11 +609,13 @@ async function handleBatchTriage(request: Request, env: Env, ctx: any): Promise<
     }
 
     // Bulk update tickets (upsert hack for bulk update in Supabase JS)
-    const { error: updateError } = await supabase
-      .from("support_tickets")
-      .upsert(updates);
-
-    if (updateError) throw updateError;
+    for (const update of updates) {
+      const { error: updateError } = await supabase
+        .from("support_tickets")
+        .update({ priority: update.priority, status: update.status })
+        .eq("id", update.id);
+      if (updateError) throw updateError;
+    }
 
     // Upsert telemetry
     const { error: telemetryError } = await supabase
@@ -904,8 +907,6 @@ async function handleWebhookIntake(request: Request, env: Env, ctx: any): Promis
     }
 
     // 2. Synchronous Core Ticket Creation
-    let slaBreachAt = new Date();
-    slaBreachAt.setHours(slaBreachAt.getHours() + 24); // Default 24h SLA
 
 
     // Determine assigned_department based on workflow_category
@@ -927,7 +928,7 @@ const { data: ticket, error: ticketError } = await supabase
         customer_id: customerId,
         priority: "medium", // Default priority
         status: "open", // Default status
-        sla_breach_at: slaBreachAt.toISOString(),
+        sla_breach_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
         metadata: {
             source: normalizedData.source,
             tags: normalizedData.tags,
@@ -1375,29 +1376,68 @@ async function handleToolCommand(request: Request, env: Env, ctx: any): Promise<
     // `anthropic-version`: `2023-06-01`
     // and tools: ONYX_TOOLS
 
+
     let toolUsePayload = null;
 
-    // Mocking Claude's response for specific commands:
-    if (command.toLowerCase().includes("refund")) {
-      const amountMatch = command.match(/\$?(\d+(\.\d{2})?)/);
-      const amount = amountMatch ? parseFloat(amountMatch[1]) : 50;
-      toolUsePayload = {
-        name: "issue_refund",
-        input: { amount, reason: "Customer requested via support." },
-      };
-    } else if (
-      command.toLowerCase().includes("password reset") ||
-      command.toLowerCase().includes("reset password")
-    ) {
-      toolUsePayload = {
-        name: "trigger_password_reset",
-        input: { email: "user@example.com" }, // Mock email
-      };
-    } else if (command.toLowerCase().includes("beta access")) {
-      toolUsePayload = {
-        name: "grant_beta_access",
-        input: { feature_name: "new_dashboard" },
-      };
+    if (env.ANTHROPIC_API_KEY) {
+      try {
+        const response = await fetch('https://api.anthropic.com/v1/messages', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-api-key': env.ANTHROPIC_API_KEY,
+            'anthropic-version': '2023-06-01'
+          },
+          body: JSON.stringify({
+            model: 'claude-3-haiku-20240307',
+            max_tokens: 500,
+            system: "You are an AI support agent. Your job is to select the most appropriate tool to run based on the user's command. If no tool is appropriate, just reply.",
+            messages: [{ role: 'user', content: command }],
+            tools: ONYX_TOOLS
+          })
+        });
+
+        if (response.ok) {
+          const data: any = await response.json();
+          // Find the tool_use block
+          const toolUseBlock = data.content.find((c: any) => c.type === 'tool_use');
+          if (toolUseBlock) {
+            toolUsePayload = {
+              name: toolUseBlock.name,
+              input: toolUseBlock.input
+            };
+          }
+        } else {
+          const errText = await response.text(); logErr(supabase, logCtx, new Error("Anthropic API error in handleToolCommand: " + errText), ctx); console.error("Anthropic API error in handleToolCommand:", errText);
+        }
+      } catch (err) {
+        logErr(supabase, logCtx, err, ctx); console.error("Anthropic API fetch failed in handleToolCommand:", err);
+      }
+    }
+
+    if (!toolUsePayload) {
+      // Mocking Claude's response for specific commands if live call failed/no key:
+      if (command.toLowerCase().includes("refund")) {
+        const amountMatch = command.match(/\$?(\d+(\.\d{2})?)/);
+        const amount = amountMatch ? parseFloat(amountMatch[1]) : 50;
+        toolUsePayload = {
+          name: "issue_refund",
+          input: { amount, reason: "Customer requested via support." },
+        };
+      } else if (
+        command.toLowerCase().includes("password reset") ||
+        command.toLowerCase().includes("reset password")
+      ) {
+        toolUsePayload = {
+          name: "trigger_password_reset",
+          input: { email: "user@example.com" }, // Mock email
+        };
+      } else if (command.toLowerCase().includes("beta access")) {
+        toolUsePayload = {
+          name: "grant_beta_access",
+          input: { feature_name: "new_dashboard" },
+        };
+      }
     }
 
     if (toolUsePayload) {
@@ -1859,14 +1899,6 @@ async function handleOnyxBridgeStream(request: Request, env: Env, ctx: any): Pro
 
       await new Promise((r) => setTimeout(r, 1000));
 
-      // Clear presence
-      if (ticketId) {
-        const channelName = `ticket-presence:${ticketId}`;
-        const channel = supabase.channel(channelName);
-        await channel.untrack();
-        supabase.removeChannel(channel);
-      }
-
       if (ticketId) {
         await supabase.from("events_ax2024").insert({
           type: "onyx_presence",
@@ -1882,9 +1914,19 @@ async function handleOnyxBridgeStream(request: Request, env: Env, ctx: any): Pro
       controller?.close();
     } catch (e: any) {
       logErr(supabase, logCtx, e, ctx);
-
-      logErr(supabase, logCtx, e, ctx);
       controller?.error(e);
+    } finally {
+      // Clear presence
+      if (ticketId) {
+        try {
+          const channelName = `ticket-presence:${ticketId}`;
+          const channel = supabase.channel(channelName);
+          await channel.untrack();
+          supabase.removeChannel(channel);
+        } catch (err) {
+          console.error("Error cleaning up channel", err);
+        }
+      }
     }
   })();
 
@@ -1923,6 +1965,7 @@ async function handleAutoDraft(request: Request, env: Env, ctx: any): Promise<Re
 
     // Mocking Claude 3 Haiku API response based on RAG context
     // In real life, we would use fetch('https://api.anthropic.com/v1/messages', {...}) here.
+
     const simulatedDraft = `Hello ${ticketData?.contacts_ax2024?.name || "there"},
 
 Based on our knowledge base, here is some relevant information regarding "${ticketData.subject}":
@@ -1933,7 +1976,52 @@ I am currently investigating this further and will provide a full update shortly
 Best,
 AXiM Support (Onyx Auto-Draft)`;
 
-    return new Response(JSON.stringify({ draft: simulatedDraft }), {
+    let generatedDraft = simulatedDraft;
+
+    if (env.ANTHROPIC_API_KEY) {
+      try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 10000);
+
+        const systemPrompt = "You are Onyx, an AI support co-pilot. Draft a concise, professional initial response to the customer based on the provided context. If the context doesn't contain a full answer, state that we are looking into it.";
+        const userPrompt = `Customer Issue: ${ticketData.subject}
+
+Relevant Context:
+${contextText}`;
+
+        const response = await fetch('https://api.anthropic.com/v1/messages', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-api-key': env.ANTHROPIC_API_KEY,
+            'anthropic-version': '2023-06-01'
+          },
+          body: JSON.stringify({
+            model: 'claude-3-haiku-20240307',
+            max_tokens: 500,
+            system: systemPrompt,
+            messages: [{ role: 'user', content: userPrompt }]
+          }),
+          signal: controller.signal
+        });
+
+        clearTimeout(timeoutId);
+
+        if (response.ok) {
+          const anthropicData: any = await response.json();
+          if (anthropicData.content && anthropicData.content[0] && anthropicData.content[0].text) {
+            generatedDraft = anthropicData.content[0].text;
+          }
+        } else {
+          const errText = await response.text(); logErr(supabase, logCtx, new Error("Anthropic API error in handleAutoDraft: " + errText), ctx); console.error("Anthropic API error in handleAutoDraft:", errText);
+        }
+      } catch (err) {
+        logErr(supabase, logCtx, err, ctx); console.error("Anthropic API fetch failed or timed out in handleAutoDraft:", err);
+      }
+    }
+
+    return new Response(JSON.stringify({ draft: generatedDraft }), {
+
       headers: {
         "Content-Type": "application/json",
         ...getCorsHeaders(env, request),
@@ -2156,7 +2244,7 @@ async function handleMessageEgress(request: Request, env: Env, ctx: any): Promis
           return;
         }
 
-        let finalBody = record.message_body || record.body || "";
+        let finalBody = record.message_body || "";
 
         if (ticket.status === 'closed') {
           finalBody += `
@@ -2166,9 +2254,10 @@ This case has been marked as closed. How did we do? Please let us know by visiti
         }
 
         const emailPayload = {
+          from: env.RESEND_FROM_EMAIL || "support@axim.us.com",
           to: contact.email,
           subject: `Re: ${ticket.subject}`,
-          body: finalBody,
+          text: finalBody,
         };
 
         // Fire and forget generic external API placeholder
@@ -2239,11 +2328,11 @@ async function handleFeedbackIngress(request: Request, env: Env, ctx: any): Prom
           const analysisResult = await analyzeWithOnyx("", threadText + "\n\nPROMPT: " + systemPrompt, env.ANTHROPIC_API_KEY);
 
           await supabase.from('hitl_audit_logs').insert({
-            ticket_id,
+            support_ticket_id: ticket_id,
             status: 'pending',
             action_required: 'Review Failure Analysis and update ecosystem memory if valid.',
             tool_type: 'update_memory_bank',
-            proposed_payload: analysisResult
+            payload: analysisResult
           });
         } catch (err) {
           console.error("Failed to generate continuous learning failure analysis:", err);

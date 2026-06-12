@@ -35,6 +35,16 @@ export default function SupportMetrics() {
 
         if (escError) console.error("Escalations Error:", escError);
 
+        // SLA breach rate
+        const { count: breachedCount, error: breachError } = await supabase
+          .from('support_tickets')
+          .select('*', { count: 'exact', head: true })
+          .in('status', ['open', 'pending'])
+          .lt('sla_breach_at', new Date().toISOString());
+
+        if (breachError) console.error("Breach Error:", breachError);
+
+        const slaBreachRate = (openCount && breachedCount) ? ((breachedCount / openCount) * 100).toFixed(1) : 0;
         // AI Deflection Rate & Confidence Score
         const yesterday = new Date();
         yesterday.setDate(yesterday.getDate() - 1);
