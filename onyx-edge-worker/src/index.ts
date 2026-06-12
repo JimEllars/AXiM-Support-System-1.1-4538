@@ -337,10 +337,6 @@ export default {
       return handleSandboxResolution(request, env, ctx);
     }
 
-    if (url.pathname === "/api/v1/webhooks/sandbox-resolution") {
-      return handleSandboxResolution(request, env, ctx);
-    }
-
 if (url.pathname === "/webhooks/intake") {
       return handleWebhookIntake(request, env, ctx);
     }
@@ -441,6 +437,18 @@ async function handleTicketIngestion(request: Request, env: Env, ctx: any): Prom
               auto_response_draft: onyxAnalysis.draft,
               confidence_score: onyxAnalysis.confidence,
             });
+
+  // Tier 3 Sandbox Egress Dispatch
+  if (onyxAnalysis.confidence < 85) {
+    console.log(`[ESCALATION] Confidence ${onyxAnalysis.confidence} < 85. Dispatching to Sandbox.`);
+    const sandboxUrl = `${env.CORE_API_URL || "https://api.axim-core.internal"}/functions/v1/sandbox-dispatch`;
+
+    fetch(sandboxUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${env.AXIM_SERVICE_KEY}` },
+      body: JSON.stringify({ ticket_id: ticket.id, subject: subject, description: description, customer_email: ticketData.customer_email }),
+    }).catch(err => console.error("Sandbox dispatch failed:", err));
+  }
 
 
 
@@ -1152,48 +1160,6 @@ const { data: ticket, error: ticketError } = await supabase
               auto_response_draft: onyxAnalysis.draft,
               confidence_score: onyxAnalysis.confidence,
             });
-
-  // Tier 3 Sandbox Egress Dispatch
-  if (onyxAnalysis.confidence < 85) {
-    console.log(`[ESCALATION] Confidence ${onyxAnalysis.confidence} < 85. Dispatching to Sandbox.`);
-    const sandboxUrl = `${env.CORE_API_URL || "https://api.axim-core.internal"}/functions/v1/sandbox-dispatch`;
-
-    fetch(sandboxUrl, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${env.AXIM_SERVICE_KEY}`,
-      },
-      body: JSON.stringify({
-        ticket_id: ticket.id,
-        subject: normalizedData.subject,
-        description: normalizedData.description,
-        customer_email: normalizedData.customer_email,
-      }),
-    }).catch(err => console.error("Sandbox dispatch failed:", err));
-  }
-
-
-  // Tier 3 Sandbox Egress Dispatch
-  if (onyxAnalysis.confidence < 85) {
-    console.log(`[ESCALATION] Confidence ${onyxAnalysis.confidence} < 85. Dispatching to Sandbox.`);
-    const sandboxUrl = `${env.CORE_API_URL || "https://api.axim-core.internal"}/functions/v1/sandbox-dispatch`;
-
-    fetch(sandboxUrl, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${env.AXIM_SERVICE_KEY}`,
-      },
-      body: JSON.stringify({
-        ticket_id: ticket.id,
-        subject: normalizedData.subject,
-        description: normalizedData.description,
-        customer_email: normalizedData.customer_email,
-      }),
-    }).catch(err => console.error("Sandbox dispatch failed:", err));
-  }
-
 
 
 
@@ -1941,96 +1907,50 @@ async function handleOnyxBridgeStream(request: Request, env: Env, ctx: any): Pro
 }
 
 async function handleAutoDraft(request: Request, env: Env, ctx: any): Promise<Response> {
-  const supabase = createClient(
-    env.SUPABASE_URL,
-    env.SUPABASE_SERVICE_ROLE_KEY,
-  );
+  const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
   const logCtx = createLogContext(request);
   const startTime = Date.now();
-  ctx.waitUntil(logToEvents(supabase, logCtx, "performance_metric", "Request start", {
-    headers: request.headers,
-  }).catch(() => {}));
+  ctx.waitUntil(logToEvents(supabase, logCtx, "performance_metric", "Request start", { headers: request.headers }).catch(() => {}));
 
   const authHeader = request.headers.get("Authorization");
-  if (authHeader !== `Bearer ${env.AXIM_ONYX_SECRET}`) {
-    return new Response("Unauthorized", { status: 401 });
-  }
+  if (authHeader !== `Bearer ${env.AXIM_ONYX_SECRET}`) return new Response("Unauthorized", { status: 401 });
 
   try {
     const { ticketData, articles } = (await request.json()) as any;
+    let contextText = articles.map((a: any) => `${a.title}: ${a.content}`).join("\n");
 
-    let contextText = articles
-      .map((a: any) => `${a.title}: ${a.content}`)
-      .join("\n");
-
-    // Mocking Claude 3 Haiku API response based on RAG context
-    // In real life, we would use fetch('https://api.anthropic.com/v1/messages', {...}) here.
-
-    const simulatedDraft = `Hello ${ticketData?.contacts_ax2024?.name || "there"},
-
-Based on our knowledge base, here is some relevant information regarding "${ticketData.subject}":
-${contextText ? contextText : "No specific articles found, but we are looking into this."}
-
-I am currently investigating this further and will provide a full update shortly.
-
-Best,
-AXiM Support (Onyx Auto-Draft)`;
-
-    let generatedDraft = simulatedDraft;
-
+    let draft = "";
     if (env.ANTHROPIC_API_KEY) {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 12000);
       try {
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 10000);
-
-        const systemPrompt = "You are Onyx, an AI support co-pilot. Draft a concise, professional initial response to the customer based on the provided context. If the context doesn't contain a full answer, state that we are looking into it.";
-        const userPrompt = `Customer Issue: ${ticketData.subject}
-
-Relevant Context:
-${contextText}`;
-
-        const response = await fetch('https://api.anthropic.com/v1/messages', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'x-api-key': env.ANTHROPIC_API_KEY,
-            'anthropic-version': '2023-06-01'
-          },
+        const response = await fetch("https://api.anthropic.com/v1/messages", {
+          method: "POST",
+          headers: { "x-api-key": env.ANTHROPIC_API_KEY, "anthropic-version": "2023-06-01", "content-type": "application/json" },
           body: JSON.stringify({
-            model: 'claude-3-haiku-20240307',
+            model: "claude-3-haiku-20240307",
             max_tokens: 500,
-            system: systemPrompt,
-            messages: [{ role: 'user', content: userPrompt }]
+            system: "You are an expert technical support agent. Draft a professional reply to the customer based ONLY on the provided knowledge base context.",
+            messages: [{ role: "user", content: `Ticket Subject: ${ticketData.subject}\n\nKnowledge Base:\n${contextText}\n\nDraft a concise, helpful reply:` }]
           }),
           signal: controller.signal
         });
-
         clearTimeout(timeoutId);
-
         if (response.ok) {
-          const anthropicData: any = await response.json();
-          if (anthropicData.content && anthropicData.content[0] && anthropicData.content[0].text) {
-            generatedDraft = anthropicData.content[0].text;
-          }
-        } else {
-          const errText = await response.text(); logErr(supabase, logCtx, new Error("Anthropic API error in handleAutoDraft: " + errText), ctx); console.error("Anthropic API error in handleAutoDraft:", errText);
-        }
-      } catch (err) {
-        logErr(supabase, logCtx, err, ctx); console.error("Anthropic API fetch failed or timed out in handleAutoDraft:", err);
+          const data: any = await response.json();
+          draft = data.content[0].text;
+        } else { throw new Error("Anthropic API failed"); }
+      } catch (e) {
+        draft = `Hello ${ticketData?.contacts_ax2024?.name || "there"},\n\nBased on our knowledge base:\n${contextText || "No articles found."}\n\nWe are looking into this.`;
       }
+    } else {
+      draft = `Hello ${ticketData?.contacts_ax2024?.name || "there"},\n\nBased on our knowledge base:\n${contextText || "No articles found."}\n\nWe are looking into this.`;
     }
 
-    return new Response(JSON.stringify({ draft: generatedDraft }), {
-
-      headers: {
-        "Content-Type": "application/json",
-        ...getCorsHeaders(env, request),
-      },
-    });
+    return new Response(JSON.stringify({ draft }), { headers: { "Content-Type": "application/json", ...getCorsHeaders(env, request) } });
   } catch (e: any) {
     logErr(supabase, logCtx, e, ctx);
-
-    return new Response(JSON.stringify({ error: e instanceof Error ? e.message : String(e) }), { status: 500 });
+    return new Response(JSON.stringify({ error: e.message }), { status: 500 });
   }
 }
 
@@ -2355,30 +2275,20 @@ async function handleFeedbackIngress(request: Request, env: Env, ctx: any): Prom
 
 async function handleSandboxResolution(request: Request, env: Env, ctx: any): Promise<Response> {
   const authHeader = request.headers.get("Authorization");
-  if (authHeader !== `Bearer ${env.AXIM_SERVICE_KEY}`) {
-    return new Response("Unauthorized Vault Access", { status: 401 });
-  }
+  if (authHeader !== `Bearer ${env.AXIM_SERVICE_KEY}`) return new Response("Unauthorized Vault Access", { status: 401 });
 
   try {
     const payload = await request.json() as any;
     const { ticket_id, resolution_notes, patch_payload } = payload;
-
     const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
 
-    // Create pending HITL execution block
     const { data: hitlLog, error: hitlError } = await supabase.from("hitl_audit_logs").insert({
-      status: 'pending',
-      tool_type: 'apply_git_patch',
-      payload: patch_payload,
-      support_ticket_id: ticket_id
+      status: 'pending', tool_type: 'apply_git_patch', payload: patch_payload, support_ticket_id: ticket_id
     }).select().single();
-
     if (hitlError) throw hitlError;
 
-    // Inject proposed action into the message thread
     await supabase.from("ticket_messages").insert({
-      ticket_id: ticket_id,
-      sender_id: 'onyx_system',
+      ticket_id: ticket_id, sender_id: 'onyx_system',
       message_body: resolution_notes || "Tier 3 Sandbox Agent has proposed a code resolution.",
       metadata: { hitl_log_id: hitlLog.id }
     });
