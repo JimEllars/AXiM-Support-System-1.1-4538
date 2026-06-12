@@ -333,10 +333,14 @@ export default {
 
 
     if (url.pathname === "/api/v1/webhooks/sandbox-resolution") {
-      return handleSandboxResolution(request, env);
+      return handleSandboxResolution(request, env, ctx);
     }
 
-    if (url.pathname === "/webhooks/intake") {
+    if (url.pathname === "/api/v1/webhooks/sandbox-resolution") {
+      return handleSandboxResolution(request, env, ctx);
+    }
+
+if (url.pathname === "/webhooks/intake") {
       return handleWebhookIntake(request, env, ctx);
     }
 
@@ -679,52 +683,7 @@ async function handlePublicWebIngress(request: Request, env: Env, ctx: any): Pro
 }
 
 
-async function handleSandboxResolution(request: Request, env: Env): Promise<Response> {
-  const cors = getCorsHeaders(env, request);
-  if (request.method === "OPTIONS") return new Response(null, { headers: cors });
 
-  try {
-    const authHeader = request.headers.get("Authorization");
-    if (authHeader !== `Bearer ${env.AXIM_SERVICE_KEY}`) {
-      return new Response(JSON.stringify({ error: "Unauthorized" }), { status: 401, headers: { ...cors, "Content-Type": "application/json" } });
-    }
-
-    const { ticket_id, resolution_notes, patch_payload } = await request.json() as any;
-
-    const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
-
-    const { data: hitlLog, error: hitlError } = await supabase
-      .from("hitl_audit_logs")
-      .insert({
-        status: 'pending',
-        tool_type: 'apply_git_patch',
-        proposed_payload: patch_payload,
-        ticket_id: ticket_id,
-        action_required: 'Review patch and apply'
-      })
-      .select()
-      .single();
-
-    if (hitlError) throw hitlError;
-
-    const { error: msgError } = await supabase
-      .from("ticket_messages")
-      .insert({
-        ticket_id: ticket_id,
-        sender_id: 'onyx_system',
-        message_body: resolution_notes,
-        metadata: { hitl_log_id: hitlLog.id },
-        is_internal_note: true
-      });
-
-    if (msgError) throw msgError;
-
-    return new Response(JSON.stringify({ success: true }), { status: 200, headers: { ...cors, "Content-Type": "application/json" } });
-  } catch (error: any) {
-    console.error("[handleSandboxResolution] Error:", error);
-    return new Response(JSON.stringify({ error: "Internal server error" }), { status: 500, headers: { ...cors, "Content-Type": "application/json" } });
-  }
-}
 
 async function handleWebhookIntake(request: Request, env: Env, ctx: any): Promise<Response> {
   const contentLength = request.headers.get("content-length");
@@ -1192,6 +1151,48 @@ const { data: ticket, error: ticketError } = await supabase
               auto_response_draft: onyxAnalysis.draft,
               confidence_score: onyxAnalysis.confidence,
             });
+
+  // Tier 3 Sandbox Egress Dispatch
+  if (onyxAnalysis.confidence < 85) {
+    console.log(`[ESCALATION] Confidence ${onyxAnalysis.confidence} < 85. Dispatching to Sandbox.`);
+    const sandboxUrl = `${env.CORE_API_URL || "https://api.axim-core.internal"}/functions/v1/sandbox-dispatch`;
+
+    fetch(sandboxUrl, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${env.AXIM_SERVICE_KEY}`,
+      },
+      body: JSON.stringify({
+        ticket_id: ticket.id,
+        subject: normalizedData.subject,
+        description: normalizedData.description,
+        customer_email: normalizedData.customer_email,
+      }),
+    }).catch(err => console.error("Sandbox dispatch failed:", err));
+  }
+
+
+  // Tier 3 Sandbox Egress Dispatch
+  if (onyxAnalysis.confidence < 85) {
+    console.log(`[ESCALATION] Confidence ${onyxAnalysis.confidence} < 85. Dispatching to Sandbox.`);
+    const sandboxUrl = `${env.CORE_API_URL || "https://api.axim-core.internal"}/functions/v1/sandbox-dispatch`;
+
+    fetch(sandboxUrl, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${env.AXIM_SERVICE_KEY}`,
+      },
+      body: JSON.stringify({
+        ticket_id: ticket.id,
+        subject: normalizedData.subject,
+        description: normalizedData.description,
+        customer_email: normalizedData.customer_email,
+      }),
+    }).catch(err => console.error("Sandbox dispatch failed:", err));
+  }
+
 
 
 
@@ -2254,5 +2255,47 @@ async function handleFeedbackIngress(request: Request, env: Env, ctx: any): Prom
   } catch (err: any) {
     console.error("Feedback Ingress Error:", err);
     return new Response(JSON.stringify({ error: "Internal server error" }), { status: 500, headers: { ...getCorsHeaders(env, request), 'Content-Type': 'application/json' } });
+  }
+}
+
+
+
+
+
+
+
+async function handleSandboxResolution(request: Request, env: Env, ctx: any): Promise<Response> {
+  const authHeader = request.headers.get("Authorization");
+  if (authHeader !== `Bearer ${env.AXIM_SERVICE_KEY}`) {
+    return new Response("Unauthorized Vault Access", { status: 401 });
+  }
+
+  try {
+    const payload = await request.json() as any;
+    const { ticket_id, resolution_notes, patch_payload } = payload;
+
+    const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
+
+    // Create pending HITL execution block
+    const { data: hitlLog, error: hitlError } = await supabase.from("hitl_audit_logs").insert({
+      status: 'pending',
+      tool_type: 'apply_git_patch',
+      payload: patch_payload,
+      support_ticket_id: ticket_id
+    }).select().single();
+
+    if (hitlError) throw hitlError;
+
+    // Inject proposed action into the message thread
+    await supabase.from("ticket_messages").insert({
+      ticket_id: ticket_id,
+      sender_id: 'onyx_system',
+      message_body: resolution_notes || "Tier 3 Sandbox Agent has proposed a code resolution.",
+      metadata: { hitl_log_id: hitlLog.id }
+    });
+
+    return new Response(JSON.stringify({ success: true }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+  } catch (err: any) {
+    return new Response(JSON.stringify({ error: err.message }), { status: 500 });
   }
 }
