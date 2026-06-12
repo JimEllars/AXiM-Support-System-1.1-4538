@@ -16,6 +16,7 @@ export default function SupportMetrics() {
   useEffect(() => {
     let isMounted = true;
 
+
     async function fetchMetrics() {
       try {
         // Active Queue Size
@@ -34,38 +35,70 @@ export default function SupportMetrics() {
 
         if (escError) console.error("Escalations Error:", escError);
 
-        // AI Deflection Rate
-        // 1. Total tickets in last 24h
+        // AI Deflection Rate & Confidence Score
         const yesterday = new Date();
         yesterday.setDate(yesterday.getDate() - 1);
         const yesterdayIso = yesterday.toISOString();
 
-        const { count: totalRecent, error: totError } = await supabase
+        const { data: telemetryData, error: totError } = await supabase
           .from('ticket_ai_telemetry')
-          .select('*', { count: 'exact', head: true })
+          .select('confidence_score, created_at')
           .gte('created_at', yesterdayIso);
 
         if (totError) console.error("Total Telemetry Error:", totError);
 
-        // 2. Deflected tickets in last 24h
-        const { count: deflectedCount, error: defError } = await supabase
-          .from('ticket_ai_telemetry')
-          .select('*', { count: 'exact', head: true })
-          .gte('created_at', yesterdayIso)
-          .gt('confidence_score', 90);
+        let totalRecent = 0;
+        let deflectedCount = 0;
+        let sumConfidence = 0;
 
-        if (defError) console.error("Deflected Telemetry Error:", defError);
+        if (telemetryData) {
+          totalRecent = telemetryData.length;
+          telemetryData.forEach(item => {
+            const score = item.confidence_score || 0;
+            sumConfidence += score;
+            if (score > 90) {
+              deflectedCount++;
+            }
+          });
+        }
 
-        const aiRate = totalRecent > 0 && deflectedCount !== null
+        const aiRate = totalRecent > 0
           ? ((deflectedCount / totalRecent) * 100).toFixed(1)
           : 0;
+
+        const avgConfidence = totalRecent > 0
+          ? (sumConfidence / totalRecent).toFixed(1)
+          : 0;
+
+        // Fetch volume trend for the last 7 days
+        const sevenDaysAgo = new Date();
+        sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 6);
+        sevenDaysAgo.setHours(0, 0, 0, 0);
+
+        const { data: trendData, error: trendError } = await supabase
+          .from('support_tickets')
+          .select('created_at')
+          .gte('created_at', sevenDaysAgo.toISOString());
+
+        let volumeTrend = [0, 0, 0, 0, 0, 0, 0];
+        if (trendData && !trendError) {
+          trendData.forEach(ticket => {
+            const ticketDate = new Date(ticket.created_at);
+            const diffTime = Math.abs(new Date().setHours(0,0,0,0) - ticketDate.setHours(0,0,0,0));
+            const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+            if (diffDays < 7) {
+              volumeTrend[6 - diffDays]++; // 6 is today, 0 is 6 days ago
+            }
+          });
+        }
 
         if (isMounted) {
           setMetrics({
             activeQueue: openCount || 0,
             escalations: escalatedCount || 0,
             aiDeflectionRate: aiRate,
-            volumeTrend: [10, 20, 15, 30, 25, openCount || 0, 5] // Mock trend for now
+            avgConfidence: avgConfidence,
+            volumeTrend: volumeTrend
           });
           setIsLoading(false);
         }
@@ -74,6 +107,7 @@ export default function SupportMetrics() {
         if (isMounted) setIsLoading(false);
       }
     }
+
 
     fetchMetrics();
 
