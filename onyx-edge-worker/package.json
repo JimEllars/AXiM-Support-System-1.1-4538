@@ -7,7 +7,7 @@
     "zod": "^4.4.3"
   },
   "devDependencies": {
-    "@cloudflare/workers-types": "^4.20260611.1",
+    "@cloudflare/workers-types": "^4.20260612.1",
     "@types/node": "^25.7.0",
     "esbuild": "^0.17.18",
     "typescript": "^6.0.3",
