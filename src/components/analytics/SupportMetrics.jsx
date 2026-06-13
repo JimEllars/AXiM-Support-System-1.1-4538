@@ -8,6 +8,7 @@ export default function SupportMetrics() {
     activeQueue: 0,
     escalations: 0,
     aiDeflectionRate: 0,
+    slaBreachRate: 0,
     volumeTrend: [0, 0, 0, 0, 0, 0, 0]
   });
 
@@ -107,6 +108,7 @@ export default function SupportMetrics() {
             activeQueue: openCount || 0,
             escalations: escalatedCount || 0,
             aiDeflectionRate: aiRate,
+            slaBreachRate: slaBreachRate || 0,
             avgConfidence: avgConfidence,
             volumeTrend: volumeTrend
           });
@@ -165,7 +167,7 @@ export default function SupportMetrics() {
   const dashOffset = circleCircumference - (metrics.aiDeflectionRate / 100) * circleCircumference;
 
   return (
-    <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+    <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
       <div className="glass-panel p-6 rounded-2xl relative overflow-hidden">
         {isLoading && <div className="absolute inset-0 bg-zinc-900/50 flex items-center justify-center backdrop-blur-sm z-10"><div className="w-5 h-5 border-2 border-cyan-500 border-t-transparent rounded-full animate-spin"></div></div>}
         <p className="text-zinc-500 text-xs font-bold uppercase tracking-widest">Active Queue</p>
@@ -219,6 +221,13 @@ export default function SupportMetrics() {
             />
           </svg>
         </div>
+      </div>
+      {/* Phase 37: Added SLA Breach Rate metric display */}
+      <div className={`glass-panel p-6 rounded-2xl border-l-2 relative overflow-hidden ${metrics.slaBreachRate > 10 ? 'border-l-rose-500/50' : 'border-l-amber-500/50'}`}>
+        {isLoading && <div className="absolute inset-0 bg-zinc-900/50 flex items-center justify-center backdrop-blur-sm z-10"><div className="w-5 h-5 border-2 border-amber-500 border-t-transparent rounded-full animate-spin"></div></div>}
+        <p className="text-zinc-500 text-xs font-bold uppercase tracking-widest">SLA Breach Rate</p>
+        <h3 className={`text-3xl font-black mt-2 ${metrics.slaBreachRate > 10 ? 'text-rose-500' : 'text-amber-400'}`}>{metrics.slaBreachRate}%</h3>
+        <div className={`mt-2 text-[10px] font-medium tracking-widest ${metrics.slaBreachRate > 10 ? 'text-rose-500/80' : 'text-amber-500/80'}`}>OVER 24H SLA</div>
       </div>
     </div>
   );
