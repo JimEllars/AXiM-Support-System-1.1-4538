@@ -412,6 +412,7 @@ async function handleTicketIngestion(request: Request, env: Env, ctx: any): Prom
             if (updateError) throw updateError;
 
 
+            // Phase 37: Duplicate sandbox dispatch removed. First dispatch kept.
             if (onyxAnalysis.confidence < 85) {
               console.log(`[ESCALATION] Confidence ${onyxAnalysis.confidence} < 85. Dispatching to Sandbox.`);
               fetch(`${env.CORE_API_URL || "https://api.axim-core.internal"}/functions/v1/sandbox-dispatch`, {
@@ -437,18 +438,6 @@ async function handleTicketIngestion(request: Request, env: Env, ctx: any): Prom
               auto_response_draft: onyxAnalysis.draft,
               confidence_score: onyxAnalysis.confidence,
             });
-
-  // Tier 3 Sandbox Egress Dispatch
-  if (onyxAnalysis.confidence < 85) {
-    console.log(`[ESCALATION] Confidence ${onyxAnalysis.confidence} < 85. Dispatching to Sandbox.`);
-    const sandboxUrl = `${env.CORE_API_URL || "https://api.axim-core.internal"}/functions/v1/sandbox-dispatch`;
-
-    fetch(sandboxUrl, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${env.AXIM_SERVICE_KEY}` },
-      body: JSON.stringify({ ticket_id: ticket.id, subject: subject, description: description, customer_email: ticketData.customer_email }),
-    }).catch(err => console.error("Sandbox dispatch failed:", err));
-  }
 
 
 
@@ -1052,30 +1041,8 @@ const { data: ticket, error: ticketError } = await supabase
             }
 
             // Sentinel Logic: Run vector search and attempt deflection
-            let embedding: any[] = [];
-            try {
-              const embedRes = await fetch(
-                `${env.CORE_API_URL || "https://api.axim-core.internal"}/functions/v1/generate-embedding`,
-                {
-                  method: "POST",
-                  headers: {
-                    "Content-Type": "application/json",
-                    Authorization: `Bearer ${env.AXIM_SERVICE_KEY}`,
-                  },
-                  body: JSON.stringify({
-                    input: `${normalizedData.subject} ${normalizedData.description || ""}`,
-                  }),
-                },
-              );
-              if (embedRes.ok) {
-                const embedData: any = await embedRes.json();
-                if (embedData.embedding) embedding = embedData.embedding;
-              } else {
-                logErr(supabase, logCtx, new Error("Embedding API error: " + (await embedRes.text())), ctx);
-              }
-            } catch (err) {
-              logErr(supabase, logCtx, err, ctx);
-            }
+            // Phase 37: Reusing shared embedding for KB match to prevent double generation
+            let embedding: any[] = embeddingForRag;
 
             if (embedding.length > 0) {
               const { data: searchResults, error: searchError } = await supabase.rpc(
@@ -1854,28 +1821,58 @@ async function handleOnyxBridgeStream(request: Request, env: Env, ctx: any): Pro
         });
       }
 
-      await new Promise((r) => setTimeout(r, 1000));
-      sendEvent({ type: "log", message: `Analyzing ticket ${ticketId}...` });
-
-      await new Promise((r) => setTimeout(r, 1500));
-      sendEvent({ type: "log", message: "Checking knowledge base..." });
-
-      await new Promise((r) => setTimeout(r, 1500));
-      sendEvent({ type: "log", message: "Verifying user permissions..." });
-
-      await new Promise((r) => setTimeout(r, 1000));
-
+      // Phase 37: Activated OnyxBridgeStream with real Anthropic analysis
       if (ticketId) {
-        await supabase.from("events_ax2024").insert({
-          type: "onyx_presence",
-          payload: {
-            ticket_id: ticketId,
-            status: "Complete",
-            message: "Investigation complete.",
-          },
-        });
+        sendEvent({ type: "log", message: `Fetching ticket data for ${ticketId}...` });
+
+        const { data: ticket, error: fetchError } = await supabase
+          .from("support_tickets")
+          .select("subject, description, priority, status")
+          .eq("id", ticketId)
+          .single();
+
+        if (fetchError || !ticket) {
+          sendEvent({ type: "log", message: "Failed to fetch ticket data." });
+          sendEvent({ type: "complete", analysis: null });
+        } else {
+          sendEvent({ type: "log", message: "Analyzing context via Anthropic Haiku..." });
+
+          const controllerAuth = new AbortController();
+          const timeoutId = setTimeout(() => controllerAuth.abort(), 15000); // 15s timeout
+
+          try {
+            const analysis = await analyzeWithOnyx(ticket.subject, ticket.description, env.ANTHROPIC_API_KEY, null, null, "");
+            clearTimeout(timeoutId);
+
+            sendEvent({
+              type: "log",
+              message: `Triage complete. Priority: ${analysis.priority}. Confidence: ${analysis.confidence}%`
+            });
+
+            await supabase.from("events_ax2024").insert({
+              type: "onyx_presence",
+              payload: {
+                ticket_id: ticketId,
+                status: "Complete",
+                message: "Investigation complete.",
+              },
+            });
+
+            sendEvent({ type: "complete", analysis: {
+              priority: analysis.priority,
+              confidence: analysis.confidence,
+              sentiment: analysis.sentiment,
+              category: analysis.category
+            }});
+          } catch (aiError) {
+            clearTimeout(timeoutId);
+            sendEvent({ type: "log", message: "AI analysis timed out or failed." });
+            sendEvent({ type: "complete", analysis: null });
+          }
+        }
+      } else {
+         sendEvent({ type: "complete", analysis: null });
       }
-      sendEvent({ type: "complete" });
 
       controller?.close();
     } catch (e: any) {
@@ -2295,6 +2292,10 @@ async function handleSandboxResolution(request: Request, env: Env, ctx: any): Pr
 
     return new Response(JSON.stringify({ success: true }), { status: 200, headers: { 'Content-Type': 'application/json' } });
   } catch (err: any) {
-    return new Response(JSON.stringify({ error: err.message }), { status: 500 });
+    // Phase 37: Added CORS headers to error response
+    return new Response(JSON.stringify({ error: err.message }), {
+      status: 500,
+      headers: { ...getCorsHeaders(env, request), 'Content-Type': 'application/json' }
+    });
   }
 }
