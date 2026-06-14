@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { useTranslation } from "react-i18next";
 import { useTicketStore } from '../store/useTicketStore';
 import { motion, AnimatePresence } from 'framer-motion';
 import SafeIcon from '../common/SafeIcon';
@@ -9,6 +10,7 @@ import toast from 'react-hot-toast';
 const { FiX, FiSend, FiLoader, FiCpu, FiTerminal, FiPlus } = FiIcons;
 
 export default function CreateTicketModal({ isOpen, onClose, onSuccess }) {
+  const { t } = useTranslation();
   const [loading, setLoading] = useState(false);
   const [form, setForm] = useState({ subject: '', description: '' });
 
@@ -120,7 +122,7 @@ export default function CreateTicketModal({ isOpen, onClose, onSuccess }) {
                   ) : (
                     <>
                       <SafeIcon icon={FiSend} className="text-xl" />
-                      <span>INITIALIZE_TICKET</span>
+                      <span>{t("submit_ticket")}</span>
                     </>
                   )}
                 </div>

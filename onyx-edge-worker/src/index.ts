@@ -8,6 +8,29 @@ import { createClient } from "@supabase/supabase-js";
 import { z } from "zod";
 
 const WebhookIntakeSchema = z.object({
+async function verifyWebhookSignature(request: Request, env: Env, payloadText: string): Promise<boolean> {
+  const signature = request.headers.get("x-axim-signature");
+  if (!signature) return false;
+
+  const encoder = new TextEncoder();
+  const key = await crypto.subtle.importKey(
+    "raw",
+    encoder.encode(env.AXIM_ONYX_SECRET),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["verify"]
+  );
+
+  const signatureBuffer = hexStringToUint8Array(signature);
+  return await crypto.subtle.verify("HMAC", key, signatureBuffer, encoder.encode(payloadText));
+}
+
+function hexStringToUint8Array(hexString: string): Uint8Array {
+  const bytes = new Uint8Array(Math.ceil(hexString.length / 2));
+  for (let i = 0; i < bytes.length; i++) bytes[i] = parseInt(hexString.substring(i * 2, i * 2 + 2), 16);
+  return bytes;
+}
+
   subject: z.string().min(1).max(500),
   description: z.string().optional(),
   customer_email: z.string().email(),
@@ -693,6 +716,18 @@ async function handlePublicWebIngress(request: Request, env: Env, ctx: any): Pro
 
 
 async function handleWebhookIntake(request: Request, env: Env, ctx: any): Promise<Response> {
+  let payloadText = "";
+  if (request.method !== "GET" && request.method !== "HEAD") {
+    // clone request to read body as text for verification
+    payloadText = await request.clone().text();
+  }
+
+  if (!request.headers.get("X-Axim-Default-Source")) {
+    const isVerified = await verifyWebhookSignature(request, env, payloadText);
+    if (!isVerified) {
+      return new Response(JSON.stringify({ error: "Unauthorized: Invalid Signature" }), { status: 401, headers: getCorsHeaders(env, request) });
+    }
+  }
   const contentLength = request.headers.get("content-length");
   if (contentLength && parseInt(contentLength) > 5 * 1024 * 1024) {
     return new Response(JSON.stringify({ error: "Payload exceeds maximum allowed size of 5MB." }), {
@@ -1701,7 +1736,50 @@ async function handleTicketResolved(request: Request, env: Env, ctx: any): Promi
 
     // 1. Push to AXiM Core memory_banks (Ecosystem Fusion)
 
-    let embeddingForMemory: any[] | null = null;
+    // 1a. RCA Quality Scoring Engine
+    let rcaScore = 10; // Default to pass if anthropic is missing
+    if (env.ANTHROPIC_API_KEY) {
+      try {
+        const scoreRes = await fetch("https://api.anthropic.com/v1/messages", {
+          method: "POST",
+          headers: {
+            "x-api-key": env.ANTHROPIC_API_KEY,
+            "anthropic-version": "2023-06-01",
+            "content-type": "application/json",
+          },
+          body: JSON.stringify({
+            model: "claude-3-haiku-20240307",
+            max_tokens: 10,
+            messages: [{
+              role: "user",
+              content: `Grade the following Root Cause Analysis on a scale of 1 to 10 for clarity, accuracy, and formatting. Return ONLY the integer score.\n\n${rcaMarkdown}`
+            }]
+          }),
+        });
+        if (scoreRes.ok) {
+          const scoreData: any = await scoreRes.json();
+          const scoreText = scoreData.content[0].text.trim();
+          const parsedScore = parseInt(scoreText, 10);
+          if (!isNaN(parsedScore)) {
+            rcaScore = parsedScore;
+          }
+        }
+      } catch (err) {
+        logErr(supabase, logCtx, err, ctx);
+      }
+    }
+
+    if (rcaScore < 8) {
+      // Route to HITL for review
+      await supabase.from("hitl_audit_logs").insert({
+        ticket_id: record.id,
+        status: "pending",
+        action_required: "RCA Quality Review",
+        context: { rcaDraft: rcaMarkdown, score: rcaScore }
+      });
+    } else {
+      // Proceed with embedding and memory_banks insertion
+          let embeddingForMemory: any[] | null = null;
     try {
       const embedRes = await fetch(
         `${env.CORE_API_URL || "https://api.axim-core.internal"}/functions/v1/generate-embedding`,
@@ -1735,7 +1813,8 @@ async function handleTicketResolved(request: Request, env: Env, ctx: any): Promi
       },
     });
 
-    // 2. Push to events_ax2024
+    }
+        // 2. Push to events_ax2024
     await supabase.from("events_ax2024").insert({
       type: "rca_generated",
       payload: {
