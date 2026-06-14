@@ -71,11 +71,7 @@ export default function OnyxInvestigationPanel({
       )
       .subscribe();
 
-    return () => {
-      supabase.removeChannel(channel);
-      setLogs([]);
-      setIsActive(false);
-    };
+    return () => { supabase.removeChannel(channel); setLogs([]); setIsActive(false); };
   }, [ticketId, isInvestigating]);
 
   if (!isActive && logs.length === 0) return null;

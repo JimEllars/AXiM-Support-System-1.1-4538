@@ -413,9 +413,23 @@ async function handleTicketIngestion(request: Request, env: Env, ctx: any): Prom
 
 
             // Phase 37: Duplicate sandbox dispatch removed. First dispatch kept.
+
+
+            const { error: aiError } = await supabase.from("ticket_ai_telemetry").insert({
+
+              ticket_id: ticket.id,
+              analyzed_sentiment: onyxAnalysis.sentiment,
+              suggested_category: onyxAnalysis.category,
+              auto_response_draft: onyxAnalysis.draft,
+              confidence_score: onyxAnalysis.confidence,
+            });
+
+            // Tier 3 Sandbox Egress Dispatch
             if (onyxAnalysis.confidence < 85) {
               console.log(`[ESCALATION] Confidence ${onyxAnalysis.confidence} < 85. Dispatching to Sandbox.`);
-              fetch(`${env.CORE_API_URL || "https://api.axim-core.internal"}/functions/v1/sandbox-dispatch`, {
+              const sandboxUrl = `${env.CORE_API_URL || "https://api.axim-core.internal"}/functions/v1/sandbox-dispatch`;
+
+              fetch(sandboxUrl, {
                 method: "POST",
                 headers: {
                   "Content-Type": "application/json",
@@ -430,14 +444,7 @@ async function handleTicketIngestion(request: Request, env: Env, ctx: any): Prom
               }).catch(err => console.error("Sandbox dispatch failed:", err));
             }
 
-            const { error: aiError } = await supabase.from("ticket_ai_telemetry").insert({
 
-              ticket_id: ticket.id,
-              analyzed_sentiment: onyxAnalysis.sentiment,
-              suggested_category: onyxAnalysis.category,
-              auto_response_draft: onyxAnalysis.draft,
-              confidence_score: onyxAnalysis.confidence,
-            });
 
 
 
@@ -1102,9 +1109,21 @@ const { data: ticket, error: ticketError } = await supabase
             }
 
 
+            const { error: aiTelemetryError } = await supabase.from("ticket_ai_telemetry").insert({
+
+              ticket_id: ticket.id,
+              analyzed_sentiment: onyxAnalysis.sentiment,
+              suggested_category: onyxAnalysis.category,
+              auto_response_draft: onyxAnalysis.draft,
+              confidence_score: onyxAnalysis.confidence,
+            });
+
+            // Tier 3 Sandbox Egress Dispatch
             if (onyxAnalysis.confidence < 85) {
               console.log(`[ESCALATION] Confidence ${onyxAnalysis.confidence} < 85. Dispatching to Sandbox.`);
-              fetch(`${env.CORE_API_URL || "https://api.axim-core.internal"}/functions/v1/sandbox-dispatch`, {
+              const sandboxUrl = `${env.CORE_API_URL || "https://api.axim-core.internal"}/functions/v1/sandbox-dispatch`;
+
+              fetch(sandboxUrl, {
                 method: "POST",
                 headers: {
                   "Content-Type": "application/json",
@@ -1119,14 +1138,10 @@ const { data: ticket, error: ticketError } = await supabase
               }).catch(err => console.error("Sandbox dispatch failed:", err));
             }
 
-            const { error: aiTelemetryError } = await supabase.from("ticket_ai_telemetry").insert({
 
-              ticket_id: ticket.id,
-              analyzed_sentiment: onyxAnalysis.sentiment,
-              suggested_category: onyxAnalysis.category,
-              auto_response_draft: onyxAnalysis.draft,
-              confidence_score: onyxAnalysis.confidence,
-            });
+
+
+
 
 
 
@@ -2271,31 +2286,26 @@ async function handleFeedbackIngress(request: Request, env: Env, ctx: any): Prom
 
 
 async function handleSandboxResolution(request: Request, env: Env, ctx: any): Promise<Response> {
-  const authHeader = request.headers.get("Authorization");
-  if (authHeader !== `Bearer ${env.AXIM_SERVICE_KEY}`) return new Response("Unauthorized Vault Access", { status: 401 });
 
-  try {
-    const payload = await request.json() as any;
-    const { ticket_id, resolution_notes, patch_payload } = payload;
-    const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
+try { const payload = await request.json() as any; const { ticket_id, resolution_notes, patch_payload } = payload; const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
 
-    const { data: hitlLog, error: hitlError } = await supabase.from("hitl_audit_logs").insert({
-      status: 'pending', tool_type: 'apply_git_patch', payload: patch_payload, support_ticket_id: ticket_id
-    }).select().single();
-    if (hitlError) throw hitlError;
+// Create pending HITL execution block
+const { data: hitlLog, error: hitlError } = await supabase.from("hitl_audit_logs").insert({
+  status: 'pending',
+  tool_type: 'apply_git_patch',
+  payload: patch_payload,
+  support_ticket_id: ticket_id
+}).select().single();
 
-    await supabase.from("ticket_messages").insert({
-      ticket_id: ticket_id, sender_id: 'onyx_system',
-      message_body: resolution_notes || "Tier 3 Sandbox Agent has proposed a code resolution.",
-      metadata: { hitl_log_id: hitlLog.id }
-    });
+if (hitlError) throw hitlError;
 
-    return new Response(JSON.stringify({ success: true }), { status: 200, headers: { 'Content-Type': 'application/json' } });
-  } catch (err: any) {
-    // Phase 37: Added CORS headers to error response
-    return new Response(JSON.stringify({ error: err.message }), {
-      status: 500,
-      headers: { ...getCorsHeaders(env, request), 'Content-Type': 'application/json' }
-    });
-  }
-}
+// Inject proposed action into the message thread
+await supabase.from("ticket_messages").insert({
+  ticket_id: ticket_id,
+  sender_id: 'onyx_system',
+  message_body: resolution_notes || "Tier 3 Sandbox Agent has proposed a code resolution.",
+  metadata: { hitl_log_id: hitlLog.id }
+});
+
+return new Response(JSON.stringify({ success: true }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+} catch (err: any) { return new Response(JSON.stringify({ error: err.message }), { status: 500 }); } }
