@@ -2273,23 +2273,29 @@ This case has been marked as closed. How did we do? Please let us know by visiti
           text: finalBody,
         };
 
-        // Fire and forget generic external API placeholder
-        const resendRes = await fetch("https://api.resend.com/emails", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "Authorization": `Bearer ${env.RESEND_API_KEY}`,
-          },
-          body: JSON.stringify(emailPayload),
-        });
+      // Fire and forget external API, with graceful degradation logging
+      const resendRes = await fetch("https://api.resend.com/emails", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${env.RESEND_API_KEY}`,
+        },
+        body: JSON.stringify(emailPayload),
+      });
 
-        if (!resendRes.ok) {
-           const errText = await resendRes.text();
-           await supabase.from("events_ax2024").insert({
-              type: "error",
-              payload: { function: "emailDispatch", ticket_id: record.ticket_id, error: errText }
-           });
-        }
+      if (!resendRes.ok) {
+         const errText = await resendRes.text();
+         console.error("Email dispatch failed:", errText);
+         await supabase.from("events_ax2024").insert({
+            type: "error",
+            payload: {
+              function: "emailDispatch",
+              ticket_id: record.ticket_id,
+              error: errText,
+              timestamp: new Date().toISOString()
+            }
+         });
+      }
       } catch (err) {
         console.error("Error in email dispatch background task", err);
       }
