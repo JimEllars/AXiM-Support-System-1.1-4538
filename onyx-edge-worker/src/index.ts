@@ -8,6 +8,13 @@ import { createClient } from "@supabase/supabase-js";
 import { z } from "zod";
 
 const WebhookIntakeSchema = z.object({
+  subject: z.string().min(1).max(500),
+  description: z.string().optional(),
+  customer_email: z.string().email(),
+  customer_name: z.string().optional(),
+  priority: z.enum(["low", "medium", "high", "urgent"]).optional(),
+});
+
 async function verifyWebhookSignature(request: Request, env: Env, payloadText: string): Promise<boolean> {
   const signature = request.headers.get("x-axim-signature");
   if (!signature) return false;
@@ -31,12 +38,7 @@ function hexStringToUint8Array(hexString: string): Uint8Array {
   return bytes;
 }
 
-  subject: z.string().min(1).max(500),
-  description: z.string().optional(),
-  customer_email: z.string().email(),
-  customer_name: z.string().optional(),
-  priority: z.enum(["low", "medium", "high", "urgent"]).optional(),
-});
+
 
 const ToolCommandSchema = z.object({
   hitlLogId: z.string().uuid(),
@@ -2272,20 +2274,26 @@ This case has been marked as closed. How did we do? Please let us know by visiti
         };
 
         // Fire and forget generic external API placeholder
-        await fetch("https://api.resend.com/emails", {
+        const resendRes = await fetch("https://api.resend.com/emails", {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
             "Authorization": `Bearer ${env.RESEND_API_KEY}`,
           },
           body: JSON.stringify(emailPayload),
-        }).catch(err => console.error("Email dispatch failed", err));
+        });
 
+        if (!resendRes.ok) {
+           const errText = await resendRes.text();
+           await supabase.from("events_ax2024").insert({
+              type: "error",
+              payload: { function: "emailDispatch", ticket_id: record.ticket_id, error: errText }
+           });
+        }
       } catch (err) {
         console.error("Error in email dispatch background task", err);
       }
     };
-
 
     ctx.waitUntil(emailDispatch());
 

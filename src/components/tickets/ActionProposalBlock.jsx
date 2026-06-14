@@ -42,60 +42,56 @@ export default function ActionProposalBlock({ hitlLog }) {
     fetchLog();
   }, [hitlLogId, hitlLog]);
 
-  const handleExecuteAction = async (action) => {
-    if (isExecuting) return;
+  const handleExecute = async () => {
+  setIsExecuting(true);
+  try {
+    // Direct call to the Onyx Edge Worker
+    const workerUrl = import.meta.env.VITE_ONYX_WORKER_URL || 'http://localhost:8787';
+    const response = await fetch(`${workerUrl}/api/v1/actions/resolve`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        // Assuming session/auth token maps to the Onyx Secret for internal cockpit use
+        'Authorization': `Bearer ${import.meta.env.VITE_AXIM_ONYX_SECRET}`
+      },
+      body: JSON.stringify({ hitlLogId: hitlLog.id })
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json();
+      throw new Error(errorData.error || 'Action execution failed at the edge');
+    }
+
+    toast.success("Action executed successfully via Core Proxy.");
+    // Optional: Fire an event or callback to refresh the thread
+    setLog(prev => ({ ...prev, status: 'approved' }));
+  } catch (err) {
+    console.error(err);
+    toast.error(`Execution Error: ${err.message}`);
+  } finally {
+    setIsExecuting(false);
+  }
+};
+
+const handleReject = async () => {
     setIsExecuting(true);
-    if (!log) return;
-    const newStatus = action === 'approve' ? 'approved' : 'rejected';
-
-    // Optimistic update
-    setLog({ ...log, status: newStatus });
-
     try {
         const { error } = await supabase
             .from('hitl_audit_logs')
-            .update({ status: newStatus, updated_at: new Date() })
+            .update({ status: 'rejected', updated_at: new Date() })
             .eq('id', hitlLogId);
 
         if (error) throw error;
-
-        if (action === 'approve') {
-            const ONYX_WORKER_URL = import.meta.env.VITE_ONYX_WORKER_URL;
-            const ONYX_SECRET = import.meta.env.VITE_ONYX_SECRET;
-            setIsExecuting(true);
-            const res = await fetch(`${ONYX_WORKER_URL}/api/v1/actions/resolve`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${ONYX_SECRET}` },
-                body: JSON.stringify({ hitlLogId: hitlLogId })
-            });
-            const resultData = await res.json();
-
-            toast.success(`Action Executed: ${log.tool_type}`, {
-                style: { background: '#18181b', color: '#10b981', border: '1px solid #047857' }
-            });
-
-            // Insert system message about action completion
-            await supabase.from('ticket_messages').insert({
-                ticket_id: log.support_ticket_id,
-                sender_id: 'system',
-                message_body: `ACTION LOG: [${agentName}] approved [${log.tool_type}] which executed successfully.`,
-                is_internal_note: true
-            });
-
-            setLog(prev => ({ ...prev, execution_result: resultData }));
-
-        } else {
-            toast('Action Rejected', {
-                style: { background: '#18181b', color: '#f43f5e', border: '1px solid #9f1239' }
-            });
-        }
+        toast('Action Rejected', {
+            style: { background: '#18181b', color: '#f43f5e', border: '1px solid #9f1239' }
+        });
+        setLog(prev => ({ ...prev, status: 'rejected' }));
     } catch (e) {
         toast.error('Failed to update action');
-        setLog({ ...log, status: 'pending' }); // Revert
     } finally {
         setIsExecuting(false);
     }
-  };
+}
 
   if (loading || !log) return null;
 
@@ -142,14 +138,14 @@ export default function ActionProposalBlock({ hitlLog }) {
         )}
         <div className="flex gap-3 mt-4">
             <button
-                onClick={() => handleExecuteAction('approve')}
+                onClick={handleExecute}
                 disabled={!isCoreOnline || isExecuting}
                 className={`flex items-center gap-2 px-4 py-2 ${!isCoreOnline || isExecuting ? 'bg-zinc-700 text-zinc-500 cursor-not-allowed' : 'bg-cyan-500 hover:bg-cyan-400 text-zinc-950'} font-bold rounded-lg transition-colors text-sm`}
             >
                 <SafeIcon icon={FiCheck} /> {isExecuting ? 'Executing...' : 'Approve & Execute'}
             </button>
             <button
-                onClick={() => handleExecuteAction('reject')}
+                onClick={handleReject}
                 disabled={!isCoreOnline}
                 className={`flex items-center gap-2 px-4 py-2 ${!isCoreOnline ? 'bg-zinc-800/50 text-zinc-600 cursor-not-allowed' : 'bg-zinc-800 hover:bg-zinc-700 text-zinc-300'} font-medium rounded-lg transition-colors text-sm`}
             >
