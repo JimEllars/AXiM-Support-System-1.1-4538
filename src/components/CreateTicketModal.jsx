@@ -60,7 +60,7 @@ export default function CreateTicketModal({ isOpen, onClose, onSuccess }) {
             <form onSubmit={handleSubmit} className="p-10 space-y-8">
               <div className="space-y-2">
                 <label className="text-[10px] font-black text-zinc-500 uppercase tracking-[0.3em] flex items-center gap-2">
-                  <SafeIcon icon={FiTerminal} className="text-cyan-500" /> Subject_Header
+                  <SafeIcon icon={FiTerminal} className="text-cyan-500" /> {t('subject')}
                 </label>
                 <input 
                   required 
@@ -73,7 +73,7 @@ export default function CreateTicketModal({ isOpen, onClose, onSuccess }) {
 
               <div className="space-y-2">
                 <label className="text-[10px] font-black text-zinc-500 uppercase tracking-[0.3em] flex items-center gap-2">
-                  <SafeIcon icon={FiCpu} className="text-fuchsia-500" /> Context_Payload
+                  <SafeIcon icon={FiCpu} className="text-fuchsia-500" /> {t('description')}
                 </label>
                 <textarea 
                   required 
