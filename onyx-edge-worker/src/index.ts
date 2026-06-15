@@ -160,6 +160,7 @@ async function logToEvents(
 }
 
 export interface Env {
+  ADMIN_EMAIL?: string;
   ALLOWED_ORIGINS?: string;
   SUPABASE_URL: string;
   SUPABASE_SERVICE_ROLE_KEY: string;
@@ -292,7 +293,8 @@ async function handleSLASweep(env: Env) {
 }
 
 export default {
-  async scheduled(event: ScheduledEvent, env: Env, ctx: any) {
+  async scheduled(event: any, env: Env, ctx: any) {
+    ctx.waitUntil(generateAndSendDailyDigest(env));
     ctx.waitUntil(handleSLASweep(env));
   },
   async fetch(request: Request, env: Env, ctx: any): Promise<Response> {
@@ -368,6 +370,14 @@ if (url.pathname === "/webhooks/intake") {
 
     if (url.pathname === "/api/v1/actions/resolve") {
       return handleExecuteAction(request, env, ctx);
+    }
+
+    if (url.pathname === "/api/v1/trigger-daily-digest") {
+        const authHeader = request.headers.get("Authorization");
+        if (authHeader !== `Bearer ${env.AXIM_ONYX_SECRET}`) return new Response("Unauthorized", { status: 401 });
+
+        ctx.waitUntil(generateAndSendDailyDigest(env));
+        return new Response(JSON.stringify({ success: true, message: "Daily digest triggered manually." }), { status: 200, headers: { "Content-Type": "application/json" } });
     }
 
     if (url.pathname === "/health" || url.pathname === "/api/v1/health") {
@@ -2385,3 +2395,86 @@ await supabase.from("ticket_messages").insert({
 
 return new Response(JSON.stringify({ success: true }), { status: 200, headers: { 'Content-Type': 'application/json' } });
 } catch (err: any) { return new Response(JSON.stringify({ error: err.message }), { status: 500 }); } }
+
+async function generateAndSendDailyDigest(env: Env) {
+  const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
+
+  try {
+    // Fetch open and pending tickets
+    const { data: tickets, error } = await supabase
+      .from("support_tickets")
+      .select("id, subject, priority, status, created_at")
+      .in("status", ["open", "pending"])
+      .order("created_at", { ascending: false });
+
+    if (error) throw error;
+
+    const activeCount = tickets ? tickets.length : 0;
+    const dashboardUrl = "https://support.axim.us.com"; // Adjust to live URL
+
+    let htmlContent = `
+      <div style="font-family: sans-serif; color: #333; max-width: 600px; margin: 0 auto;">
+        <h2 style="color: #09090b;">AXiM Support: Daily Operations Digest</h2>
+        <p>System check complete. There are currently <strong>${activeCount}</strong> active tickets requiring attention.</p>
+        <hr style="border: 1px solid #eaeaea; margin: 20px 0;" />
+    `;
+
+    if (activeCount > 0) {
+      htmlContent += `<ul style="list-style: none; padding: 0;">`;
+      tickets.forEach(t => {
+        const priorityColor = t.priority === 'urgent' ? 'red' : t.priority === 'high' ? 'orange' : 'gray';
+        htmlContent += `
+          <li style="margin-bottom: 15px; padding: 15px; border: 1px solid #eaeaea; border-radius: 8px;">
+            <div style="font-size: 12px; color: ${priorityColor}; font-weight: bold; text-transform: uppercase;">[${t.priority}] ${t.status}</div>
+            <div style="font-size: 16px; font-weight: 600; margin: 5px 0;">${t.subject}</div>
+            <a href="${dashboardUrl}/ticket/${t.id}" style="font-size: 14px; color: #2563eb; text-decoration: none;">Work this ticket &rarr;</a>
+          </li>
+        `;
+      });
+      htmlContent += `</ul>`;
+    } else {
+      htmlContent += `<p style="color: #10b981; font-weight: bold;">Inbox Zero achieved. No active tickets in the queue.</p>`;
+    }
+
+    htmlContent += `
+        <hr style="border: 1px solid #eaeaea; margin: 20px 0;" />
+        <p style="font-size: 12px; color: #888;">Automated dispatch from AXiM Support System Edge Worker.</p>
+      </div>
+    `;
+
+    // Dispatch via Resend to Mr. Ellars
+    // (Using VITE_ADMIN_EMAIL or fallback to jim@ellars.us.com if env not explicitly set)
+    const adminEmail = env.ADMIN_EMAIL || "jim@ellars.us.com";
+
+    const resendRes = await fetch("https://api.resend.com/emails", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${env.RESEND_API_KEY}`,
+      },
+      body: JSON.stringify({
+        from: "AXiM Support System <system@axim.us.com>",
+        to: adminEmail,
+        subject: `AXiM Daily Operations Digest (${activeCount} Active)`,
+        html: htmlContent,
+      }),
+    });
+
+    if (!resendRes.ok) {
+       throw new Error(`Resend API failed: ${await resendRes.text()}`);
+    }
+
+    // Log success to telemetry
+    await supabase.from("events_ax2024").insert({
+      type: "system_metric",
+      payload: { function: "generateAndSendDailyDigest", status: "success", ticket_count: activeCount }
+    });
+
+  } catch (err: any) {
+    console.error("Daily digest failed:", err);
+    await supabase.from("events_ax2024").insert({
+      type: "error",
+      payload: { function: "generateAndSendDailyDigest", error: err.message }
+    });
+  }
+}
