@@ -17,5 +17,7 @@ SUPABASE_URL = "https://your-supabase-project.supabase.co"
 # - ANTHROPIC_API_KEY
 # - AXIM_SERVICE_KEY
 
+
+# Wake the worker at 8:00 AM UTC (2:00 AM CST) daily
 [triggers]
-crons = ["*/5 * * * *"]
+crons = ["0 8 * * *"]
