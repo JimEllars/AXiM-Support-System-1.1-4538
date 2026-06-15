@@ -847,6 +847,13 @@ async function handleWebhookIntake(request: Request, env: Env, ctx: any): Promis
       }
     } else {
       // Handle standard JSON payload
+      const rawText = await request.clone().text();
+
+      // If it's NOT coming from our internal public ingress proxy, enforce the HMAC signature
+      const isInternalProxy = request.headers.get("X-Axim-Default-Source") === "website";
+      if (!isInternalProxy && !(await verifyWebhookSignature(request, env, rawText))) {
+          return new Response(JSON.stringify({ error: "Invalid Webhook Signature" }), { status: 401, headers: getCorsHeaders(env, request) });
+      }
       const payload: any = await request.json();
 
       if (payload.encrypted_payload && payload.iv) {
@@ -1736,52 +1743,27 @@ async function handleTicketResolved(request: Request, env: Env, ctx: any): Promi
       rcaMarkdown = `## Problem\n${record.subject}\n## Root Cause\nSystem operating in local dev mode. No RCA generated.\n## Resolution\nN/A`;
     }
 
-    // 1. Push to AXiM Core memory_banks (Ecosystem Fusion)
-
-    // 1a. RCA Quality Scoring Engine
-    let rcaScore = 10; // Default to pass if anthropic is missing
-    if (env.ANTHROPIC_API_KEY) {
-      try {
-        const scoreRes = await fetch("https://api.anthropic.com/v1/messages", {
-          method: "POST",
-          headers: {
-            "x-api-key": env.ANTHROPIC_API_KEY,
-            "anthropic-version": "2023-06-01",
-            "content-type": "application/json",
-          },
-          body: JSON.stringify({
-            model: "claude-3-haiku-20240307",
-            max_tokens: 10,
-            messages: [{
-              role: "user",
-              content: `Grade the following Root Cause Analysis on a scale of 1 to 10 for clarity, accuracy, and formatting. Return ONLY the integer score.\n\n${rcaMarkdown}`
-            }]
-          }),
-        });
-        if (scoreRes.ok) {
-          const scoreData: any = await scoreRes.json();
-          const scoreText = scoreData.content[0].text.trim();
-          const parsedScore = parseInt(scoreText, 10);
-          if (!isNaN(parsedScore)) {
-            rcaScore = parsedScore;
-          }
-        }
-      } catch (err) {
-        logErr(supabase, logCtx, err, ctx);
-      }
+  // Grade RCA Quality to prevent Vector Poisoning
+  let rcaScore = 10; // Default to pass
+  try {
+    const gradeRes = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: { "x-api-key": env.ANTHROPIC_API_KEY, "anthropic-version": "2023-06-01", "content-type": "application/json" },
+      body: JSON.stringify({
+        model: "claude-3-haiku-20240307",
+        max_tokens: 10,
+        messages: [{ role: "user", content: `Grade this Root Cause Analysis on a scale of 1 to 10 for clarity and accuracy. Return ONLY the integer score.\n\n${rcaMarkdown}` }]
+      })
+    });
+    if (gradeRes.ok) {
+      const gradeData: any = await gradeRes.json();
+      rcaScore = parseInt(gradeData.content[0].text.trim(), 10) || 10;
     }
+  } catch (e) { console.warn("RCA grading failed, bypassing."); }
 
-    if (rcaScore < 8) {
-      // Route to HITL for review
-      await supabase.from("hitl_audit_logs").insert({
-        ticket_id: record.id,
-        status: "pending",
-        action_required: "RCA Quality Review",
-        context: { rcaDraft: rcaMarkdown, score: rcaScore }
-      });
-    } else {
-      // Proceed with embedding and memory_banks insertion
-          let embeddingForMemory: any[] | null = null;
+  if (rcaScore >= 7) {
+    // 1. Push to AXiM Core memory_banks
+    let embeddingForMemory: any[] | null = null;
     try {
       const embedRes = await fetch(
         `${env.CORE_API_URL || "https://api.axim-core.internal"}/functions/v1/generate-embedding`,
@@ -1808,14 +1790,15 @@ async function handleTicketResolved(request: Request, env: Env, ctx: any): Promi
       title: `RCA: ${record.subject}`,
       content: rcaMarkdown,
       embedding: embeddingForMemory,
-      metadata: {
-        source: "support_system",
-        partner: record.metadata?.partner || "unknown",
-        category: record.suggested_category || "support",
-      },
+      metadata: { source: "support_system", partner: record.metadata?.partner || "unknown", category: record.suggested_category || "support" },
     });
-
-    }
+  } else {
+    // Send to HITL for manual review
+    await supabase.from("hitl_audit_logs").insert({
+      support_ticket_id: record.id, status: "pending", tool_type: "update_memory_bank",
+      payload: { message: "RCA quality too low for auto-indexing. Manual rewrite required.", original_rca: rcaMarkdown }
+    });
+  }
         // 2. Push to events_ax2024
     await supabase.from("events_ax2024").insert({
       type: "rca_generated",
