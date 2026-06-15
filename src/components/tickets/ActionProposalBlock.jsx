@@ -45,13 +45,12 @@ export default function ActionProposalBlock({ hitlLog }) {
   const handleExecute = async () => {
   setIsExecuting(true);
   try {
-    // Direct call to the Onyx Edge Worker
+    // Direct call to the securely routed Onyx Edge Worker
     const workerUrl = import.meta.env.VITE_ONYX_WORKER_URL || 'http://localhost:8787';
     const response = await fetch(`${workerUrl}/api/v1/actions/resolve`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        // Assuming session/auth token maps to the Onyx Secret for internal cockpit use
         'Authorization': `Bearer ${import.meta.env.VITE_AXIM_ONYX_SECRET}`
       },
       body: JSON.stringify({ hitlLogId: hitlLog.id })
@@ -63,8 +62,7 @@ export default function ActionProposalBlock({ hitlLog }) {
     }
 
     toast.success("Action executed successfully via Core Proxy.");
-    // Optional: Fire an event or callback to refresh the thread
-    setLog(prev => ({ ...prev, status: 'approved' }));
+    // The MessageThread subscription will auto-refresh the UI with the execution confirmation
   } catch (err) {
     console.error(err);
     toast.error(`Execution Error: ${err.message}`);
@@ -72,6 +70,7 @@ export default function ActionProposalBlock({ hitlLog }) {
     setIsExecuting(false);
   }
 };
+
 
 const handleReject = async () => {
     setIsExecuting(true);
