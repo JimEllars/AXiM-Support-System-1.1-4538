@@ -127,6 +127,7 @@ export default function SupportMetrics() {
             slaBreachRate: slaBreachRate || 0,
             avgConfidence: avgConfidence,
             csatScore: avgCsat,
+            csatScore: (metrics.csatScore || 0),
             volumeTrend: volumeTrend
           });
           setIsLoading(false);
@@ -170,7 +171,7 @@ export default function SupportMetrics() {
       },
       barWidth: '50%'
     }],
-    tooltip: { 
+    tooltip: {
       trigger: 'axis',
       backgroundColor: '#09090b',
       borderColor: '#27272a',
@@ -191,7 +192,7 @@ export default function SupportMetrics() {
         <h3 className="text-3xl font-black text-cyan-400 mt-2">{metrics.activeQueue}</h3>
         <div className="mt-2 text-[10px] text-cyan-500/80 font-medium tracking-widest">OPEN & PENDING</div>
       </div>
-      
+
       <div className="glass-panel p-6 rounded-2xl border-l-2 border-l-rose-500/50 relative overflow-hidden">
         {isLoading && <div className="absolute inset-0 bg-zinc-900/50 flex items-center justify-center backdrop-blur-sm z-10"><div className="w-5 h-5 border-2 border-rose-500 border-t-transparent rounded-full animate-spin"></div></div>}
         <p className="text-zinc-500 text-xs font-bold uppercase tracking-widest">Urgent Escalations</p>
