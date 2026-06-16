@@ -27,6 +27,7 @@
     "react-icons": "^5.4.0",
     "react-router-dom": "^7.1.0",
     "tailwind-merge": "^2.2.2",
+    "uuid": "^14.0.0",
     "zustand": "^4.5.2"
   },
   "devDependencies": {

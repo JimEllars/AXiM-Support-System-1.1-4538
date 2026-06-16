@@ -6,6 +6,7 @@ import CreateTicketModal from '../components/CreateTicketModal';
 import BatchTriageModal from '../components/modals/BatchTriageModal';
 import SystemBroadcastModal from '../components/modals/SystemBroadcastModal';
 import SupportMetrics from '../components/analytics/SupportMetrics';
+import DLQMonitorBlock from '../components/tickets/DLQMonitorBlock';
 import AgentPresence from '../components/AgentPresence';
 import DashboardQuickActions from '../components/DashboardQuickActions';
 import SafeIcon from '../common/SafeIcon';
@@ -74,6 +75,7 @@ export default function Dashboard() {
         </header>
 
         <SupportMetrics />
+        <DLQMonitorBlock />
         
         <div className="grid grid-cols-1 lg:grid-cols-4 gap-4 mb-10">
           <DashboardQuickActions onAction={handleAction} />
