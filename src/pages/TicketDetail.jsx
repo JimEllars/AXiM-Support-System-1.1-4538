@@ -77,6 +77,42 @@ export default function TicketDetail() {
   }, [id, tickets, navigate]);
 
   useEffect(() => {
+    if (!id) return;
+
+    // Setup Supabase Realtime subscriptions for this ticket
+    const channel = supabase.channel(`ticket-detail-${id}`)
+      .on(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'support_tickets', filter: `id=eq.${id}` },
+        (payload) => {
+          console.log('Ticket updated via Realtime', payload);
+          setTicket((prev) => ({ ...prev, ...payload.new }));
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'ticket_messages', filter: `ticket_id=eq.${id}` },
+        (payload) => {
+          console.log('New message via Realtime', payload);
+          setMessages((prev) => {
+             // Check for duplicate messages before adding
+             if (prev.some(m => m.id === payload.new.id)) return prev;
+             return [...prev, payload.new];
+          });
+        }
+      )
+      .subscribe((status) => {
+        if (status === 'SUBSCRIBED') {
+          console.log(`Subscribed to ticket ${id} updates`);
+        }
+      });
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [id]);
+
+  useEffect(() => {
       // Auto-scroll to bottom of messages
       messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
