@@ -168,6 +168,7 @@ export interface Env {
   ANTHROPIC_API_KEY: string;
   AXIM_SERVICE_KEY: string;
   CORE_API_URL: string;
+  IDEMPOTENCY_KV: KVNamespace;
   RESEND_API_KEY?: string;
   RESEND_FROM_EMAIL?: string;
 }
@@ -1508,6 +1509,18 @@ async function handleToolCommand(request: Request, env: Env, ctx: any): Promise<
 }
 
 async function handleExecuteAction(request: Request, env: Env, ctx: any): Promise<Response> {
+  const idempotencyKey = request.headers.get("X-Idempotency-Key");
+  if (idempotencyKey && env.IDEMPOTENCY_KV) {
+    const existingKey = await env.IDEMPOTENCY_KV.get(idempotencyKey);
+    if (existingKey) {
+      return new Response(JSON.stringify({ error: "Conflict: Action already processed", status: "rejected" }), {
+        status: 409,
+        headers: { "Content-Type": "application/json", ...getCorsHeaders(env, request) }
+      });
+    }
+    await env.IDEMPOTENCY_KV.put(idempotencyKey, "processed", { expirationTtl: 86400 });
+  }
+
   const supabase = createClient(
     env.SUPABASE_URL,
     env.SUPABASE_SERVICE_ROLE_KEY,

@@ -13,6 +13,7 @@ export default function ActionProposalBlock({ hitlLog }) {
   const [log, setLog] = useState(hitlLog || null);
   const [loading, setLoading] = useState(!hitlLog);
   const [isExecuting, setIsExecuting] = useState(false);
+  const [idempotencyKey] = useState(() => crypto.randomUUID());
   const { isCoreOnline } = useTicketStore();
   const { user } = useAuthStore();
   const agentName = user?.email?.split('@')[0] || 'System Agent';
@@ -51,7 +52,8 @@ export default function ActionProposalBlock({ hitlLog }) {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${import.meta.env.VITE_AXIM_ONYX_SECRET}`
+        'Authorization': `Bearer ${import.meta.env.VITE_AXIM_ONYX_SECRET}`,
+        'X-Idempotency-Key': idempotencyKey
       },
       body: JSON.stringify({ hitlLogId: hitlLog.id })
     });
