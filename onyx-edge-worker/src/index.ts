@@ -296,6 +296,7 @@ export default {
   async scheduled(event: any, env: Env, ctx: any) {
     ctx.waitUntil(generateAndSendDailyDigest(env));
     ctx.waitUntil(handleSLASweep(env));
+    ctx.waitUntil(handleDataRetentionSweep(env));
   },
   async fetch(request: Request, env: Env, ctx: any): Promise<Response> {
     const url = new URL(request.url);
@@ -1699,6 +1700,49 @@ async function handleTicketResolved(request: Request, env: Env, ctx: any): Promi
     const payload: any = await request.json();
     const record = payload.record;
 
+    // Webhook Egress Dispatcher
+    if (record.status === 'resolved') {
+        const dispatchWebhook = async () => {
+            try {
+                // Determine tenant context (organization_id or fallback)
+                const tenantId = record.organization_id || record.customer_id;
+                if (!tenantId) return;
+
+                const { data: webhooks, error: webhookError } = await supabase
+                    .from('tenant_webhooks')
+                    .select('url, secret')
+                    .eq('tenant_id', tenantId);
+
+                if (webhookError || !webhooks || webhooks.length === 0) return;
+
+                const ticketSummary = {
+                    ticket_id: record.id,
+                    subject: record.subject,
+                    status: record.status,
+                    resolution_time: new Date().toISOString()
+                };
+
+                for (const wh of webhooks) {
+                    try {
+                        const headers: any = { 'Content-Type': 'application/json' };
+                        if (wh.secret) headers['Authorization'] = `Bearer ${wh.secret}`;
+
+                        await fetch(wh.url, {
+                            method: 'POST',
+                            headers,
+                            body: JSON.stringify(ticketSummary)
+                        });
+                    } catch (fetchErr) {
+                        console.error('Failed to dispatch webhook to', wh.url, fetchErr);
+                    }
+                }
+            } catch (err) {
+                console.error('Webhook dispatcher error:', err);
+            }
+        };
+        ctx.waitUntil(dispatchWebhook());
+    }
+
     if (
       !record ||
       record.status !== "resolved" ||
@@ -2376,6 +2420,29 @@ async function handleSandboxResolution(request: Request, env: Env, ctx: any): Pr
 try { const payload = await request.json() as any; const { ticket_id, resolution_notes, patch_payload } = payload; const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
 
 // Create pending HITL execution block
+
+// Egress Webhook Dispatcher
+ctx.waitUntil((async () => {
+  try {
+    const { data: ticket } = await supabase.from('support_tickets').select('*').eq('id', ticket_id).single();
+    if (ticket && ticket.status === 'resolved') {
+      const tenantId = ticket.organization_id || ticket.customer_id;
+      if (!tenantId) return;
+      const { data: webhooks } = await supabase.from('tenant_webhooks').select('url, secret').eq('tenant_id', tenantId);
+      if (webhooks && webhooks.length > 0) {
+        const payload = { ticket_id, subject: ticket.subject, status: ticket.status };
+        for (const wh of webhooks) {
+          const headers: any = { 'Content-Type': 'application/json' };
+          if (wh.secret) headers['Authorization'] = `Bearer ${wh.secret}`;
+          await fetch(wh.url, { method: 'POST', headers, body: JSON.stringify(payload) }).catch(e => console.error(e));
+        }
+      }
+    }
+  } catch (err) {
+    console.error('Sandbox webhook error:', err);
+  }
+})());
+
 const { data: hitlLog, error: hitlError } = await supabase.from("hitl_audit_logs").insert({
   status: 'pending',
   tool_type: 'apply_git_patch',
@@ -2476,5 +2543,39 @@ async function generateAndSendDailyDigest(env: Env) {
       type: "error",
       payload: { function: "generateAndSendDailyDigest", error: err.message }
     });
+  }
+}
+
+async function handleDataRetentionSweep(env: Env) {
+  try {
+    const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
+    const ninetyDaysAgo = new Date();
+    ninetyDaysAgo.setDate(ninetyDaysAgo.getDate() - 90);
+    const cutoffDate = ninetyDaysAgo.toISOString();
+
+    const { data: expiredAttachments, error: queryError } = await supabase
+      .from('support_attachments')
+      .select('id, file_path')
+      .lt('created_at', cutoffDate);
+
+    if (queryError) {
+      console.error('[handleDataRetentionSweep] DB query error:', queryError);
+      return;
+    }
+
+    if (expiredAttachments && expiredAttachments.length > 0) {
+      const paths = expiredAttachments.map(att => att.file_path);
+      const { error: storageError } = await supabase.storage.from('ticket_attachments').remove(paths);
+
+      if (storageError) {
+        console.error('[handleDataRetentionSweep] Storage remove error:', storageError);
+      } else {
+        const ids = expiredAttachments.map(att => att.id);
+        await supabase.from('support_attachments').delete().in('id', ids);
+        console.log(`[handleDataRetentionSweep] Successfully deleted ${expiredAttachments.length} attachments.`);
+      }
+    }
+  } catch (error) {
+    console.error('[handleDataRetentionSweep] Unhandled exception:', error);
   }
 }
