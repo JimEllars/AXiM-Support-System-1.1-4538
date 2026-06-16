@@ -1071,24 +1071,24 @@ async function handleWebhookIntake(request: Request, env: Env, ctx: any): Promis
     }
 
 const { data: ticket, error: ticketError } = await supabase
-      .from("support_tickets")
-      .insert({
-        assigned_department: assignedDepartment,
-        subject: normalizedData.subject,
-        description: normalizedData.description,
-        customer_id: customerId,
-        organization_id: customerData?.organization_id || null,
-        priority: "medium", // Default priority
-        status: "open", // Default status
-        sla_breach_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
-        metadata: {
-            source: normalizedData.source,
-            tags: normalizedData.tags,
-            workflow_category: normalizedData.workflow_category,
-        },
-      })
-      .select()
-      .single();
+  .from("support_tickets")
+  .insert({
+    assigned_department: assignedDepartment,
+    subject: normalizedData.subject,
+    description: normalizedData.description,
+    customer_id: customerId,
+    organization_id: customerData?.organization_id || null, // FIX: Bind tenant context
+    priority: "medium",
+    status: "open",
+    sla_breach_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
+    metadata: {
+        source: normalizedData.source,
+        tags: normalizedData.tags,
+        workflow_category: normalizedData.workflow_category,
+    },
+  })
+  .select()
+  .single();
 
     if (ticketError) throw ticketError;
 
@@ -1182,47 +1182,28 @@ const { data: ticket, error: ticketError } = await supabase
             );
 
             // Tier 3 Autonomous Remediation Check
-            if (onyxAnalysis.confidence > 95 && (onyxAnalysis.category?.includes("cache") || onyxAnalysis.category?.includes("sync"))) {
-              console.log(`[AUTO-HEALER] High confidence fault detected (${onyxAnalysis.confidence}%). Invoking Core universal-dispatcher.`);
+if (onyxAnalysis.confidence > 95 && (onyxAnalysis.category?.includes("cache") || onyxAnalysis.category?.includes("sync"))) {
+  console.log(`[AUTO-HEALER] High confidence fault (${onyxAnalysis.confidence}%). Invoking Core.`);
+  try {
+    const dispatcherRes = await fetch(`${env.CORE_API_URL}/functions/v1/universal-dispatcher`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Authorization": `Bearer ${env.AXIM_SERVICE_KEY}` },
+      body: JSON.stringify({ ticket_id: ticket.id, action: onyxAnalysis.category })
+    });
 
-              try {
-                const dispatcherRes = await fetch(`${env.CORE_API_URL || "https://api.axim-core.internal"}/functions/v1/universal-dispatcher`, {
-                  method: "POST",
-                  headers: {
-                    "Content-Type": "application/json",
-                    "Authorization": `Bearer ${env.AXIM_SERVICE_KEY}`
-                  },
-                  body: JSON.stringify({
-                    ticket_id: ticket.id,
-                    action: onyxAnalysis.category,
-                    payload: { subject: normalizedData.subject, description: normalizedData.description }
-                  })
-                });
+    if (dispatcherRes.ok) {
+      await supabase.from("support_tickets")
+        .update({ status: "resolved", metadata: { ...ticket.metadata, operational_status: "Resolved-Automated" } })
+        .eq("id", ticket.id);
 
-                if (dispatcherRes.ok) {
-                  // Permanently settle ticket row state parameters as Resolved-Automated
-                  let autoHealMetadata = {
-                      source: normalizedData.source,
-                      tags: normalizedData.tags,
-                      operational_status: "Resolved-Automated"
-                  };
-
-                  await supabase
-                    .from("support_tickets")
-                    .update({ status: "resolved", metadata: autoHealMetadata })
-                    .eq("id", ticket.id);
-
-                  await supabase.from("ticket_messages").insert({
-                    ticket_id: ticket.id,
-                    sender_id: "onyx_system",
-                    message_body: `[AUTO-HEALER SUCCESS] Programmatic remedy executed via Core Gateway. Exception cleared cleanly. Status updated to Resolved-Automated.`
-                  });
-                  return; // Terminate loop early since ticket is autonomously handled
-                }
-              } catch (dispatcherErr: any) {
-                console.error("Auto-Healer dispatch fallback triggered:", dispatcherErr.message);
-              }
-            }
+      await supabase.from("ticket_messages").insert({
+        ticket_id: ticket.id, sender_id: "onyx_system",
+        message_body: `[AUTO-HEALER] Action executed via Core. Fault cleared.`
+      });
+      return;
+    }
+  } catch (err) { console.error("Auto-Healer dispatch failed", err); }
+}
 
             let initialStatus = "open";
             let onyxResponseDraft = onyxAnalysis.draft;
