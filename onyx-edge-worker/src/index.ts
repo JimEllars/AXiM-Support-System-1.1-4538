@@ -702,6 +702,34 @@ async function handleBatchTriage(request: Request, env: Env, ctx: any): Promise<
  * Handles tokenless public intake from web forms.
  * Enforces origin rules and tags sandbox escalation for zero-day faults.
  */
+
+// AST Payload Sanitization
+function sanitizePayload(obj: any): any {
+  if (typeof obj === 'string') {
+    // Strip script tags
+    let sanitized = obj.replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '');
+    // Strip common SQL injection patterns loosely (avoid false positives if possible, but strict for DROP, SELECT, OR 1=1)
+    sanitized = sanitized.replace(/(\b(DROP|SELECT|DELETE|UPDATE|INSERT)\b.*?\bFROM\b.*?|\b(DROP|ALTER)\b.*?\bTABLE\b.*?)/gi, '[REDACTED SQL]');
+    sanitized = sanitized.replace(/(\bOR\b\s+\d+\s*=\s*\d+|\bOR\b\s+'[^']+'\s*=\s*'[^']+')/gi, '[REDACTED SQL]');
+    // Strip markdown shell hooks / executables
+    sanitized = sanitized.replace(/\$\([^)]+\)/g, '[REDACTED SHELL]');
+    sanitized = sanitized.replace(/`[^`]+`/g, '[REDACTED MD]');
+    return sanitized;
+  }
+  if (Array.isArray(obj)) {
+    return obj.map(item => sanitizePayload(item));
+  }
+  if (obj !== null && typeof obj === 'object') {
+    const result: any = {};
+    for (const key of Object.keys(obj)) {
+      result[key] = sanitizePayload(obj[key]);
+    }
+    return result;
+  }
+  return obj;
+}
+
+
 async function handlePublicWebIngress(request: Request, env: Env, ctx: any): Promise<Response> {
   const origin = request.headers.get("Origin");
   const allowedOrigins = env.ALLOWED_ORIGINS ? env.ALLOWED_ORIGINS.split(",") : [];
@@ -710,27 +738,86 @@ async function handlePublicWebIngress(request: Request, env: Env, ctx: any): Pro
     return new Response(JSON.stringify({ error: "Forbidden: Invalid Origin" }), { status: 403, headers: getCorsHeaders(env, request) });
   }
 
+  let decryptedPayload: any = null;
+  const rawPayloadText = await request.text();
+
+  try {
+    const rawPayload = JSON.parse(rawPayloadText);
+
+    if (rawPayload.encrypted_payload && rawPayload.iv && rawPayload.auth_tag) {
+      try {
+        const encoder = new TextEncoder();
+
+        // Derive AES-GCM Key from Secret via SHA-256 to ensure correct byte length
+        const hashBuffer = await crypto.subtle.digest('SHA-256', encoder.encode(env.AXIM_ONYX_SECRET));
+        const aesKey = await crypto.subtle.importKey(
+          "raw",
+          hashBuffer,
+          { name: "AES-GCM" },
+          false,
+          ["decrypt"]
+        );
+
+        const ivBuffer = hexStringToUint8Array(rawPayload.iv);
+        // Concatenate ciphertext and auth tag as Web Crypto expects them together
+        const ciphertextBuffer = hexStringToUint8Array(rawPayload.encrypted_payload);
+        const authTagBuffer = hexStringToUint8Array(rawPayload.auth_tag);
+
+        const combinedBuffer = new Uint8Array(ciphertextBuffer.length + authTagBuffer.length);
+        combinedBuffer.set(ciphertextBuffer);
+        combinedBuffer.set(authTagBuffer, ciphertextBuffer.length);
+
+        const decryptedBuffer = await crypto.subtle.decrypt(
+          { name: "AES-GCM", iv: ivBuffer },
+          aesKey,
+          combinedBuffer
+        );
+
+        const decryptedText = new TextDecoder().decode(decryptedBuffer);
+        const unsafePayload = JSON.parse(decryptedText);
+
+        // Phase 48: Sanitize Payload
+        decryptedPayload = sanitizePayload(unsafePayload);
+      } catch (cryptoError: any) {
+        // Send to Dead Letter Queue metrics
+        const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
+        await supabase.from("events_ax2024").insert({
+          type: "dlq_payload",
+          payload: {
+            reason: "DECRYPTION_FAILED",
+            source: "website_support_form",
+            raw: rawPayloadText
+          }
+        });
+        return new Response(JSON.stringify({ error: "Decryption Failed. Payload integrity compromised." }), { status: 400, headers: getCorsHeaders(env, request) });
+      }
+    } else {
+      // Legacy plaintext payload (if allowed) - sanitize before parsing further
+      decryptedPayload = sanitizePayload(rawPayload);
+    }
+  } catch (parseError) {
+    return new Response(JSON.stringify({ error: "Invalid JSON Payload" }), { status: 400, headers: getCorsHeaders(env, request) });
+  }
+
   try {
     const newHeaders = new Headers(request.headers);
     newHeaders.set("Authorization", `Bearer ${env.AXIM_ONYX_SECRET}`);
     newHeaders.set("X-Axim-Default-Source", "website");
 
-    // @ts-ignore - Required by CF Workers for ReadableStream body
     const newRequest = new Request(request.url, {
       method: request.method,
       headers: newHeaders,
-      body: request.body,
-      // @ts-ignore
-      duplex: 'half'
+      body: JSON.stringify(decryptedPayload)
     });
 
     return handleWebhookIntake(newRequest, env, ctx);
-  } catch (error) {
+
+  } catch (error: any) {
+    console.error("Proxy routing failed error: ", error.message || error);
     return new Response(JSON.stringify({ error: "Proxy routing failed" }), { status: 500, headers: getCorsHeaders(env, request) });
   }
+
 }
-
-
 
 
 async function handleWebhookIntake(request: Request, env: Env, ctx: any): Promise<Response> {
