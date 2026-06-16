@@ -2520,52 +2520,70 @@ async function handleFeedbackIngress(request: Request, env: Env, ctx: any): Prom
 
 
 async function handleSandboxResolution(request: Request, env: Env, ctx: any): Promise<Response> {
-
-try { const payload = await request.json() as any; const { ticket_id, resolution_notes, patch_payload } = payload; const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
-
-// Create pending HITL execution block
-
-// Egress Webhook Dispatcher
-ctx.waitUntil((async () => {
-  try {
-    const { data: ticket } = await supabase.from('support_tickets').select('*').eq('id', ticket_id).single();
-    if (ticket && ticket.status === 'resolved') {
-      const tenantId = ticket.organization_id || ticket.customer_id;
-      if (!tenantId) return;
-      const { data: webhooks } = await supabase.from('tenant_webhooks').select('url, secret').eq('tenant_id', tenantId);
-      if (webhooks && webhooks.length > 0) {
-        const payload = { ticket_id, subject: ticket.subject, status: ticket.status };
-        for (const wh of webhooks) {
-          const headers: any = { 'Content-Type': 'application/json' };
-          if (wh.secret) headers['Authorization'] = `Bearer ${wh.secret}`;
-          await fetch(wh.url, { method: 'POST', headers, body: JSON.stringify(payload) }).catch(e => console.error(e));
-        }
-      }
-    }
-  } catch (err) {
-    console.error('Sandbox webhook error:', err);
+  const authHeader = request.headers.get("Authorization");
+  if (authHeader !== `Bearer ${env.AXIM_SERVICE_KEY}`) {
+    return new Response(JSON.stringify({ error: "Unauthorized Vault Access" }), {
+      status: 401,
+      headers: { "Content-Type": "application/json", ...getCorsHeaders(env, request) }
+    });
   }
-})());
 
-const { data: hitlLog, error: hitlError } = await supabase.from("hitl_audit_logs").insert({
-  status: 'pending',
-  tool_type: 'apply_git_patch',
-  payload: patch_payload,
-  support_ticket_id: ticket_id
-}).select().single();
+  try {
+    const payload = await request.json() as any;
+    const { ticket_id, resolution_notes, patch_payload } = payload;
+    const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
 
-if (hitlError) throw hitlError;
+    // Egress Webhook Dispatcher
+    ctx.waitUntil((async () => {
+      try {
+        const { data: ticket } = await supabase.from('support_tickets').select('*').eq('id', ticket_id).single();
+        if (ticket && ticket.status === 'resolved') {
+          const tenantId = ticket.organization_id || ticket.customer_id;
+          if (!tenantId) return;
+          const { data: webhooks } = await supabase.from('tenant_webhooks').select('url, secret').eq('tenant_id', tenantId);
+          if (webhooks && webhooks.length > 0) {
+            const webhookPayload = { ticket_id, subject: ticket.subject, status: ticket.status };
+            for (const wh of webhooks) {
+              const headers: any = { 'Content-Type': 'application/json' };
+              if (wh.secret) headers['Authorization'] = `Bearer ${wh.secret}`;
+              await fetch(wh.url, { method: 'POST', headers, body: JSON.stringify(webhookPayload) }).catch(e => console.error(e));
+            }
+          }
+        }
+      } catch (err) {
+        console.error('Sandbox webhook error:', err);
+      }
+    })());
 
-// Inject proposed action into the message thread
-await supabase.from("ticket_messages").insert({
-  ticket_id: ticket_id,
-  sender_id: 'onyx_system',
-  message_body: resolution_notes || "Tier 3 Sandbox Agent has proposed a code resolution.",
-  metadata: { hitl_log_id: hitlLog.id }
-});
+    // Create pending HITL execution block
+    const { data: hitlLog, error: hitlError } = await supabase.from("hitl_audit_logs").insert({
+      status: 'pending',
+      tool_type: 'apply_git_patch',
+      payload: patch_payload,
+      support_ticket_id: ticket_id
+    }).select().single();
 
-return new Response(JSON.stringify({ success: true }), { status: 200, headers: { 'Content-Type': 'application/json' } });
-} catch (err: any) { return new Response(JSON.stringify({ error: err.message }), { status: 500 }); } }
+    if (hitlError) throw hitlError;
+
+    // Inject proposed action into the message thread
+    await supabase.from("ticket_messages").insert({
+      ticket_id: ticket_id,
+      sender_id: 'onyx_system',
+      message_body: resolution_notes || "Tier 3 Sandbox Agent has proposed a code resolution.",
+      metadata: { hitl_log_id: hitlLog.id }
+    });
+
+    return new Response(JSON.stringify({ success: true }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json', ...getCorsHeaders(env, request) }
+    });
+  } catch (err: any) {
+    return new Response(JSON.stringify({ error: err.message }), {
+      status: 500,
+      headers: { 'Content-Type': 'application/json', ...getCorsHeaders(env, request) }
+    });
+  }
+}
 
 async function generateAndSendDailyDigest(env: Env) {
   const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
@@ -2624,7 +2642,7 @@ async function generateAndSendDailyDigest(env: Env) {
         "Authorization": `Bearer ${env.RESEND_API_KEY}`,
       },
       body: JSON.stringify({
-        from: "AXiM Support System <system@axim.us.com>",
+        from: env.RESEND_FROM_EMAIL || "AXiM Support System <system@axim.us.com>",
         to: adminEmail,
         subject: `AXiM Daily Operations Digest (${activeCount} Active)`,
         html: htmlContent,
@@ -2699,6 +2717,28 @@ async function handleDLQReplay(request: Request, env: Env, ctx: any): Promise<Re
     });
   }
 
+  // Enforce Multi-Tenant Operator RLS Verification over DLQ Replays
+  const xAximSignature = request.headers.get("X-Axim-Signature");
+  if (!xAximSignature) {
+    return new Response(JSON.stringify({ error: "Missing Operator Signature" }), {
+      status: 401,
+      headers: { 'Content-Type': 'application/json', ...getCorsHeaders(env, request) }
+    });
+  }
+
+  const { data: operatorProfile, error: operatorError } = await supabase
+    .from('team_profiles')
+    .select('tenant_id, role')
+    .eq('id', xAximSignature)
+    .single();
+
+  if (operatorError || !operatorProfile) {
+    return new Response(JSON.stringify({ error: "Invalid Operator Profile" }), {
+      status: 401,
+      headers: { 'Content-Type': 'application/json', ...getCorsHeaders(env, request) }
+    });
+  }
+
   const idempotencyKey = request.headers.get("X-Idempotency-Key");
   if (idempotencyKey && env.IDEMPOTENCY_KV) {
     const existingKey = await env.IDEMPOTENCY_KV.get(idempotencyKey);
@@ -2713,7 +2753,14 @@ async function handleDLQReplay(request: Request, env: Env, ctx: any): Promise<Re
 
   try {
     const payloadBody = await request.json() as any;
-    const { eventId, payload } = payloadBody;
+    const { eventId, payload, tenant_id: targetTenantId } = payloadBody;
+
+    if (targetTenantId && operatorProfile.tenant_id !== targetTenantId && operatorProfile.role !== 'super_admin') {
+      return new Response(JSON.stringify({ error: "Forbidden: Cross-Tenant Execution Blocked" }), {
+        status: 403,
+        headers: { 'Content-Type': 'application/json', ...getCorsHeaders(env, request) }
+      });
+    }
 
     if (!eventId || !payload) {
       return new Response(JSON.stringify({ error: "Missing eventId or payload" }), {
