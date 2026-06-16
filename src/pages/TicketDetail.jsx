@@ -166,6 +166,7 @@ export default function TicketDetail() {
           <p className="text-zinc-400 text-xl font-medium leading-relaxed max-w-4xl mb-4">{ticket?.description}</p>
           {/* Attachments Tray */}
           {attachments?.length > 0 && (
+            <>
             <div className="mt-6 flex flex-wrap gap-4 mb-4">
               {attachments.map(file => {
                 const url = supabase.storage.from('ticket_attachments').getPublicUrl(`${id}/intake/${file.name}`).data.publicUrl;
@@ -182,6 +183,10 @@ export default function TicketDetail() {
                 );
               })}
             </div>
+              <p className="text-zinc-500 text-[10px] mt-2 mb-4 uppercase tracking-widest font-black">
+                Attachments are automatically and permanently deleted after 90 days to ensure data privacy and compliance.
+              </p>
+            </>
           )}
 
           {/* Tier 3 Escalation Banner */}
