@@ -46,7 +46,7 @@ function App() {
       setSession(session);
 
       if (event === 'SIGNED_OUT') {
-        useAuthStore.getState().signOut();
+        useAuthStore.getState().logout();
         useTicketStore.setState({ tickets: [], selectedTicketIds: [] });
       } else if (session?.user) {
         supabase.from('team_profiles').upsert({
@@ -91,9 +91,9 @@ function App() {
     let timeout;
 
     const logoutUser = () => {
-      const { session, signOut } = useAuthStore.getState();
+      const { session, logout } = useAuthStore.getState();
       if (session) {
-        signOut();
+        logout();
         useTicketStore.setState({ tickets: [], selectedTicketIds: [] });
         import('react-hot-toast').then(({ default: toast }) => {
           toast.error("Session expired due to inactivity.");

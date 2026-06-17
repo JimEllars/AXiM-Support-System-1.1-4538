@@ -35,6 +35,7 @@ const SkeletonLoader = () => (
 
 export default function TicketList({ onSelectTicket }) {
   const { tickets, isLoading, fetchTickets, subscribeToTickets, searchQuery, selectedTicketIds, toggleSelectedTicketId } = useTicketStore();
+  const { activeOrganization } = useAuthStore();
   const { user } = useAuthStore();
   const [queueFilter, setQueueFilter] = useState('unassigned');
   const [isTriaging, setIsTriaging] = useState(false);
@@ -79,7 +80,7 @@ export default function TicketList({ onSelectTicket }) {
 
         if (result && result.success) {
             useTicketStore.getState().setSelectedTicketIds([]);
-            fetchTickets();
+            fetchTickets(activeOrganization);
             toast.success(`Successfully triaged ${selectedTicketIds.length} cases`, {
                 id: toastId,
                 style: { background: '#18181b', color: '#10b981', border: '1px solid #047857' }
@@ -102,14 +103,14 @@ export default function TicketList({ onSelectTicket }) {
 
 
   useEffect(() => {
-    fetchTickets();
+    fetchTickets(activeOrganization);
     const unsubscribe = subscribeToTickets();
 
 
     return () => {
       unsubscribe();
     };
-  }, [isTriaging, fetchTickets, subscribeToTickets]);
+  }, [isTriaging, fetchTickets, subscribeToTickets, activeOrganization]);
 
 
     if (isLoading && filteredTickets.length === 0) {
@@ -211,7 +212,7 @@ export default function TicketList({ onSelectTicket }) {
         <button
           onClick={() => {
             if (!isTriaging && !isLoading) {
-              fetchTickets();
+              fetchTickets(activeOrganization);
             }
           }}
           className="text-zinc-500 hover:text-cyan-400 transition-colors p-2 rounded-xl hover:bg-zinc-800/50"
