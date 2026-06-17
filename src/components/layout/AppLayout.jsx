@@ -1,6 +1,7 @@
 import React from 'react';
 import Sidebar from './Sidebar';
 import CoreHealthIndicator from './CoreHealthIndicator';
+import { ErrorBoundary } from './ErrorBoundary';
 
 export default function AppLayout({ children }) {
   return (
@@ -8,7 +9,9 @@ export default function AppLayout({ children }) {
       <Sidebar />
       <div className="pl-24">
         <CoreHealthIndicator />
-        {children}
+        <ErrorBoundary>
+          {children}
+        </ErrorBoundary>
       </div>
     </div>
   );

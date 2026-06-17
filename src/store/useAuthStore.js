@@ -1,32 +1,48 @@
 import { create } from 'zustand';
 import { supabase } from '../lib/supabaseClient';
-import toast from 'react-hot-toast';
 
 export const useAuthStore = create((set) => ({
-  session: null,
   user: null,
-  setSession: (session) => set({ session, user: session?.user || null }),
-  signIn: async (email, password) => {
-    try {
-      const { data, error } = await supabase.auth.signInWithPassword({
-        email,
-        password,
-      });
-      if (error) throw error;
-      set({ session: data.session, user: data.user });
-      return { data, error: null };
-    } catch (error) {
-      toast.error(error.message || 'Failed to sign in');
-      return { data: null, error };
+  session: null,
+  activeOrganization: null, // NEW
+  isAuthenticated: false,
+
+  setSession: async (session) => {
+    if (!session) {
+      set({ session: null, user: null, activeOrganization: null, isAuthenticated: false });
+      return;
     }
+
+    // Fetch user's organization profile
+    const { data: profile } = await supabase.from('team_profiles').select('organization_id').eq('id', session.user.id).single();
+
+    set({
+      user: session.user,
+      session: session,
+      activeOrganization: profile?.organization_id || null,
+      isAuthenticated: true
+    });
   },
-  signOut: async () => {
-    try {
-      const { error } = await supabase.auth.signOut();
-      if (error) throw error;
-      set({ session: null, user: null });
-    } catch (error) {
-      toast.error(error.message || 'Failed to sign out');
-    }
+
+  login: async (email, password) => {
+    const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+    if (error) throw error;
+
+    // Fetch user's organization profile
+    const { data: profile } = await supabase.from('team_profiles').select('organization_id').eq('id', data.user.id).single();
+
+    set({
+      user: data.user,
+      session: data.session,
+      activeOrganization: profile?.organization_id || null,
+      isAuthenticated: true
+    });
+
+    return { data, error: null };
   },
+
+  logout: async () => {
+    await supabase.auth.signOut();
+    set({ user: null, session: null, activeOrganization: null, isAuthenticated: false });
+  }
 }));

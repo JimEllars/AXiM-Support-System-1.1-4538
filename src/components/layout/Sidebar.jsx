@@ -6,21 +6,26 @@ import { motion } from 'framer-motion';
 import { useAuthStore } from '../../store/useAuthStore';
 import { supabase } from '../../lib/supabaseClient';
 import toast from 'react-hot-toast';
+import { useTranslation } from 'react-i18next';
 
 const { FiGrid, FiActivity, FiUsers, FiSettings, FiZap, FiShield, FiCpu, FiLogOut, FiDatabase } = FiIcons;
 
-const NAV_ITEMS = [
-  { id: 'dashboard', label: 'Command', path: '/', icon: FiGrid },
-  { id: 'analytics', label: 'Intelligence', path: '/analytics', icon: FiActivity },
-  { id: 'team', label: 'Neural Team', path: '/team', icon: FiUsers },
-  { id: 'memory', label: 'System Memory', path: '/memory', icon: FiDatabase },
-  { id: 'settings', label: 'Onyx Config', path: '/settings', icon: FiSettings },
-];
+
 
 export default function Sidebar() {
+  const { t } = useTranslation();
+
+  const NAV_ITEMS = [
+    { id: 'dashboard', label: t('nav.dashboard', 'Dashboard'), path: '/', icon: FiGrid },
+    { id: 'analytics', label: t('nav.queue', 'Queue'), path: '/analytics', icon: FiActivity },
+    { id: 'team', label: 'Neural Team', path: '/team', icon: FiUsers },
+    { id: 'memory', label: t('nav.memory_hub', 'Memory Hub'), path: '/memory', icon: FiDatabase },
+    { id: 'settings', label: t('nav.settings', 'Settings'), path: '/settings', icon: FiSettings },
+  ];
+
   const navigate = useNavigate();
   const location = useLocation();
-  const { user, signOut } = useAuthStore();
+  const { user, logout } = useAuthStore();
 
   const [isAway, setIsAway] = useState(false);
 
@@ -44,7 +49,7 @@ export default function Sidebar() {
 
 
   const handleSignOut = async () => {
-    await signOut();
+    await logout();
     navigate('/login');
   };
 

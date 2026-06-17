@@ -10,9 +10,9 @@ export const useTicketStore = create((set, get) => ({
   selectedTicketId: null,
   setSelectedTicketId: (id) => set({ selectedTicketId: id }),
   searchQuery: "",
-  setSearchQuery: (query) => {
+  setSearchQuery: (orgId, query) => {
     set({ searchQuery: query });
-    get().fetchTickets(query);
+    get().fetchTickets(orgId, query);
   },
   selectedTicketIds: [], // State for multi-select
   setSelectedTicketIds: (ids) => set({ selectedTicketIds: ids }),
@@ -41,7 +41,7 @@ export const useTicketStore = create((set, get) => ({
       )
     })),
 
-  fetchTickets: async (query = "") => {
+  fetchTickets: async (orgId, query = "") => {
     set({ isLoading: true });
     try {
       let q = supabase
@@ -49,6 +49,9 @@ export const useTicketStore = create((set, get) => ({
         .select("*, contacts_ax2024!inner(*)")
         .order("created_at", { ascending: false })
         .limit(50);
+
+      // Enforce Multi-Tenant Query Filter
+      if (orgId) q = q.eq('organization_id', orgId);
 
       if (query && query.trim() !== '') {
         const searchTerm = `%${query.trim()}%`;

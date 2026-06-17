@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import SafeIcon from '../../common/SafeIcon';
 import * as FiIcons from 'react-icons/fi';
 import { useTicketStore } from '../../store/useTicketStore';
+import { useAuthStore } from '../../store/useAuthStore';
 import { onyxService } from '../../services/onyxService';
 import toast from 'react-hot-toast';
 
@@ -12,6 +13,7 @@ export default function BatchTriageModal({ isOpen, onClose }) {
   const [processing, setProcessing] = useState(false);
   const [completed, setCompleted] = useState(false);
   const { selectedTicketIds, setSelectedTicketIds, fetchTickets } = useTicketStore();
+  const { activeOrganization } = useAuthStore();
 
   const handleStart = async () => {
     if (selectedTicketIds.length === 0) {
@@ -24,7 +26,7 @@ export default function BatchTriageModal({ isOpen, onClose }) {
         const result = await onyxService.executeBatchTriage(selectedTicketIds);
         if (result.success) {
             setCompleted(true);
-            await fetchTickets(); // Refresh queue
+            await fetchTickets(activeOrganization); // Refresh queue
             setSelectedTicketIds([]); // Clear selection
         } else {
             throw new Error(result.error || "Batch triage failed.");

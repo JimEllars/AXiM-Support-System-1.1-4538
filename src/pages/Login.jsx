@@ -10,7 +10,7 @@ export default function Login() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  const { signIn } = useAuthStore();
+  const { login } = useAuthStore();
   const navigate = useNavigate();
 
   const handleLogin = async (e) => {
@@ -21,7 +21,7 @@ export default function Login() {
     }
 
     setIsLoading(true);
-    const { error } = await signIn(email, password);
+    const { error } = await login(email, password);
     setIsLoading(false);
 
     if (!error) {
