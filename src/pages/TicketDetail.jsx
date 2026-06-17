@@ -156,7 +156,7 @@ export default function TicketDetail() {
     <div className="min-h-screen bg-black text-white p-8">
       <div className="max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-12 gap-8">
 
-        <div className="lg:col-span-8 flex flex-col h-[calc(100vh-4rem)]">
+        <div className="col-span-1 lg:col-span-8 flex flex-col h-[calc(100vh-4rem)]">
 
           {/* Header */}
           <motion.div
@@ -344,7 +344,7 @@ export default function TicketDetail() {
           </motion.div>
         </div>
 
-        <div className="lg:col-span-4 space-y-8">
+        <div className="col-span-1 lg:col-span-4 space-y-8">
           <div className="flex p-1.5 bg-zinc-900 border border-zinc-800 rounded-3xl">
             <button
               onClick={() => setActiveTab("intelligence")}

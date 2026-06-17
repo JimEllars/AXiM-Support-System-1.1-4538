@@ -1,6 +1,7 @@
 import { onyxService } from '../services/onyxService';
 import toast from 'react-hot-toast';
 import React, { useEffect, useState, useRef } from 'react';
+import { useTranslation } from 'react-i18next';
 import SafeIcon from '../common/SafeIcon';
 import * as FiIcons from 'react-icons/fi';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -34,6 +35,7 @@ const SkeletonLoader = () => (
 );
 
 export default function TicketList({ onSelectTicket }) {
+  const { t } = useTranslation();
   const { tickets, isLoading, fetchTickets, subscribeToTickets, searchQuery, selectedTicketIds, toggleSelectedTicketId } = useTicketStore();
   const { activeOrganization } = useAuthStore();
   const { user } = useAuthStore();
@@ -206,9 +208,14 @@ export default function TicketList({ onSelectTicket }) {
       </div>
 
       <div className="flex justify-between items-center mb-4 px-2">
-        <h2 className="text-zinc-400 font-bold tracking-widest text-sm uppercase flex items-center gap-2">
-          Inbox Pipeline
-        </h2>
+        <div className="flex flex-1 justify-between text-zinc-400 font-bold tracking-widest text-[10px] uppercase px-4">
+          <span>{t('ticket_list.subject', 'Subject')}</span>
+          <div className="flex gap-12">
+            <span>{t('ticket_list.priority', 'Priority')}</span>
+            <span>{t('ticket_list.time', 'Time')}</span>
+            <span>{t('ticket_list.status', 'Status')}</span>
+          </div>
+        </div>
         <button
           onClick={() => {
             if (!isTriaging && !isLoading) {

@@ -12,7 +12,7 @@ const { FiGrid, FiActivity, FiUsers, FiSettings, FiZap, FiShield, FiCpu, FiLogOu
 
 
 
-export default function Sidebar() {
+export default function Sidebar({ isOpen, setIsOpen }) {
   const { t } = useTranslation();
 
   const NAV_ITEMS = [
@@ -54,7 +54,7 @@ export default function Sidebar() {
   };
 
   return (
-    <aside className="fixed left-0 top-0 bottom-0 w-24 bg-zinc-950 border-r border-zinc-900 flex flex-col items-center py-10 z-[60]">
+    <aside className={`fixed left-0 top-0 bottom-0 w-24 bg-zinc-950 border-r border-zinc-900 flex flex-col items-center py-10 z-[60] transition-transform duration-300 md:translate-x-0 ${isOpen ? "translate-x-0" : "-translate-x-full"}`}>
       <div className="w-12 h-12 bg-cyan-500 rounded-2xl flex items-center justify-center text-black shadow-[0_0_20px_rgba(34,211,238,0.4)] mb-12 cursor-pointer group">
         <SafeIcon icon={FiZap} className="text-2xl group-hover:rotate-12 transition-transform" />
       </div>
@@ -65,7 +65,7 @@ export default function Sidebar() {
           return (
             <button
               key={item.id}
-              onClick={() => navigate(item.path)}
+              onClick={() => { navigate(item.path); if (setIsOpen) setIsOpen(false); }}
               className="relative group p-4"
             >
               <SafeIcon 

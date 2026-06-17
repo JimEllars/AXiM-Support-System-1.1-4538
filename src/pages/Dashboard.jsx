@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 import TicketList from '../components/TicketList';
 import OnyxCommandHub from '../components/OnyxCommandHub';
@@ -15,6 +16,7 @@ import * as FiIcons from 'react-icons/fi';
 const { FiInbox, FiPlus, FiActivity, FiLayers } = FiIcons;
 
 export default function Dashboard() {
+  const { t } = useTranslation();
   const navigate = useNavigate();
   const [modalType, setModalType] = useState(null); // 'create', 'batch', 'broadcast'
   const [refreshKey, setRefreshKey] = useState(0);
@@ -90,7 +92,7 @@ export default function Dashboard() {
                 <SafeIcon icon={FiLayers} className="text-xl" />
               </div>
               <div>
-                <h2 className="text-2xl font-black text-white tracking-tight">Case Queue</h2>
+                <h2 className="text-2xl font-black text-white tracking-tight">{t('dashboard.recent_tickets', 'Recent Tickets')}</h2>
                 <div className="flex items-center gap-2 text-[10px] font-black text-cyan-400/70 uppercase tracking-[0.2em] mt-0.5">
                    <div className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-pulse" />
                    Real-time Synchronization
