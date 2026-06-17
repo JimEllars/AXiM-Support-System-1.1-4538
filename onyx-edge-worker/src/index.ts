@@ -169,6 +169,7 @@ export interface Env {
   AXIM_SERVICE_KEY: string;
   CORE_API_URL: string;
   IDEMPOTENCY_KV: KVNamespace;
+  KB_CACHE: KVNamespace;
   RESEND_API_KEY?: string;
   RESEND_FROM_EMAIL?: string;
 }
@@ -1122,55 +1123,20 @@ const { data: ticket, error: ticketError } = await supabase
             }
 
             // Analyze and insert
-            let embeddingForRag: any[] = [];
-            try {
-              const embedRes = await fetch(
-                `${env.CORE_API_URL || "https://api.axim-core.internal"}/functions/v1/generate-embedding`,
-                {
-                  method: "POST",
-                  headers: {
-                    "Content-Type": "application/json",
-                    Authorization: `Bearer ${env.AXIM_SERVICE_KEY}`,
-                  },
-                  body: JSON.stringify({
-                    input: `${normalizedData.subject} ${normalizedData.description || ""}`,
-                  }),
-                },
-              );
-              if (embedRes.ok) {
-                const embedData: any = await embedRes.json();
-                if (embedData.embedding) embeddingForRag = embedData.embedding;
-              }
-            } catch (err) {
-              logErr(supabase, logCtx, err, ctx);
-            }
 
-            let contextText = "";
-            if (embeddingForRag.length > 0) {
-              const { data: searchResults, error: searchError } = await supabase.rpc(
-                "match_memory_banks",
-                {
-                  query_embedding: embeddingForRag,
-                  match_threshold: 0.5,
-                  match_count: 3,
-                },
-              );
+            // High-Speed Edge-Cached Context Retrieval
+            const combinedQuery = `${normalizedData.subject} ${normalizedData.description || ""}`;
+            let contextText = await getCachedRAGContext(combinedQuery, env, supabase, ctx);
 
-              if (!searchError && searchResults && searchResults.length > 0) {
-                contextText = searchResults
-                  .map((r: any) => `Title: ${r.title}\nContent: ${r.content}`)
-                  .join("\n\n");
-              }
-            } else {
-               const { data: searchResults, error: searchError } = await supabase
+            // If memory_banks yielded nothing, fallback to standard fetch limit 3
+            if (!contextText) {
+               const { data: fallbackResults, error: fallbackError } = await supabase
                 .from("memory_banks")
                 .select("title, content")
                 .limit(3);
 
-              if (!searchError && searchResults && searchResults.length > 0) {
-                contextText = searchResults
-                  .map((r: any) => `Title: ${r.title}\nContent: ${r.content}`)
-                  .join("\n\n");
+              if (!fallbackError && fallbackResults && fallbackResults.length > 0) {
+                contextText = fallbackResults.map((r: any) => `Title: ${r.title}\nContent: ${r.content}`).join("\n\n");
               }
             }
 
@@ -1237,28 +1203,6 @@ const { data: ticket, error: ticketError } = await supabase
               priority = "urgent";
               updatedSlaBreachAt = new Date();
               updatedSlaBreachAt.setHours(updatedSlaBreachAt.getHours() + 1); // 1h SLA for VIP
-            }
-
-            // Sentinel Logic: Run vector search and attempt deflection
-            // Phase 37: Reusing shared embedding for KB match to prevent double generation
-            let embedding: any[] = embeddingForRag;
-
-            if (embedding.length > 0) {
-              const { data: searchResults, error: searchError } = await supabase.rpc(
-                "match_kb_articles",
-                {
-                  query_embedding: embedding,
-                  match_threshold: 0.5,
-                  match_count: 3,
-                },
-              );
-
-              let context = "";
-              if (!searchError && searchResults && searchResults.length > 0) {
-                context = searchResults
-                  .map((r: any) => `Title: ${r.title}\nContent: ${r.content}`)
-                  .join("\n\n");
-              }
             }
 
             // If confidence > 90%, deflect
@@ -1362,6 +1306,65 @@ const { data: ticket, error: ticketError } = await supabase
 
 // --- Helpers ---
 
+
+async function hashString(message: string): Promise<string> {
+  const msgUint8 = new TextEncoder().encode(message);
+  const hashBuffer = await crypto.subtle.digest('SHA-256', msgUint8);
+  const hashArray = Array.from(new Uint8Array(hashBuffer));
+  return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+async function getCachedRAGContext(queryText: string, env: Env, supabase: any, ctx: any): Promise<string> {
+  if (!queryText || queryText.trim() === "") return "";
+
+  const cacheKey = `rag_v1_${await hashString(queryText)}`;
+
+  // 1. Check Cloudflare KV Edge Cache
+  if (env.KB_CACHE) {
+    const cachedData = await env.KB_CACHE.get(cacheKey);
+    if (cachedData) {
+      console.log("[CACHE HIT] Semantic context pulled from Edge KV");
+      return cachedData;
+    }
+  }
+
+  // 2. Cache Miss - Generate Embedding via AXiM Core
+  let contextText = "";
+  try {
+    const embedRes = await fetch(`${env.CORE_API_URL || "https://api.axim-core.internal"}/functions/v1/generate-embedding`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Authorization": `Bearer ${env.AXIM_SERVICE_KEY}` },
+      body: JSON.stringify({ input: queryText }),
+    });
+
+    if (embedRes.ok) {
+      const embedData: any = await embedRes.json();
+      const embedding = embedData.embedding;
+
+      if (embedding && embedding.length > 0) {
+        // Query Supabase Vectors
+        const { data: searchResults, error: searchError } = await supabase.rpc("match_memory_banks", {
+          query_embedding: embedding,
+          match_threshold: 0.5,
+          match_count: 3,
+        });
+
+        if (!searchError && searchResults && searchResults.length > 0) {
+          contextText = searchResults.map((r: any) => `Title: ${r.title}\nContent: ${r.content}`).join("\n\n");
+        }
+      }
+    }
+  } catch (err) {
+    console.error("Embedding generation failed, proceeding without context", err);
+  }
+
+  // 3. Store in Cloudflare KV (24-hour TTL)
+  if (env.KB_CACHE && contextText) {
+    ctx.waitUntil(env.KB_CACHE.put(cacheKey, contextText, { expirationTtl: 86400 }));
+  }
+
+  return contextText;
+}
 async function analyzeWithOnyx(
   subject: string,
   description: string,
