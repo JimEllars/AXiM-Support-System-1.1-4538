@@ -120,8 +120,23 @@ const handleReject = async () => {
         <div className="text-zinc-200 font-medium">
            Tool: <span className={`${isCompleted ? 'text-emerald-300' : 'text-cyan-300'} font-mono text-sm`}>{log.tool_type}</span>
         </div>
-        <div className="text-zinc-400 text-sm font-mono bg-black/40 p-2 rounded overflow-x-auto">
-          {JSON.stringify(log.payload, null, 2)}
+
+        <div className="text-zinc-400 text-sm font-mono bg-black/40 p-2 rounded overflow-x-auto relative">
+          {log.tool_type === 'apply_git_patch' && (
+            <button
+              onClick={() => {
+                navigator.clipboard.writeText(log.payload.patch || JSON.stringify(log.payload));
+                toast.success("Patch copied to clipboard", {
+                    style: { background: '#18181b', color: '#10b981', border: '1px solid #047857' }
+                });
+              }}
+              className="absolute top-2 right-2 text-zinc-500 hover:text-cyan-400 transition-colors p-1 bg-black/50 rounded"
+              title="Copy Patch"
+            >
+              <SafeIcon icon={FiIcons.FiCopy} />
+            </button>
+          )}
+          <pre>{JSON.stringify(log.payload, null, 2)}</pre>
         </div>
         {isCompleted && log.execution_result && (
            <div className="mt-2 text-emerald-400 text-xs font-mono bg-emerald-950/30 p-2 border border-emerald-900/50 rounded">

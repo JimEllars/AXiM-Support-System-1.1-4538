@@ -14,6 +14,7 @@ export default function SupportMetrics() {
   });
 
   const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState(false);
 
   useEffect(() => {
     let isMounted = true;
@@ -133,6 +134,7 @@ export default function SupportMetrics() {
         }
       } catch (error) {
         console.error("Failed to fetch live metrics:", error);
+        setError(true);
         if (isMounted) setIsLoading(false);
       }
     }
@@ -140,7 +142,9 @@ export default function SupportMetrics() {
 
     fetchMetrics();
 
-    return () => {
+
+
+  return () => {
       isMounted = false;
     };
   }, []);
@@ -177,6 +181,16 @@ export default function SupportMetrics() {
       textStyle: { color: '#fafafa' }
     }
   };
+
+  if (error) {
+    return (
+      <div className="glass-panel p-6 rounded-2xl flex items-center justify-center border-rose-500/30">
+        <p className="text-rose-400 font-bold uppercase tracking-widest text-sm">
+          ⚠️ Telemetry offline. Retrying...
+        </p>
+      </div>
+    );
+  }
 
   // SVG Progress Ring logic
   const circleRadius = 24;

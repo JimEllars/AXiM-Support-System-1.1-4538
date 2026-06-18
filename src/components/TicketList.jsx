@@ -1,7 +1,8 @@
+import { useTranslation } from "react-i18next";
 import { onyxService } from '../services/onyxService';
 import toast from 'react-hot-toast';
 import React, { useEffect, useState, useRef } from 'react';
-import { useTranslation } from 'react-i18next';
+
 import SafeIcon from '../common/SafeIcon';
 import * as FiIcons from 'react-icons/fi';
 import { motion, AnimatePresence } from 'framer-motion';
