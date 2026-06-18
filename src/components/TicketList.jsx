@@ -116,25 +116,7 @@ export default function TicketList({ onSelectTicket }) {
   }, [isTriaging, fetchTickets, subscribeToTickets, activeOrganization]);
 
 
-    if (isLoading && filteredTickets.length === 0) {
-    return (
-      <div className="space-y-3 relative">
-        {[1, 2, 3, 4, 5].map(i => (
-          <div key={i} className="animate-pulse flex items-center justify-between p-5 border border-zinc-800 rounded-2xl bg-zinc-900/40">
-            <div className="flex gap-4 items-center w-full">
-              <div className="w-8 h-8 bg-zinc-800 rounded-lg shrink-0" />
-              <div className="w-12 h-12 bg-zinc-800 rounded-xl shrink-0" />
-              <div className="flex-1 space-y-2">
-                <div className="h-4 bg-zinc-800 rounded w-1/3" />
-                <div className="h-3 bg-zinc-800 rounded w-1/4" />
-              </div>
-            </div>
-            <div className="w-20 h-6 bg-zinc-800 rounded-lg shrink-0" />
-          </div>
-        ))}
-      </div>
-    );
-  }
+
 
 
   if (filteredTickets.length === 0) {
@@ -234,7 +216,19 @@ export default function TicketList({ onSelectTicket }) {
       </div>
       <div className="space-y-3">
       <AnimatePresence>
-        {filteredTickets.length === 0 && !isLoading ? (
+        {isLoading ? (
+  <>
+    {[1, 2, 3, 4, 5].map((i) => (
+      <tr key={i} className="border-b border-zinc-800/50 flex">
+        <td className="px-6 py-4 flex-1"><div className="h-4 bg-zinc-800 rounded animate-pulse w-3/4"></div></td>
+        <td className="px-6 py-4 flex-1"><div className="h-4 bg-zinc-800 rounded animate-pulse w-1/2"></div></td>
+        <td className="px-6 py-4 flex-1"><div className="h-4 bg-zinc-800 rounded animate-pulse w-1/3"></div></td>
+        <td className="px-6 py-4 flex-1"><div className="h-4 bg-zinc-800 rounded animate-pulse w-1/4"></div></td>
+        <td className="px-6 py-4"><div className="h-8 w-8 bg-zinc-800 rounded-lg animate-pulse ml-auto"></div></td>
+      </tr>
+    ))}
+  </>
+) : filteredTickets.length === 0 ? (
           <div className="py-24 text-center">
             <div className="flex flex-col items-center justify-center space-y-4 animate-in fade-in zoom-in duration-500">
               <div className="w-16 h-16 rounded-full bg-zinc-900/50 border border-zinc-800 flex items-center justify-center text-zinc-600 shadow-inner">

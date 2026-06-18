@@ -13,6 +13,7 @@ export default function ActionProposalBlock({ hitlLog }) {
   const [log, setLog] = useState(hitlLog || null);
   const [loading, setLoading] = useState(!hitlLog);
   const [isExecuting, setIsExecuting] = useState(false);
+  const [showConfirm, setShowConfirm] = useState(false);
   const [idempotencyKey] = useState(() => crypto.randomUUID());
   const { isCoreOnline } = useTicketStore();
   const { user } = useAuthStore();
@@ -168,22 +169,25 @@ const handleReject = async () => {
                 <SafeIcon icon={FiZap} className="animate-pulse" /> ⚠️ AXiM Core Offline: Action execution suspended.
             </div>
         )}
-        <div className="flex gap-3 mt-4">
-            <button
-                onClick={handleExecute}
-                disabled={!isCoreOnline || isExecuting}
-                className={`flex items-center gap-2 px-4 py-2 ${!isCoreOnline || isExecuting ? 'bg-zinc-700 text-zinc-500 cursor-not-allowed' : 'bg-cyan-500 hover:bg-cyan-400 text-zinc-950'} font-bold rounded-lg transition-colors text-sm`}
-            >
-                <SafeIcon icon={FiCheck} /> {isExecuting ? 'Executing...' : 'Approve & Execute'}
-            </button>
-            <button
-                onClick={handleReject}
-                disabled={!isCoreOnline}
-                className={`flex items-center gap-2 px-4 py-2 ${!isCoreOnline ? 'bg-zinc-800/50 text-zinc-600 cursor-not-allowed' : 'bg-zinc-800 hover:bg-zinc-700 text-zinc-300'} font-medium rounded-lg transition-colors text-sm`}
-            >
-                <SafeIcon icon={FiX} /> Reject
-            </button>
-        </div>
+        {/* Action Buttons */}
+<div className="mt-4 flex justify-end gap-3">
+  {showConfirm ? (
+    <div className="flex items-center gap-3 animate-in slide-in-from-right-4 duration-300">
+      <span className="text-xs text-amber-400 font-bold uppercase tracking-wider">Confirm Execution?</span>
+      <button onClick={() => setShowConfirm(false)} className="px-4 py-2 bg-zinc-800 text-zinc-400 hover:bg-zinc-700 hover:text-white rounded-lg text-xs font-bold transition-colors">
+        Cancel
+      </button>
+      <button onClick={handleExecute} disabled={isExecuting} className="px-4 py-2 bg-amber-500 hover:bg-amber-400 text-amber-950 rounded-lg text-xs font-black uppercase tracking-wider transition-colors disabled:opacity-50 flex items-center gap-2">
+        {isExecuting ? <><SafeIcon icon={FiIcons.FiLoader} className="animate-spin" /> Executing...</> : "Yes, Execute"}
+      </button>
+    </div>
+  ) : (
+    <button onClick={() => setShowConfirm(true)} className="px-4 py-2 bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 hover:bg-emerald-500/20 rounded-lg text-xs font-bold transition-colors flex items-center gap-2">
+      <SafeIcon icon={FiIcons.FiPlay} />
+      Execute Action
+    </button>
+  )}
+</div>
         </>
       ) : (
           <div className="flex items-center gap-2 text-sm font-bold mono-font mt-4">
