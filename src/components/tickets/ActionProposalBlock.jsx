@@ -136,7 +136,23 @@ const handleReject = async () => {
               <SafeIcon icon={FiIcons.FiCopy} />
             </button>
           )}
-          <pre>{JSON.stringify(log.payload, null, 2)}</pre>
+          <code>
+  {typeof log.payload === 'string'
+    ? log.payload.split('\n').map((line, i) => {
+        let colorClass = 'text-zinc-300';
+        if (line.startsWith('+') && !line.startsWith('+++')) colorClass = 'text-emerald-400 bg-emerald-400/10';
+        else if (line.startsWith('-') && !line.startsWith('---')) colorClass = 'text-rose-400 bg-rose-400/10';
+        else if (line.startsWith('@@')) colorClass = 'text-cyan-400';
+
+        return (
+          <div key={i} className={`px-2 ${colorClass} whitespace-pre-wrap min-h-[1.2em]`}>
+            {line}
+          </div>
+        );
+      })
+    : JSON.stringify(log.payload, null, 2)
+  }
+</code>
         </div>
         {isCompleted && log.execution_result && (
            <div className="mt-2 text-emerald-400 text-xs font-mono bg-emerald-950/30 p-2 border border-emerald-900/50 rounded">
