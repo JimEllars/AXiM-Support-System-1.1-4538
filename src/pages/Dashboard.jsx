@@ -76,16 +76,18 @@ export default function Dashboard() {
           </div>
         </header>
 
-        <SupportMetrics />
-        <DLQMonitorBlock />
-        
-        <div className="grid grid-cols-1 lg:grid-cols-4 gap-4 mb-10">
-          <DashboardQuickActions onAction={handleAction} />
-        </div>
+        <div className="space-y-6">
+          <SupportMetrics />
+          <DLQMonitorBlock />
 
-        <OnyxCommandHub />
+          <div className="bg-zinc-900/40 border border-zinc-800 rounded-3xl p-6 backdrop-blur-xl">
+            <div className="grid grid-cols-1 lg:grid-cols-4 gap-4 mb-10">
+              <DashboardQuickActions onAction={handleAction} />
+            </div>
 
-        <main className="glass-panel rounded-[3rem] p-12 border-zinc-800/40">
+            <OnyxCommandHub />
+
+            <main className="glass-panel rounded-[3rem] p-12 border-zinc-800/40">
           <div className="mb-10 flex flex-col sm:flex-row sm:items-center justify-between gap-6">
             <div className="flex items-center gap-4">
               <div className="w-14 h-14 bg-zinc-950 border border-zinc-800 rounded-2xl flex items-center justify-center text-zinc-500">
@@ -103,6 +105,8 @@ export default function Dashboard() {
           
           <TicketList onSelectTicket={(id) => navigate(`/ticket/${id}`)} />
         </main>
+          </div>
+        </div>
       </div>
 
       <CreateTicketModal 

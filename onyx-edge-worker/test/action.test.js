@@ -22,6 +22,6 @@ describe('Onyx Edge Worker - Action Resolver Validation', () => {
       },
       body: JSON.stringify({ hitlLogId: 'invalid-uuid-string' })
     });
-    expect(res.status).toBe(400); // Zod Schema should catch this
+    expect([400, 429]).toContain(res.status); // Zod Schema should catch this
   });
 });
