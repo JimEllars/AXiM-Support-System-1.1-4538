@@ -22,8 +22,7 @@ export default function TicketDetail() {
   const { user } = useAuthStore();
 
   const [ticket, setTicket] = useState(null);
-  const [messages, setMessages] = useState([]);
-  const [reply, setReply] = useState('');
+    const [reply, setReply] = useState('');
   const [isInternal, setIsInternal] = useState(false);
   const [activeTab, setActiveTab] = useState('intelligence');
   const [telemetry, setTelemetry] = useState(null);
@@ -54,9 +53,6 @@ export default function TicketDetail() {
         setTicket(found);
 
         // Mock fetching messages
-        setMessages([
-          { id: 1, sender_id: found.customer_id, sender_type: 'customer', message_body: found.description, created_at: found.created_at }
-        ]);
 
         // Mock telemetry data
         setTelemetry({
@@ -89,18 +85,7 @@ export default function TicketDetail() {
           setTicket((prev) => ({ ...prev, ...payload.new }));
         }
       )
-      .on(
-        'postgres_changes',
-        { event: 'INSERT', schema: 'public', table: 'ticket_messages', filter: `ticket_id=eq.${id}` },
-        (payload) => {
-          console.log('New message via Realtime', payload);
-          setMessages((prev) => {
-             // Check for duplicate messages before adding
-             if (prev.some(m => m.id === payload.new.id)) return prev;
-             return [...prev, payload.new];
-          });
-        }
-      )
+
       .subscribe((status) => {
         if (status === 'SUBSCRIBED') {
           console.log(`Subscribed to ticket ${id} updates`);
@@ -111,12 +96,6 @@ export default function TicketDetail() {
       supabase.removeChannel(channel);
     };
   }, [id]);
-
-  useEffect(() => {
-      // Auto-scroll to bottom of messages
-      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages]);
-
   const handleSend = async () => {
     if (!reply.trim()) return;
 
@@ -128,8 +107,7 @@ export default function TicketDetail() {
       created_at: new Date().toISOString(),
       is_internal_note: isInternal
     };
-
-    setMessages(prev => [...prev, newMessage]);
+    // Message optimistic update handled by MessageThread
     setReply('');
     setIsInternal(false);
 
@@ -245,37 +223,8 @@ export default function TicketDetail() {
             className="flex-1 bg-zinc-900/50 border border-zinc-800 rounded-[3rem] overflow-hidden flex flex-col backdrop-blur-xl shadow-2xl relative"
           >
             <div className="flex-1 overflow-y-auto p-8 space-y-6">
-              {messages.map((msg, idx) => {
-                  const isAgent = msg.sender_type === 'agent' || msg.sender_type === 'internal';
-                  return (
-                      <div key={msg.id} className={`flex gap-6 ${isAgent ? 'flex-row-reverse' : ''}`}>
-                          <div className={`w-12 h-12 rounded-2xl flex items-center justify-center shrink-0 border-2 shadow-lg ${
-                              msg.sender_type === 'customer' ? 'bg-zinc-800 border-zinc-700 text-zinc-400' :
-                              msg.sender_type === 'internal' ? 'bg-amber-500/20 border-amber-500/50 text-amber-400' :
-                              'bg-cyan-500/20 border-cyan-500/50 text-cyan-400'
-                          }`}>
-                              <SafeIcon icon={
-                                  msg.sender_type === 'customer' ? FiGlobe :
-                                  msg.sender_type === 'internal' ? FiZap : FiCpu
-                              } className="text-xl" />
-                          </div>
-                          <div className={`flex max-w-[80%] flex-col ${isAgent ? 'items-end' : 'items-start'}`}>
-                              <div className={`px-6 py-4 rounded-[2rem] text-[15px] leading-relaxed ${
-                                  msg.sender_type === 'customer' ? 'bg-zinc-800/80 border border-zinc-700/50 rounded-tl-sm text-zinc-300' :
-                                  msg.sender_type === 'internal' ? 'bg-amber-500/10 border border-amber-500/20 rounded-tr-sm text-amber-100 font-mono text-sm' :
-                                  'bg-cyan-500/10 border border-cyan-500/20 rounded-tr-sm text-cyan-50'
-                              }`}>
-                                  {msg.message_body}
-                              </div>
-                              <span className="text-[10px] font-bold text-zinc-600 mt-2 uppercase tracking-widest px-2">
-                                  {new Date(msg.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                                  {msg.is_internal_note && <span className="ml-2 text-amber-500/50 font-black flex items-center inline-flex gap-1"><SafeIcon icon={FiZap}/> INTERNAL</span>}
-                              </span>
-                          </div>
-                      </div>
-                  );
-              })}
-              <div ref={messagesEndRef} />
+              <MessageThread ticketId={id} />
+
             </div>
 
             <div className="p-4 bg-zinc-950/80 border-t border-zinc-800 backdrop-blur-xl">

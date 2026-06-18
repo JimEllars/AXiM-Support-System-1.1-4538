@@ -142,9 +142,20 @@ export default function SupportMetrics() {
 
     fetchMetrics();
 
+    const telemetryChannel = supabase.channel('public:telemetry_metrics')
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'ticket_ai_telemetry' }, () => {
+        fetchMetrics();
+      })
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'events_ax2024' }, () => {
+        fetchMetrics();
+      })
+      .subscribe();
 
 
-  return () => {
+
+
+    return () => {
+      supabase.removeChannel(telemetryChannel);
       isMounted = false;
     };
   }, []);
@@ -198,7 +209,7 @@ export default function SupportMetrics() {
   const dashOffset = circleCircumference - (metrics.aiDeflectionRate / 100) * circleCircumference;
 
   return (
-    <div className="grid grid-cols-1 md:grid-cols-5 gap-6 mb-8">
+    <div className="grid grid-cols-1 md:grid-cols-5 gap-6 mb-8 bg-[#09090b]/80 backdrop-blur-md border border-white/10 shadow-2xl rounded-2xl p-4">
       <div className="glass-panel p-6 rounded-2xl relative overflow-hidden">
         {isLoading && <div className="absolute inset-0 bg-zinc-900/50 flex items-center justify-center backdrop-blur-sm z-10"><div className="w-5 h-5 border-2 border-cyan-500 border-t-transparent rounded-full animate-spin"></div></div>}
         <p className="text-zinc-500 text-xs font-bold uppercase tracking-widest">Active Queue</p>
