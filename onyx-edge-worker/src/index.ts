@@ -237,6 +237,36 @@ async function handleHealthCheck(env: Env, request: Request, ctx: any): Promise<
 }
 
 
+async function handleStaleTicketSweep(env: Env) {
+  try {
+    const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
+    const fortyEightHoursAgo = new Date();
+    fortyEightHoursAgo.setHours(fortyEightHoursAgo.getHours() - 48);
+
+    // Find tickets that have been pending for > 48 hours
+    const { data: staleTickets, error } = await supabase
+      .from('support_tickets')
+      .select('id')
+      .eq('status', 'pending')
+      .lt('updated_at', fortyEightHoursAgo.toISOString());
+
+    if (error || !staleTickets || staleTickets.length === 0) return;
+
+    for (const ticket of staleTickets) {
+      await supabase.from('support_tickets').update({ status: 'closed', metadata: { closure_reason: 'Auto-closed due to 48h inactivity' } }).eq('id', ticket.id);
+      await supabase.from('ticket_messages').insert({
+        ticket_id: ticket.id,
+        sender_id: 'system',
+        message_body: 'This ticket has been automatically closed due to 48 hours of inactivity. Please open a new request if the issue persists.',
+        is_internal_note: false
+      });
+    }
+    console.log(`[STALE SWEEP] Successfully closed ${staleTickets.length} abandoned tickets.`);
+  } catch (err) {
+    console.error('[STALE SWEEP] Error:', err);
+  }
+}
+
 async function handleSLASweep(env: Env) {
   try {
     const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
@@ -299,6 +329,7 @@ export default {
     ctx.waitUntil(generateAndSendDailyDigest(env));
     ctx.waitUntil(handleSLASweep(env));
     ctx.waitUntil(handleDataRetentionSweep(env));
+    ctx.waitUntil(handleStaleTicketSweep(env));
   },
   async fetch(request: Request, env: Env, ctx: any): Promise<Response> {
     const url = new URL(request.url);

@@ -2,6 +2,7 @@ import { useTranslation } from "react-i18next";
 import { onyxService } from '../services/onyxService';
 import toast from 'react-hot-toast';
 import React, { useEffect, useState, useRef } from 'react';
+import { supabase } from '../lib/supabaseClient';
 
 import SafeIcon from '../common/SafeIcon';
 import * as FiIcons from 'react-icons/fi';
@@ -13,10 +14,10 @@ import SLABadge from './tickets/SLABadge';
 const { FiCircle, FiCheckCircle, FiClock, FiAlertCircle, FiSearch, FiCheckSquare, FiSquare, FiRefreshCw, FiGlobe, FiMail, FiMessageSquare } = FiIcons;
 
 const statusStyles = {
-  open: { icon: FiCircle, color: 'text-cyan-400', border: 'border-cyan-500/50', bg: 'bg-cyan-500/10' },
-  pending: { icon: FiClock, color: 'text-amber-400', border: 'border-amber-500/50', bg: 'bg-amber-500/10' },
-  resolved: { icon: FiCheckCircle, color: 'text-emerald-400', border: 'border-emerald-500/50', bg: 'bg-emerald-500/10' },
-  closed: { icon: FiCheckCircle, color: 'text-zinc-500', border: 'border-zinc-500/30', bg: 'bg-zinc-500/5' },
+  open: { icon: FiCircle, color: 'text-cyan-400', border: 'border-cyan-500/20 shadow-[0_0_10px_rgba(34,211,238,0.2)]', bg: 'bg-cyan-500/10' },
+  pending: { icon: FiClock, color: 'text-amber-400', border: 'border-amber-500/20 shadow-[0_0_10px_rgba(251,191,36,0.2)]', bg: 'bg-amber-500/10' },
+  resolved: { icon: FiCheckCircle, color: 'text-emerald-400', border: 'border-emerald-500/20 shadow-[0_0_10px_rgba(16,185,129,0.2)]', bg: 'bg-emerald-500/10' },
+  closed: { icon: FiCheckCircle, color: 'text-zinc-500', border: 'border-zinc-500/30 shadow-[0_0_10px_rgba(113,113,122,0.1)]', bg: 'bg-zinc-500/5' },
 };
 
 const SkeletonLoader = () => (
@@ -107,13 +108,18 @@ export default function TicketList({ onSelectTicket }) {
 
   useEffect(() => {
     fetchTickets(activeOrganization);
-    const unsubscribe = subscribeToTickets();
 
+    const ticketChannel = supabase.channel('public:support_tickets')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'support_tickets' }, (payload) => {
+        console.log('Realtime Ticket Update:', payload);
+        fetchTickets(activeOrganization);
+      })
+      .subscribe();
 
     return () => {
-      unsubscribe();
+      supabase.removeChannel(ticketChannel);
     };
-  }, [isTriaging, fetchTickets, subscribeToTickets, activeOrganization]);
+  }, [isTriaging, fetchTickets, activeOrganization]);
 
 
 
@@ -214,7 +220,7 @@ export default function TicketList({ onSelectTicket }) {
           <SafeIcon icon={FiRefreshCw} className={`text-lg ${isLoading ? 'animate-spin text-cyan-400' : ''}`} />
         </button>
       </div>
-      <div className="space-y-3">
+      <div className="space-y-3 bg-[#09090b]/80 backdrop-blur-md border border-white/10 shadow-2xl rounded-xl p-4">
       <div className={`transition-opacity duration-300 ${isTriaging ? 'opacity-50 pointer-events-none' : 'opacity-100'}`}>
       <AnimatePresence>
         {isLoading ? (
@@ -259,7 +265,7 @@ export default function TicketList({ onSelectTicket }) {
               animate={{ opacity: 1, scale: 1 }} 
               exit={{ opacity: 0, scale: 0.95 }}
               transition={{ duration: 0.2 }}
-              className={`group flex items-center justify-between p-5 border rounded-2xl transition-all cursor-pointer ${
+              className={`group flex items-center justify-between p-5 border rounded-2xl transition-all duration-200 hover:bg-white/5 cursor-pointer ${
                   isSelected
                     ? 'bg-fuchsia-500/10 border-fuchsia-500/50'
                     : isEscalated
