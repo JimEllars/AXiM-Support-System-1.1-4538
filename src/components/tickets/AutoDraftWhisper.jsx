@@ -6,6 +6,19 @@ import { motion } from 'framer-motion';
 const { FiCpu, FiCopy, FiZap, FiCheck } = FiIcons;
 
 export default function AutoDraftWhisper({ draft, onApply }) {
+  React.useEffect(() => {
+    const handleKeyDown = (e) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
+        if (draft) {
+          e.preventDefault();
+          onApply(draft);
+        }
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [draft, onApply]);
+
   if (!draft) return null;
 
   return (
@@ -32,7 +45,7 @@ export default function AutoDraftWhisper({ draft, onApply }) {
           className="flex items-center gap-2 px-4 py-1.5 bg-fuchsia-500 hover:bg-fuchsia-400 text-black rounded-xl text-[10px] font-black uppercase tracking-widest transition-all shadow-lg shadow-fuchsia-500/20"
         >
           <SafeIcon icon={FiCheck} />
-          Apply Draft
+          Apply Draft ⌘↵
         </button>
       </div>
 

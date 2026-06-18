@@ -1258,34 +1258,7 @@ const { data: ticket, error: ticketError } = await supabase
             }
 
 
-            const { error: aiTelemetryError } = await supabase.from("ticket_ai_telemetry").insert({
 
-              ticket_id: ticket.id,
-              analyzed_sentiment: onyxAnalysis.sentiment,
-              suggested_category: onyxAnalysis.category,
-              auto_response_draft: onyxAnalysis.draft,
-              confidence_score: onyxAnalysis.confidence,
-            });
-
-            // Tier 3 Sandbox Egress Dispatch
-            if (onyxAnalysis.confidence < 85) {
-              console.log(`[ESCALATION] Confidence ${onyxAnalysis.confidence} < 85. Dispatching to Sandbox.`);
-              const sandboxUrl = `${env.CORE_API_URL || "https://api.axim-core.internal"}/functions/v1/sandbox-dispatch`;
-
-              fetch(sandboxUrl, {
-                method: "POST",
-                headers: {
-                  "Content-Type": "application/json",
-                  Authorization: `Bearer ${env.AXIM_SERVICE_KEY}`,
-                },
-                body: JSON.stringify({
-                  ticket_id: ticket.id,
-                  subject: normalizedData.subject,
-                  description: normalizedData.description,
-                  customer_email: normalizedData.customer_email,
-                }),
-              }).catch(err => console.error("Sandbox dispatch failed:", err));
-            }
 
 
 
