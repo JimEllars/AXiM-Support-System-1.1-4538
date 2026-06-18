@@ -215,6 +215,7 @@ export default function TicketList({ onSelectTicket }) {
         </button>
       </div>
       <div className="space-y-3">
+      <div className={`transition-opacity duration-300 ${isTriaging ? 'opacity-50 pointer-events-none' : 'opacity-100'}`}>
       <AnimatePresence>
         {isLoading ? (
   <>
@@ -311,6 +312,7 @@ export default function TicketList({ onSelectTicket }) {
         })
         )}
       </AnimatePresence>
+      </div>
 
       <AnimatePresence>
         {selectedTicketIds.length > 0 && (
