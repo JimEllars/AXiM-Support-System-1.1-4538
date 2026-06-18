@@ -1016,6 +1016,19 @@ async function handleWebhookIntake(request: Request, env: Env, ctx: any): Promis
       }
     }
 
+  // Enforce strict schema validation
+  try {
+    WebhookIntakeSchema.parse(normalizedData);
+  } catch (zodError) {
+    if (zodError instanceof z.ZodError) {
+      return new Response(
+        JSON.stringify({ error: "Payload validation failed", details: zodError.issues }),
+        { status: 400, headers: { "Content-Type": "application/json", ...getCorsHeaders(env, request) } }
+      );
+    }
+    throw zodError;
+  }
+
     if (!normalizedData.customer_email) {
       return new Response(
         JSON.stringify({ error: "Missing required field: customer_email" }),

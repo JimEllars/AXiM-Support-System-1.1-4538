@@ -149,7 +149,6 @@ export default function TicketList({ onSelectTicket }) {
           </div>
         );
     } else {
-        const dept = filteredTickets.length > 0 && filteredTickets[0].assigned_department ? filteredTickets[0].assigned_department : "your department";
         return (
           <>
             <div className="flex bg-zinc-900/50 p-1 rounded-xl mb-6 border border-zinc-800">
@@ -172,12 +171,16 @@ export default function TicketList({ onSelectTicket }) {
                 All Cases
               </button>
             </div>
-            <div className="p-16 flex flex-col items-center justify-center border-2 border-dashed border-emerald-900/50 rounded-[2rem] bg-emerald-950/10">
-              <div className="w-16 h-16 rounded-2xl bg-emerald-950 border border-emerald-900 flex items-center justify-center text-emerald-500 mb-4 shadow-[0_0_20px_rgba(16,185,129,0.2)]">
-                <SafeIcon icon={FiIcons.FiCheckCircle} className="text-2xl" />
+            <div className="py-24 text-center">
+              <div className="flex flex-col items-center justify-center space-y-4 animate-in fade-in zoom-in duration-500">
+                <div className="w-16 h-16 rounded-full bg-zinc-900/50 border border-zinc-800 flex items-center justify-center text-zinc-600 shadow-inner">
+                  <SafeIcon icon={FiIcons.FiCheckCircle} className="text-2xl" />
+                </div>
+                <div className="space-y-1">
+                  <h3 className="text-zinc-300 font-bold tracking-wide">{t('ticket_list.empty_title', 'Inbox Zero')}</h3>
+                  <p className="text-zinc-500 text-sm max-w-sm mx-auto">{t('ticket_list.empty_desc', 'All support tickets have been resolved. The AXiM queue is clear.')}</p>
+                </div>
               </div>
-              <h3 className="text-emerald-400 font-black text-xl tracking-tight">System Optimal</h3>
-              <p className="text-emerald-500/70 font-medium text-sm mt-2 uppercase tracking-widest text-[10px]">No Active Incidents in [{dept}]</p>
             </div>
           </>
         );
@@ -231,7 +234,20 @@ export default function TicketList({ onSelectTicket }) {
       </div>
       <div className="space-y-3">
       <AnimatePresence>
-        {filteredTickets.map((ticket) => {
+        {filteredTickets.length === 0 && !isLoading ? (
+          <div className="py-24 text-center">
+            <div className="flex flex-col items-center justify-center space-y-4 animate-in fade-in zoom-in duration-500">
+              <div className="w-16 h-16 rounded-full bg-zinc-900/50 border border-zinc-800 flex items-center justify-center text-zinc-600 shadow-inner">
+                <SafeIcon icon={FiCheckCircle} className="text-2xl" />
+              </div>
+              <div className="space-y-1">
+                <h3 className="text-zinc-300 font-bold tracking-wide">{t('ticket_list.empty_title', 'Inbox Zero')}</h3>
+                <p className="text-zinc-500 text-sm max-w-sm mx-auto">{t('ticket_list.empty_desc', 'All support tickets have been resolved. The AXiM queue is clear.')}</p>
+              </div>
+            </div>
+          </div>
+        ) : (
+          filteredTickets.map((ticket) => {
           const style = statusStyles[ticket.status] || statusStyles.open;
           const priorityColor = ticket.priority === 'escalated' ? 'text-rose-500' : ticket.priority === 'urgent' ? 'text-rose-500' : ticket.priority === 'high' ? 'text-amber-500' : 'text-zinc-500';
           const isEscalated = ticket.priority === 'escalated';
@@ -298,7 +314,8 @@ export default function TicketList({ onSelectTicket }) {
               </div>
             </motion.div>
           );
-        })}
+        })
+        )}
       </AnimatePresence>
 
       <AnimatePresence>
