@@ -36,7 +36,7 @@ const SkeletonLoader = () => (
   </div>
 );
 
-export default function TicketList({ onSelectTicket }) {
+export default function TicketList({ onSelectTicket, activeQueue = "All" }) {
   const { t } = useTranslation();
   const { tickets, isLoading, fetchTickets, subscribeToTickets, searchQuery, selectedTicketIds, toggleSelectedTicketId } = useTicketStore();
   const { activeOrganization } = useAuthStore();
@@ -45,12 +45,18 @@ export default function TicketList({ onSelectTicket }) {
   const [isTriaging, setIsTriaging] = useState(false);
   const previousTicketCount = useRef(tickets.length);
 
-  // Filter tickets based on queue state and search query
+  // Filter tickets based on queue state, search query, and activeQueue department
   const filteredTickets = tickets.filter(ticket => {
-    if (searchQuery) return true; // If there is a search query, ignore queue filter
+    // 1. Department Filter
+    if (activeQueue !== 'All' && ticket.assigned_department !== activeQueue) return false;
+
+    // 2. Search Filter overrides queue filter
+    if (searchQuery) return true;
+
+    // 3. Queue State Filter
     if (queueFilter === 'unassigned') return !ticket.assigned_to;
     if (queueFilter === 'my_queue') return ticket.assigned_to === user?.id;
-    if (queueFilter === 'all') return true;
+
     return true;
   });
 
@@ -306,6 +312,16 @@ export default function TicketList({ onSelectTicket }) {
               </div>
               
               <div className="flex items-center gap-3 shrink-0">
+                {ticket.assigned_department && (
+                  <div onClick={() => onSelectTicket(ticket.id)} className={`px-3 py-1 rounded-lg border text-[9px] font-bold uppercase tracking-widest ${
+                    ticket.assigned_department === 'Engineering' ? 'bg-cyan-500/10 border-cyan-500/20 text-cyan-400' :
+                    ticket.assigned_department === 'Legal_Operations' ? 'bg-purple-500/10 border-purple-500/20 text-purple-400' :
+                    ticket.assigned_department === 'Financial_Systems' ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400' :
+                    'bg-zinc-500/10 border-zinc-500/20 text-zinc-400'
+                  }`}>
+                    {ticket.assigned_department.replace('_', ' ')}
+                  </div>
+                )}
                 <div onClick={() => onSelectTicket(ticket.id)}>
                   <SLABadge breachAt={ticket.sla_breach_at} status={ticket.status} />
                 </div>

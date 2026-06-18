@@ -10,6 +10,7 @@ export default function SupportMetrics() {
     escalations: 0,
     aiDeflectionRate: 0,
     slaBreachRate: 0,
+    dlqExceptions: 0,
     volumeTrend: [0, 0, 0, 0, 0, 0, 0]
   });
 
@@ -48,6 +49,15 @@ export default function SupportMetrics() {
         if (breachError) console.error("Breach Error:", breachError);
 
         const slaBreachRate = (openCount && breachedCount) ? ((breachedCount / openCount) * 100).toFixed(1) : 0;
+
+        // DLQ Exceptions
+        const { count: dlqCount, error: dlqError } = await supabase
+          .from('events_ax2024')
+          .select('*', { count: 'exact', head: true })
+          .eq('type', 'dlq_payload');
+
+        if (dlqError) console.error("DLQ Error:", dlqError);
+
         // AI Deflection Rate & Confidence Score
         const yesterday = new Date();
         yesterday.setDate(yesterday.getDate() - 1);
@@ -126,6 +136,7 @@ export default function SupportMetrics() {
             escalations: escalatedCount || 0,
             aiDeflectionRate: aiRate,
             slaBreachRate: slaBreachRate || 0,
+            dlqExceptions: dlqCount || 0,
             avgConfidence: avgConfidence,
             csatScore: avgCsat,
             volumeTrend: volumeTrend
@@ -209,7 +220,7 @@ export default function SupportMetrics() {
   const dashOffset = circleCircumference - (metrics.aiDeflectionRate / 100) * circleCircumference;
 
   return (
-    <div className="grid grid-cols-1 md:grid-cols-5 gap-6 mb-8 bg-[#09090b]/80 backdrop-blur-md border border-white/10 shadow-2xl rounded-2xl p-4">
+    <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-5 gap-6 mb-8 bg-[#09090b]/80 backdrop-blur-md border border-white/10 shadow-2xl rounded-2xl p-4 flex-wrap">
       <div className="glass-panel p-6 rounded-2xl relative overflow-hidden">
         {isLoading && <div className="absolute inset-0 bg-zinc-900/50 flex items-center justify-center backdrop-blur-sm z-10"><div className="w-5 h-5 border-2 border-cyan-500 border-t-transparent rounded-full animate-spin"></div></div>}
         <p className="text-zinc-500 text-xs font-bold uppercase tracking-widest">Active Queue</p>
@@ -270,6 +281,13 @@ export default function SupportMetrics() {
         <p className="text-zinc-500 text-xs font-bold uppercase tracking-widest">SLA Breach Rate</p>
         <h3 className={`text-3xl font-black mt-2 ${metrics.slaBreachRate > 10 ? 'text-rose-500' : 'text-amber-400'}`}>{metrics.slaBreachRate}%</h3>
         <div className={`mt-2 text-[10px] font-medium tracking-widest ${metrics.slaBreachRate > 10 ? 'text-rose-500/80' : 'text-amber-500/80'}`}>OVER 24H SLA</div>
+      </div>
+
+      <div className={`glass-panel p-6 rounded-2xl border-l-2 relative overflow-hidden ${metrics.dlqExceptions > 0 ? 'border-l-rose-500/50' : 'border-l-emerald-500/50'}`}>
+        {isLoading && <div className="absolute inset-0 bg-zinc-900/50 flex items-center justify-center backdrop-blur-sm z-10"><div className="w-5 h-5 border-2 border-emerald-500 border-t-transparent rounded-full animate-spin"></div></div>}
+        <p className="text-zinc-500 text-xs font-bold uppercase tracking-widest">Unhandled Exceptions (DLQ)</p>
+        <h3 className={`text-3xl mt-2 ${metrics.dlqExceptions > 0 ? 'animate-pulse text-rose-500 font-black' : 'text-emerald-400 font-bold'}`}>{metrics.dlqExceptions}</h3>
+        <div className={`mt-2 text-[10px] font-medium tracking-widest ${metrics.dlqExceptions > 0 ? 'text-rose-500/80' : 'text-emerald-500/80'}`}>DEAD LETTER QUEUE</div>
       </div>
     </div>
   );

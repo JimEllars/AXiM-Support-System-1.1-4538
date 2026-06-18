@@ -20,6 +20,8 @@ export default function Dashboard() {
   const navigate = useNavigate();
   const [modalType, setModalType] = useState(null); // 'create', 'batch', 'broadcast'
   const [refreshKey, setRefreshKey] = useState(0);
+  const [activeQueue, setActiveQueue] = useState('All');
+  const queueTabs = ['All', 'Engineering', 'Legal_Operations', 'Financial_Systems', 'General Support'];
 
   const handleAction = (id) => {
     if (id === 'triage') setModalType('batch');
@@ -103,7 +105,23 @@ export default function Dashboard() {
             </div>
           </div>
           
-          <TicketList onSelectTicket={(id) => navigate(`/ticket/${id}`)} />
+          <div className="mb-8 flex flex-wrap gap-3">
+            {queueTabs.map((tab) => (
+              <button
+                key={tab}
+                onClick={() => setActiveQueue(tab)}
+                className={`px-4 py-2 rounded-full text-sm font-medium transition-all duration-200 ${
+                  activeQueue === tab
+                    ? 'bg-fuchsia-500/20 text-fuchsia-400 border border-fuchsia-500/30'
+                    : 'text-zinc-400 hover:bg-white/5 border border-transparent'
+                }`}
+              >
+                {tab.replace('_', ' ')}
+              </button>
+            ))}
+          </div>
+
+          <TicketList onSelectTicket={(id) => navigate(`/ticket/${id}`)} activeQueue={activeQueue} />
         </main>
           </div>
         </div>

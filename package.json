@@ -13,6 +13,7 @@
   "dependencies": {
     "@questlabs/react-sdk": "^2.2.92",
     "@supabase/supabase-js": "^2.39.0",
+    "@tailwindcss/typography": "^0.5.20",
     "@tanstack/react-query": "^5.28.4",
     "clsx": "^2.1.0",
     "date-fns": "4.1.0",
@@ -25,6 +26,7 @@
     "react-hot-toast": "^2.6.0",
     "react-i18next": "^17.0.8",
     "react-icons": "^5.4.0",
+    "react-markdown": "^10.1.0",
     "react-router-dom": "^7.1.0",
     "tailwind-merge": "^2.2.2",
     "uuid": "^14.0.0",
