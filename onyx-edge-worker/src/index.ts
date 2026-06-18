@@ -2005,6 +2005,7 @@ async function handleTicketResolved(request: Request, env: Env, ctx: any): Promi
       logErr(supabase, logCtx, err, ctx);
     }
 
+    // High quality - push to vector memory banks
     await supabase.from("memory_banks").insert({
       title: `RCA: ${record.subject}`,
       content: rcaMarkdown,
@@ -2012,10 +2013,10 @@ async function handleTicketResolved(request: Request, env: Env, ctx: any): Promi
       metadata: { source: "support_system", partner: record.metadata?.partner || "unknown", category: record.suggested_category || "support" },
     });
   } else {
-    // Send to HITL for manual review
+    // Low quality - divert to HITL for manual rewrite
     await supabase.from("hitl_audit_logs").insert({
       support_ticket_id: record.id, status: "pending", tool_type: "update_memory_bank",
-      payload: { message: "RCA quality too low for auto-indexing. Manual rewrite required.", original_rca: rcaMarkdown }
+      payload: { message: `RCA quality score (${rcaScore}/10) too low for auto-indexing. Manual rewrite required.`, original_rca: rcaMarkdown }
     });
   }
         // 2. Push to events_ax2024
