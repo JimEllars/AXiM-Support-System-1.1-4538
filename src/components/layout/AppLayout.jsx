@@ -1,5 +1,6 @@
-import React, { useState } from 'react';
-import Sidebar from './Sidebar';
+import React, { useState, useEffect } from 'react';
+import { supabase } from '../../lib/supabaseClient';
+import toast from 'react-hot-toast';
 import CoreHealthIndicator from './CoreHealthIndicator';
 import { ErrorBoundary } from './ErrorBoundary';
 import * as FiIcons from 'react-icons/fi';
@@ -7,6 +8,20 @@ import SafeIcon from '../../common/SafeIcon';
 
 export default function AppLayout({ children }) {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+
+  useEffect(() => {
+    const urgentChannel = supabase.channel('global:urgent_alerts')
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'support_tickets', filter: "priority=eq.urgent" }, (payload) => {
+        toast.error(`🚨 URGENT TICKET: ${payload.new.subject}`, {
+          duration: 10000,
+          style: { background: '#7f1d1d', color: '#fff', border: '1px solid #ef4444' }
+        });
+      })
+      .subscribe();
+
+    return () => supabase.removeChannel(urgentChannel);
+  }, []);
+
 
   return (
     <div className="min-h-screen bg-black">

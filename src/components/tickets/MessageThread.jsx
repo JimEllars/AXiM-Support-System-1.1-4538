@@ -6,7 +6,40 @@ import ActionProposalBlock from './ActionProposalBlock';
 
 const { FiUser, FiCpu, FiLock, FiTerminal } = FiIcons;
 
-export default function MessageThread({ messages }) {
+import { supabase } from '../../lib/supabaseClient';
+import { useState, useEffect } from 'react';
+
+export default function MessageThread({ ticketId }) {
+  const [messages, setMessages] = useState([]);
+
+  useEffect(() => {
+    if (!ticketId) return;
+
+    const fetchMessages = async () => {
+      const { data, error } = await supabase
+        .from('ticket_messages')
+        .select('* ')
+        .eq('ticket_id', ticketId)
+        .order('created_at', { ascending: true });
+      if (data) setMessages(data);
+    };
+
+    fetchMessages();
+
+    const messageChannel = supabase.channel(`messages:${ticketId}`)
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'ticket_messages', filter: `ticket_id=eq.${ticketId}` }, (payload) => {
+        setMessages(prev => {
+           if (prev.some(m => m.id === payload.new.id)) return prev;
+           return [...prev, payload.new];
+        });
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(messageChannel);
+    };
+  }, [ticketId]);
+
 
   if (!messages || messages.length === 0) {
     return (
