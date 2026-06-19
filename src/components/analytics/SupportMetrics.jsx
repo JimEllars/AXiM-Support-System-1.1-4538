@@ -283,7 +283,17 @@ export default function SupportMetrics() {
         <div className={`mt-2 text-[10px] font-medium tracking-widest ${metrics.slaBreachRate > 10 ? 'text-rose-500/80' : 'text-amber-500/80'}`}>OVER 24H SLA</div>
       </div>
 
-      <div className={`glass-panel p-6 rounded-2xl border-l-2 relative overflow-hidden ${metrics.dlqExceptions > 0 ? 'border-l-rose-500/50' : 'border-l-emerald-500/50'}`}>
+      <div
+        className={`glass-panel p-6 rounded-2xl border-l-2 relative overflow-hidden cursor-pointer hover:ring-2 ring-rose-500/50 transition-all ${metrics.dlqExceptions > 0 ? 'border-l-rose-500/50' : 'border-l-emerald-500/50'}`}
+        onClick={() => {
+          const el = document.getElementById('dlq-monitor-block');
+          if (el) {
+            el.scrollIntoView({ behavior: 'smooth' });
+          } else {
+            window.location.hash = '#dlq-monitor';
+          }
+        }}
+      >
         {isLoading && <div className="absolute inset-0 bg-zinc-900/50 flex items-center justify-center backdrop-blur-sm z-10"><div className="w-5 h-5 border-2 border-emerald-500 border-t-transparent rounded-full animate-spin"></div></div>}
         <p className="text-zinc-500 text-xs font-bold uppercase tracking-widest">Unhandled Exceptions (DLQ)</p>
         <h3 className={`text-3xl mt-2 ${metrics.dlqExceptions > 0 ? 'animate-pulse text-rose-500 font-black' : 'text-emerald-400 font-bold'}`}>{metrics.dlqExceptions}</h3>

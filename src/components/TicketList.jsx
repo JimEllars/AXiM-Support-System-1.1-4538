@@ -115,10 +115,18 @@ export default function TicketList({ onSelectTicket, activeQueue = "All" }) {
   useEffect(() => {
     fetchTickets(activeOrganization);
 
+    const activeQueue = queueFilter === 'all' ? 'All' : queueFilter;
+
     const ticketChannel = supabase.channel('public:support_tickets')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'support_tickets' }, (payload) => {
-        console.log('Realtime Ticket Update:', payload);
-        fetchTickets(activeOrganization);
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'support_tickets' }, (payload) => {
+        // FIX: Prevent state leaking across tabs
+        if (activeQueue === 'All' || payload.new.assigned_department === activeQueue) {
+          useTicketStore.getState().setTickets((prev) => [payload.new, ...prev]);
+        }
+      })
+      // Also handle UPDATES (e.g., status changing to resolved should remove it from open queues)
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'support_tickets' }, (payload) => {
+        useTicketStore.getState().setTickets((prev) => prev.map(t => t.id === payload.new.id ? payload.new : t));
       })
       .subscribe();
 
