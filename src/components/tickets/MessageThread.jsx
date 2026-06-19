@@ -3,6 +3,7 @@ import { formatDistanceToNow } from 'date-fns';
 import SafeIcon from '../../common/SafeIcon';
 import * as FiIcons from 'react-icons/fi';
 import ActionProposalBlock from './ActionProposalBlock';
+import ReactMarkdown from 'react-markdown';
 
 const { FiUser, FiCpu, FiLock, FiTerminal } = FiIcons;
 
@@ -103,9 +104,9 @@ export default function MessageThread({ ticketId }) {
                   {formatDistanceToNow(new Date(msg.created_at))} AGO
                 </span>
               </div>
-              <p className={`text-zinc-300 leading-relaxed font-medium ${isAI ? 'mono-font text-sm' : ''}`}>
-                {msg.message_body}
-              </p>
+              <div className={`prose prose-invert max-w-none text-zinc-300 leading-relaxed font-medium ${isAI ? 'mono-font text-sm' : ''}`}>
+                <ReactMarkdown>{msg.message_body}</ReactMarkdown>
+              </div>
               {msg.metadata?.hitl_log_id && (
                   <ActionProposalBlock hitlLog={{ id: msg.metadata.hitl_log_id }} />
               )}
