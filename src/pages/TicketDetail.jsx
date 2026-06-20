@@ -6,6 +6,7 @@ import { useAuthStore } from '../store/useAuthStore';
 import SafeIcon from '../common/SafeIcon';
 import * as FiIcons from 'react-icons/fi';
 import Customer360 from '../components/tickets/Customer360';
+import SLABadge from '../components/tickets/SLABadge';
 import KBSidebar from '../components/tickets/KBSidebar';
 import AutoDraftWhisper from '../components/tickets/AutoDraftWhisper';
 import ActionProposalBlock from '../components/tickets/ActionProposalBlock';
@@ -161,6 +162,9 @@ export default function TicketDetail() {
                   }`}>
                     {ticket.priority} Priority
                   </span>
+                  {ticket.sla_breach_at && (
+                    <SLABadge breachAt={ticket.sla_breach_at} status={ticket.status} />
+                  )}
                 </div>
                 <h1 className="text-3xl font-black tracking-tight">{ticket.subject}</h1>
               </div>
