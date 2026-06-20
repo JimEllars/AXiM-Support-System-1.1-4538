@@ -115,8 +115,6 @@ export default function TicketList({ onSelectTicket, activeQueue = "All" }) {
   useEffect(() => {
     fetchTickets(activeOrganization);
 
-    const activeQueue = queueFilter === 'all' ? 'All' : queueFilter;
-
     const ticketChannel = supabase.channel('public:support_tickets')
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'support_tickets' }, (payload) => {
         // FIX: Prevent state leaking across tabs
@@ -133,7 +131,7 @@ export default function TicketList({ onSelectTicket, activeQueue = "All" }) {
     return () => {
       supabase.removeChannel(ticketChannel);
     };
-  }, [isTriaging, fetchTickets, activeOrganization]);
+  }, [isTriaging, fetchTickets, activeOrganization, activeQueue]);
 
 
 
