@@ -81,9 +81,9 @@ export default function MessageThread({ ticketId }) {
               <SafeIcon icon={isAI ? FiCpu : isInternal ? FiLock : FiUser} className="text-xl" />
             </div>
             
-            <div className={`flex-1 p-6 rounded-[1.5rem] border transition-all ${
-              isAI ? 'bg-fuchsia-950/10 border-fuchsia-500/20 neon-border-fuchsia' :
-              isInternal ? 'bg-amber-900/10 backdrop-blur-sm border-amber-500/30' :
+            <div className={`flex-1 p-6 rounded-[1.5rem] border transition-all relative overflow-hidden ${
+              isAI ? 'bg-[repeating-linear-gradient(45deg,transparent,transparent_10px,rgba(217,70,239,0.03)_10px,rgba(217,70,239,0.03)_20px)] border-fuchsia-500/30 neon-border-fuchsia' :
+              isInternal ? 'bg-[repeating-linear-gradient(45deg,transparent,transparent_10px,rgba(245,158,11,0.03)_10px,rgba(245,158,11,0.03)_20px)] border-amber-500/30' :
               'bg-zinc-900/40 border-zinc-800 shadow-xl'
             }`}>
               <div className="flex justify-between items-center mb-4">
@@ -93,8 +93,8 @@ export default function MessageThread({ ticketId }) {
                   }`}>
                     {isAI ? 'Onyx Intelligence' : isInternal ? 'Agent Internal' : 'Customer Relay'}
                   </span>
-                  {isInternal && (
-                    <span className="px-2 py-0.5 bg-amber-500/15 text-amber-400 text-[9px] font-black uppercase tracking-widest rounded border border-amber-500/30">
+                  {(isInternal || isAI) && (
+                    <span className="absolute top-4 right-4 px-2 py-0.5 bg-amber-500/15 text-amber-400 text-[9px] font-black uppercase tracking-widest rounded border border-amber-500/30 shadow-sm backdrop-blur-sm">
                       👁️ Internal Note
                     </span>
                   )}

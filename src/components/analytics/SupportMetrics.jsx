@@ -11,6 +11,7 @@ export default function SupportMetrics() {
     aiDeflectionRate: 0,
     slaBreachRate: 0,
     dlqExceptions: 0,
+    engineHealth: { latency: 0, tokens: 0 },
     volumeTrend: [0, 0, 0, 0, 0, 0, 0]
   });
 
@@ -80,7 +81,7 @@ export default function SupportMetrics() {
 
         const { data: telemetryData, error: totError } = await supabase
           .from('ticket_ai_telemetry')
-          .select('confidence_score, created_at')
+          .select('confidence_score, metadata, created_at')
           .gte('created_at', yesterdayIso);
 
         if (totError) console.error("Total Telemetry Error:", totError);
@@ -88,6 +89,9 @@ export default function SupportMetrics() {
         let totalRecent = 0;
         let deflectedCount = 0;
         let sumConfidence = 0;
+        let totalLatency = 0;
+        let latencyCount = 0;
+        let totalTokens = 0;
 
         if (telemetryData) {
           totalRecent = telemetryData.length;
@@ -97,8 +101,20 @@ export default function SupportMetrics() {
             if (score > 90) {
               deflectedCount++;
             }
+            if (item.metadata) {
+              const meta = typeof item.metadata === 'string' ? JSON.parse(item.metadata) : item.metadata;
+              if (meta.latency_ms) {
+                totalLatency += meta.latency_ms;
+                latencyCount++;
+              }
+              if (meta.usage) {
+                totalTokens += (meta.usage.input_tokens || 0) + (meta.usage.output_tokens || 0);
+              }
+            }
           });
         }
+
+        const avgLatency = latencyCount > 0 ? Math.round(totalLatency / latencyCount) : 0;
 
         const aiRate = totalRecent > 0
           ? ((deflectedCount / totalRecent) * 100).toFixed(1)
@@ -139,7 +155,8 @@ export default function SupportMetrics() {
             dlqExceptions: dlqCount || 0,
             avgConfidence: avgConfidence,
             csatScore: avgCsat,
-            volumeTrend: volumeTrend
+            volumeTrend: volumeTrend,
+            engineHealth: { latency: avgLatency, tokens: totalTokens }
           });
           setIsLoading(false);
         }
@@ -220,7 +237,7 @@ export default function SupportMetrics() {
   const dashOffset = circleCircumference - (metrics.aiDeflectionRate / 100) * circleCircumference;
 
   return (
-    <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-5 gap-6 mb-8 bg-[#09090b]/80 backdrop-blur-md border border-white/10 shadow-2xl rounded-2xl p-4 flex-wrap">
+    <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-6 gap-6 mb-8 bg-[#09090b]/80 backdrop-blur-md border border-white/10 shadow-2xl rounded-2xl p-4 flex-wrap">
       <div className="glass-panel p-6 rounded-2xl relative overflow-hidden">
         {isLoading && <div className="absolute inset-0 bg-zinc-900/50 flex items-center justify-center backdrop-blur-sm z-10"><div className="w-5 h-5 border-2 border-cyan-500 border-t-transparent rounded-full animate-spin"></div></div>}
         <p className="text-zinc-500 text-xs font-bold uppercase tracking-widest">Active Queue</p>
@@ -298,6 +315,15 @@ export default function SupportMetrics() {
         <p className="text-zinc-500 text-xs font-bold uppercase tracking-widest">Unhandled Exceptions (DLQ)</p>
         <h3 className={`text-3xl mt-2 ${metrics.dlqExceptions > 0 ? 'animate-pulse text-rose-500 font-black' : 'text-emerald-400 font-bold'}`}>{metrics.dlqExceptions}</h3>
         <div className={`mt-2 text-[10px] font-medium tracking-widest ${metrics.dlqExceptions > 0 ? 'text-rose-500/80' : 'text-emerald-500/80'}`}>DEAD LETTER QUEUE</div>
+      </div>
+
+      <div className="glass-panel p-6 rounded-2xl border-l-2 border-fuchsia-500/50 bg-fuchsia-950/20 relative overflow-hidden">
+        {isLoading && <div className="absolute inset-0 bg-zinc-900/50 flex items-center justify-center backdrop-blur-sm z-10"><div className="w-5 h-5 border-2 border-fuchsia-500 border-t-transparent rounded-full animate-spin"></div></div>}
+        <p className="text-zinc-500 text-xs font-bold uppercase tracking-widest">Onyx Engine Health</p>
+        <h3 className="text-3xl font-black text-fuchsia-400 mt-2">{((metrics.engineHealth?.tokens || 0) / 1000).toFixed(1)}k</h3>
+        <div className="mt-2 text-[10px] text-zinc-500 font-medium tracking-widest flex items-center gap-1">
+          TOKENS 24H • {(metrics.engineHealth?.latency || 0)}ms AVG
+        </div>
       </div>
     </div>
   );
