@@ -26,6 +26,7 @@ export default function TicketDetail() {
     const [reply, setReply] = useState('');
   const [isInternal, setIsInternal] = useState(false);
   const [activeTab, setActiveTab] = useState('intelligence');
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const [telemetry, setTelemetry] = useState(null);
   const [attachments, setAttachments] = useState([]);
 
@@ -98,23 +99,28 @@ export default function TicketDetail() {
     };
   }, [id]);
   const handleSend = async () => {
-    if (!reply.trim()) return;
+    if (!reply.trim() || isSubmitting || isLocked) return;
 
-    const newMessage = {
-      id: Date.now(),
-      sender_id: isInternal ? 'system' : currentAgent.id,
-      sender_type: isInternal ? 'internal' : 'agent',
-      message_body: reply,
-      created_at: new Date().toISOString(),
-      is_internal_note: isInternal
-    };
-    // Message optimistic update handled by MessageThread
-    setReply('');
-    setIsInternal(false);
+    setIsSubmitting(true);
+    try {
+      const newMessage = {
+        id: Date.now(),
+        sender_id: isInternal ? 'system' : currentAgent.id,
+        sender_type: isInternal ? 'internal' : 'agent',
+        message_body: reply,
+        created_at: new Date().toISOString(),
+        is_internal_note: isInternal
+      };
+      // Message optimistic update handled by MessageThread
+      setReply('');
+      setIsInternal(false);
 
-    if (ticket.status === 'open' && !isInternal) {
-      await updateTicketStatus(ticket.id, 'pending');
-      toast.success("Status automatically updated to Pending");
+      if (ticket.status === 'open' && !isInternal) {
+        await updateTicketStatus(ticket.id, 'pending');
+        toast.success("Status automatically updated to Pending");
+      }
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -166,7 +172,15 @@ export default function TicketDetail() {
                     <SLABadge breachAt={ticket.sla_breach_at} status={ticket.status} />
                   )}
                 </div>
-                <h1 className="text-3xl font-black tracking-tight">{ticket.subject}</h1>
+                <div
+                  className="cursor-pointer hover:text-cyan-400 transition-colors"
+                  onClick={() => {
+                    navigator.clipboard.writeText(`#${ticket.id} - ${ticket.subject}`);
+                    toast.success("Copied to clipboard");
+                  }}
+                >
+                  <h1 className="text-3xl font-black tracking-tight">{ticket.subject}</h1>
+                </div>
               </div>
             </div>
 
@@ -234,7 +248,7 @@ export default function TicketDetail() {
             <div className="p-4 bg-zinc-950/80 border-t border-zinc-800 backdrop-blur-xl">
               {isLocked && (
                 <div className="mb-4 p-3 bg-rose-500/10 border border-rose-500/50 rounded-xl flex items-center gap-3 text-rose-400 text-sm font-bold uppercase tracking-widest">
-                  <SafeIcon icon={FiLock} />
+                  <SafeIcon icon={FiIcons.FiLock} />
                   This case is currently locked and being handled by another agent.
                 </div>
               )}
@@ -265,10 +279,16 @@ export default function TicketDetail() {
                     }
                   }}
                   onBlur={() => updateTypingStatus(false)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+                      e.preventDefault();
+                      handleSend();
+                    }
+                  }}
                   placeholder={
                     isInternal
-                      ? "SYSLOG: Add internal agent perspective..."
-                      : "RESPOND: Craft a public resolution message..."
+                      ? "SYSLOG: Add internal agent perspective... (Cmd+Enter to send)"
+                      : "RESPOND: Craft a public resolution message... (Cmd+Enter to send)"
                   }
                   className={`w-full p-8 pb-20 rounded-[2.5rem] border-2 outline-none transition-all font-medium text-lg resize-none ${isInternal ? "bg-amber-950/10 border-amber-500/20 focus:border-amber-500/50 text-amber-100 placeholder-amber-900/50" : "bg-zinc-950 border-zinc-800 focus:border-cyan-500/50 text-white placeholder-zinc-800"} ${isLocked ? "opacity-50 cursor-not-allowed" : ""}`}
                   rows={4}
@@ -285,11 +305,15 @@ export default function TicketDetail() {
                       </button>
                   </div>
                   <button
-                    disabled={isLocked}
+                    disabled={isLocked || isSubmitting}
                     onClick={handleSend}
-                    className={`p-6 rounded-2xl text-black transition-all transform active:scale-90 shadow-2xl ${isInternal ? "bg-amber-500 hover:bg-amber-400" : "bg-cyan-500 hover:bg-cyan-400"} ${isLocked ? "opacity-50 cursor-not-allowed" : ""}`}
+                    className={`p-6 rounded-2xl text-black transition-all transform active:scale-90 shadow-2xl ${isInternal ? "bg-amber-500 hover:bg-amber-400" : "bg-cyan-500 hover:bg-cyan-400"} ${(isLocked || isSubmitting) ? "opacity-50 cursor-not-allowed" : ""}`}
                   >
-                    <SafeIcon icon={FiSend} className="text-xl" />
+                    {isSubmitting ? (
+                      <SafeIcon icon={FiIcons.FiLoader} className="text-xl animate-spin" />
+                    ) : (
+                      <SafeIcon icon={FiIcons.FiSend} className="text-xl" />
+                    )}
                   </button>
                 </div>
               </div>
