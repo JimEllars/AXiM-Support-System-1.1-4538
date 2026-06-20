@@ -127,6 +127,22 @@ export default function OnyxCommandHub() {
           <SafeIcon icon={FiZap} className="text-amber-500" /> CMD + K
         </div>
       </motion.div>
+
+      <div className="flex flex-wrap gap-2 mt-4 px-2">
+        {['/filter urgent', '/assign me', '/show breached', '/status open'].map((cmd) => (
+          <button
+            key={cmd}
+            onClick={() => {
+              setSearchQuery(cmd);
+              // Small delay to ensure state updates before firing
+              setTimeout(() => handleKeyDown({ key: 'Enter', preventDefault: () => {} }), 50);
+            }}
+            className="px-3 py-1 text-[10px] font-mono border border-cyan-500/30 text-cyan-400 rounded-full hover:bg-cyan-500/10 cursor-pointer transition-colors"
+          >
+            {cmd}
+          </button>
+        ))}
+      </div>
       
 
       {/* AUTO-HEAL ACTION LOG (TIER 1 AUTOMATION STUBS) */}
