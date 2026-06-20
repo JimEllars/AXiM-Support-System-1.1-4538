@@ -489,12 +489,12 @@ async function handleTicketIngestion(request: Request, env: Env, ctx: any): Prom
 
 
             const { error: aiError } = await supabase.from("ticket_ai_telemetry").insert({
-
               ticket_id: ticket.id,
               analyzed_sentiment: onyxAnalysis.sentiment,
               suggested_category: onyxAnalysis.category,
               auto_response_draft: onyxAnalysis.draft,
               confidence_score: onyxAnalysis.confidence,
+              metadata: onyxAnalysis.metrics // <--- Store token usage and latency
             });
 
             // Tier 3 Sandbox Egress Dispatch
@@ -1396,6 +1396,7 @@ async function analyzeWithOnyx(
     category: "technical_support",
     draft: "Hello, Onyx AI has received your request regarding " + subject + "\n\nWe are analyzing the issue.",
     confidence: 50,
+    metrics: { latency_ms: 0, input_tokens: 0, output_tokens: 0 }
   };
 
   try {
@@ -1422,6 +1423,7 @@ async function analyzeWithOnyx(
       });
     }
 
+    const startTime = Date.now();
     const response = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: {
@@ -1437,18 +1439,18 @@ async function analyzeWithOnyx(
       }),
       signal: controller.signal
     });
-
     clearTimeout(timeoutId);
 
-    if (!response.ok) {
-      return defaultFallback;
-    }
+    if (!response.ok) return defaultFallback;
 
     const data: any = await response.json();
     let textRes = data.content[0].text;
     textRes = textRes.replace(/```json/g, '').replace(/```/g, '').trim();
-
     const parsed = JSON.parse(textRes);
+
+    const latencyMs = Date.now() - startTime;
+    const inputTokens = data.usage?.input_tokens || 0;
+    const outputTokens = data.usage?.output_tokens || 0;
 
     return {
       priority: parsed.priority || defaultFallback.priority,
@@ -1456,9 +1458,10 @@ async function analyzeWithOnyx(
       category: parsed.category || defaultFallback.category,
       draft: parsed.draft || defaultFallback.draft,
       confidence: parsed.confidence || defaultFallback.confidence,
+      metrics: { latency_ms: latencyMs, input_tokens: inputTokens, output_tokens: outputTokens }
     };
   } catch (error) {
-    return defaultFallback;
+    return { ...defaultFallback, metrics: { latency_ms: 0, input_tokens: 0, output_tokens: 0 } };
   }
 }
 
