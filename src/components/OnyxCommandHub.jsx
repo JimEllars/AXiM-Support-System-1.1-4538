@@ -7,13 +7,14 @@ import { onyxService } from '../services/onyxService';
 import { supabase } from '../lib/supabaseClient';
 import toast from 'react-hot-toast';
 
-const { FiTerminal, FiSearch, FiZap, FiChevronRight, FiFilter, FiCpu } = FiIcons;
+const { FiTerminal, FiSearch, FiZap, FiChevronRight, FiFilter, FiCpu, FiTrash2 } = FiIcons;
 
 export default function OnyxCommandHub() {
   const { searchQuery, setSearchQuery } = useTicketStore();
   const [isFocused, setIsFocused] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const [liveEvents, setLiveEvents] = useState([]);
+  const [isSocketConnected, setIsSocketConnected] = useState(true);
   const inputRef = useRef(null);
 
   useEffect(() => {
@@ -54,7 +55,16 @@ export default function OnyxCommandHub() {
           });
         }
       })
-      .subscribe();
+      .on('system', { event: '*' }, (payload) => {
+        if (payload.status === 'error' || payload.status === 'closed') {
+          setIsSocketConnected(false);
+        }
+      })
+      .on('SUBSCRIBE_ERROR', () => setIsSocketConnected(false))
+      .subscribe((status) => {
+        if (status === 'SUBSCRIBED') setIsSocketConnected(true);
+        if (status === 'TIMED_OUT' || status === 'CLOSED' || status === 'CHANNEL_ERROR') setIsSocketConnected(false);
+      });
 
     return () => {
       isMounted = false;
@@ -195,10 +205,29 @@ export default function OnyxCommandHub() {
       {/* AUTO-HEAL ACTION LOG (LIVE FEED) */}
       <div className="mt-4 bg-black border border-zinc-800/50 rounded-2xl p-4 overflow-hidden relative">
         <div className="absolute top-0 left-0 w-1 h-full bg-cyan-500/50"></div>
-        <div className="text-[10px] font-black text-cyan-500 uppercase tracking-widest mb-3 flex items-center gap-2">
-          <div className="w-1.5 h-1.5 rounded-full bg-cyan-500 animate-pulse"></div>
-          Tier 1 Live Event Stream
+
+        <div className="flex items-center justify-between mb-3">
+          <div className="text-[10px] font-black text-cyan-500 uppercase tracking-widest flex items-center gap-2">
+            <div className="w-1.5 h-1.5 rounded-full bg-cyan-500 animate-pulse"></div>
+            Tier 1 Live Event Stream
+          </div>
+          <div className="flex items-center gap-2">
+            <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[9px] font-mono tracking-wider uppercase border bg-zinc-950/40 border-zinc-800">
+              <span className={`w-1.5 h-1.5 rounded-full ${isSocketConnected ? 'bg-cyan-400 animate-pulse' : 'bg-rose-500'}`} />
+              <span className={isSocketConnected ? 'text-cyan-400/80' : 'text-rose-400/80'}>
+                {isSocketConnected ? 'STREAM_LIVE' : 'CONN_DEGRADED'}
+              </span>
+            </div>
+            <button
+              onClick={() => { setLiveEvents([]); toast.success("Local layout buffer flushed"); }}
+              className="text-zinc-600 hover:text-rose-400 transition-colors cursor-pointer"
+              title="Clear Local Event Stream"
+            >
+              <SafeIcon icon={FiTrash2} />
+            </button>
+          </div>
         </div>
+
         <div className="font-mono text-xs text-zinc-500 space-y-1.5">
           {liveEvents.length === 0 ? (
             <div className="flex items-start gap-3 opacity-50">
@@ -233,7 +262,17 @@ export default function OnyxCommandHub() {
               }
 
               return (
-                <div key={event.id} className="flex items-start gap-3">
+                <div
+                  key={event.id}
+                  className="flex items-start gap-3 cursor-pointer hover:bg-zinc-900/50 p-1 rounded transition-colors"
+                  onClick={() => {
+                    setSearchQuery(`/inspect ${event.id}`);
+                    inputRef.current?.focus();
+                    toast.success('Trace identifier staged', {
+                        style: { background: '#18181b', color: '#10b981', border: '1px solid #047857' }
+                    });
+                  }}
+                >
                   <span className="text-zinc-700 shrink-0">{time}</span>
                   <span className={badgeColor}>{badgeText}</span>
                   <span className={isError ? "text-rose-300" : ""}>{displayMsg}</span>
