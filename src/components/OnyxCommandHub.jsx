@@ -13,7 +13,54 @@ export default function OnyxCommandHub() {
   const { searchQuery, setSearchQuery } = useTicketStore();
   const [isFocused, setIsFocused] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [liveEvents, setLiveEvents] = useState([]);
   const inputRef = useRef(null);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    // Initial fetch of last 3 events
+    const fetchInitialEvents = async () => {
+      try {
+        const { data, error } = await supabase
+          .from('events_ax2024')
+          .select('*')
+          .in('type', ['action_executed', 'dlq_replay_executed', 'rca_generated', 'error', 'dlq_payload'])
+          .order('created_at', { ascending: false })
+          .limit(3);
+
+        if (data && isMounted) {
+          setLiveEvents(data.reverse());
+        }
+      } catch (err) {
+        console.error("Failed to load initial terminal events:", err);
+      }
+    };
+
+    fetchInitialEvents();
+
+    const channel = supabase.channel('public:events_ax2024:terminal')
+      .on('postgres_changes', {
+        event: 'INSERT',
+        schema: 'public',
+        table: 'events_ax2024'
+      }, (payload) => {
+        const newEvent = payload.new;
+        if (['action_executed', 'dlq_replay_executed', 'rca_generated', 'error', 'dlq_payload'].includes(newEvent.type)) {
+          setLiveEvents(prev => {
+            const updated = [...prev, newEvent];
+            if (updated.length > 5) return updated.slice(updated.length - 5);
+            return updated;
+          });
+        }
+      })
+      .subscribe();
+
+    return () => {
+      isMounted = false;
+      supabase.removeChannel(channel);
+    };
+  }, []);
 
   // Global CMD+K shortcut
   useEffect(() => {
@@ -102,9 +149,9 @@ export default function OnyxCommandHub() {
       <motion.div 
         animate={{ 
           borderColor: isFocused ? '#22d3ee' : '#27272a',
-          boxShadow: isFocused ? '0 0 20px rgba(34, 211, 238, 0.1)' : 'none'
+          boxShadow: isFocused ? '0 0 30px rgba(34, 211, 238, 0.05)' : 'none'
         }}
-        className="flex items-center gap-4 bg-zinc-900 border-2 rounded-2xl px-6 py-4 transition-all relative z-50"
+        className="flex items-center gap-4 bg-[#09090b]/90 backdrop-blur-xl border border-zinc-800/80 shadow-[0_0_30px_rgba(34,211,238,0.05)] rounded-2xl px-6 py-4 transition-all relative z-50"
       >
         <SafeIcon icon={FiTerminal} className={`text-xl transition-colors ${isFocused ? 'text-cyan-400' : 'text-zinc-500'}`} />
         <div className="flex-1 flex items-center gap-1">
@@ -113,7 +160,7 @@ export default function OnyxCommandHub() {
             ref={inputRef}
             type="text"
             placeholder={isProcessing ? "PROCESSING INTENT..." : "Invoke command or filter stream..."}
-            className="flex-1 bg-transparent outline-none text-zinc-100 placeholder-zinc-700 font-medium mono-font text-lg disabled:opacity-50"
+            className="flex-1 bg-transparent outline-none text-zinc-300 placeholder-zinc-700 font-mono tracking-tight font-medium text-lg disabled:opacity-50"
             value={searchQuery}
             disabled={isProcessing}
             onKeyDown={handleKeyDown}
@@ -128,46 +175,72 @@ export default function OnyxCommandHub() {
         </div>
       </motion.div>
 
-      <div className="flex flex-wrap gap-2 mt-4 px-2">
-        {['/filter urgent', '/assign me', '/show breached', '/status open'].map((cmd) => (
+      <div className="flex flex-wrap gap-2 mt-3 px-1">
+        {['/filter urgent', '/assign me', '/status open', '/show breached'].map((pill) => (
           <button
-            key={cmd}
+            key={pill}
+            type="button"
             onClick={() => {
-              setSearchQuery(cmd);
-              // Small delay to ensure state updates before firing
-              setTimeout(() => handleKeyDown({ key: 'Enter', preventDefault: () => {} }), 50);
+              setSearchQuery(pill);
+              inputRef.current?.focus();
             }}
-            className="px-3 py-1 text-[10px] font-mono border border-cyan-500/30 text-cyan-400 rounded-full hover:bg-cyan-500/10 cursor-pointer transition-colors"
+            className="px-3 py-1 text-[10px] font-mono font-bold border border-cyan-500/30 text-cyan-400/80 rounded-full hover:bg-cyan-500/10 transition-colors uppercase tracking-wider"
           >
-            {cmd}
+            {pill}
           </button>
         ))}
       </div>
       
 
-      {/* AUTO-HEAL ACTION LOG (TIER 1 AUTOMATION STUBS) */}
+      {/* AUTO-HEAL ACTION LOG (LIVE FEED) */}
       <div className="mt-4 bg-black border border-zinc-800/50 rounded-2xl p-4 overflow-hidden relative">
         <div className="absolute top-0 left-0 w-1 h-full bg-cyan-500/50"></div>
         <div className="text-[10px] font-black text-cyan-500 uppercase tracking-widest mb-3 flex items-center gap-2">
           <div className="w-1.5 h-1.5 rounded-full bg-cyan-500 animate-pulse"></div>
-          Tier 1 Auto-Heal Feed
+          Tier 1 Live Event Stream
         </div>
         <div className="font-mono text-xs text-zinc-500 space-y-1.5">
-          <div className="flex items-start gap-3">
-            <span className="text-zinc-700 shrink-0">14:02:00</span>
-            <span className="text-emerald-400">SUCCESS</span>
-            <span>Token Cache Cleared for Node 4</span>
-          </div>
-          <div className="flex items-start gap-3">
-            <span className="text-zinc-700 shrink-0">14:05:12</span>
-            <span className="text-fuchsia-400">AUTOMATED</span>
-            <span>Auto-Draft sent for Ticket #992</span>
-          </div>
-          <div className="flex items-start gap-3">
-            <span className="text-zinc-700 shrink-0">14:08:45</span>
-            <span className="text-cyan-400">ROUTING</span>
-            <span>Anomaly tracked to vector_kb for Ticket #995</span>
-          </div>
+          {liveEvents.length === 0 ? (
+            <div className="flex items-start gap-3 opacity-50">
+              <span className="text-zinc-700 shrink-0">--:--:--</span>
+              <span className="text-cyan-400">LISTENING</span>
+              <span>Awaiting stream data...</span>
+            </div>
+          ) : (
+            liveEvents.map((event) => {
+              const time = new Date(event.created_at).toLocaleTimeString([], { hour12: false });
+              const isError = event.type === 'error' || event.type === 'dlq_payload';
+              let badgeColor = 'text-cyan-400';
+              let badgeText = event.type.replace(/_/g, ' ').toUpperCase();
+
+              if (isError) {
+                badgeColor = 'text-rose-500 bg-rose-500/10 px-1 rounded font-black';
+                badgeText = 'CRITICAL_FAULT';
+              } else if (event.type === 'action_executed') {
+                badgeColor = 'text-emerald-400';
+                badgeText = 'SUCCESS';
+              } else if (event.type === 'rca_generated') {
+                badgeColor = 'text-fuchsia-400';
+                badgeText = 'AUTOMATED';
+              }
+
+              let displayMsg = '';
+              if (event.payload) {
+                 if (typeof event.payload === 'string') displayMsg = event.payload;
+                 else if (event.payload.message) displayMsg = event.payload.message;
+                 else if (event.payload.error) displayMsg = event.payload.error;
+                 else displayMsg = JSON.stringify(event.payload).substring(0, 80) + '...';
+              }
+
+              return (
+                <div key={event.id} className="flex items-start gap-3">
+                  <span className="text-zinc-700 shrink-0">{time}</span>
+                  <span className={badgeColor}>{badgeText}</span>
+                  <span className={isError ? "text-rose-300" : ""}>{displayMsg}</span>
+                </div>
+              );
+            })
+          )}
         </div>
       </div>
 

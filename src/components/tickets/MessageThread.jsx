@@ -83,7 +83,7 @@ export default function MessageThread({ ticketId }) {
             
             <div className={`flex-1 p-6 rounded-[1.5rem] border transition-all relative overflow-hidden ${
               isAI ? 'bg-[repeating-linear-gradient(45deg,transparent,transparent_10px,rgba(217,70,239,0.03)_10px,rgba(217,70,239,0.03)_20px)] border-fuchsia-500/30 neon-border-fuchsia' :
-              isInternal ? 'bg-[repeating-linear-gradient(45deg,transparent,transparent_10px,rgba(245,158,11,0.03)_10px,rgba(245,158,11,0.03)_20px)] border-amber-500/30' :
+              isInternal ? 'bg-[repeating-linear-gradient(45deg,transparent,transparent_10px,rgba(245,158,11,0.02)_10px,rgba(245,158,11,0.02)_20px)] bg-amber-950/10 border-amber-500/30 shadow-[0_0_15px_rgba(245,158,11,0.05)]' :
               'bg-zinc-900/40 border-zinc-800 shadow-xl'
             }`}>
               <div className="flex justify-between items-center mb-4">
