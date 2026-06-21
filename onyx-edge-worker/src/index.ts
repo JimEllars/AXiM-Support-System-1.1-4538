@@ -488,13 +488,13 @@ async function handleTicketIngestion(request: Request, env: Env, ctx: any): Prom
             // Phase 37: Duplicate sandbox dispatch removed. First dispatch kept.
 
 
-            const { error: aiError } = await supabase.from("ticket_ai_telemetry").insert({
+            const { error: aiTelemetryError } = await supabase.from("ticket_ai_telemetry").insert({
               ticket_id: ticket.id,
               analyzed_sentiment: onyxAnalysis.sentiment,
               suggested_category: onyxAnalysis.category,
               auto_response_draft: onyxAnalysis.draft,
               confidence_score: onyxAnalysis.confidence,
-              metadata: onyxAnalysis.metrics // <--- Store token usage and latency
+              metadata: onyxAnalysis.metrics // <-- Guard core operational cost vectors
             });
 
             // Tier 3 Sandbox Egress Dispatch
@@ -1439,15 +1439,18 @@ async function analyzeWithOnyx(
       }),
       signal: controller.signal
     });
+
     clearTimeout(timeoutId);
 
-    if (!response.ok) return defaultFallback;
+    if (!response.ok) {
+      return defaultFallback;
+    }
 
     const data: any = await response.json();
     let textRes = data.content[0].text;
     textRes = textRes.replace(/```json/g, '').replace(/```/g, '').trim();
-    const parsed = JSON.parse(textRes);
 
+    const parsed = JSON.parse(textRes);
     const latencyMs = Date.now() - startTime;
     const inputTokens = data.usage?.input_tokens || 0;
     const outputTokens = data.usage?.output_tokens || 0;

@@ -13,6 +13,7 @@ import { Toaster } from 'react-hot-toast';
 import { useAuthStore } from './store/useAuthStore';
 import { useTicketStore } from './store/useTicketStore';
 import { supabase } from './lib/supabaseClient';
+import { useState } from 'react';
 
 const queryClient = new QueryClient();
 
@@ -24,6 +25,29 @@ const ProtectedRoute = ({ children }) => {
 
 function App() {
   const { setSession } = useAuthStore();
+  const [activeOutage, setActiveOutage] = useState(null);
+
+  useEffect(() => {
+    const channel = supabase.channel('public:events_ax2024:outage')
+      .on('postgres_changes', {
+        event: 'INSERT',
+        schema: 'public',
+        table: 'events_ax2024',
+        filter: 'type=eq.system_broadcast'
+      }, (payload) => {
+        if (payload.new && payload.new.payload) {
+           const p = typeof payload.new.payload === 'string' ? JSON.parse(payload.new.payload) : payload.new.payload;
+           if (p.active_outage === true) {
+              setActiveOutage(p.message || 'CRITICAL FLEET OUTAGE ACTIVE');
+           } else if (p.active_outage === false) {
+              setActiveOutage(null);
+           }
+        }
+      })
+      .subscribe();
+
+    return () => supabase.removeChannel(channel);
+  }, []);
 
   useEffect(() => {
     // Check initial session
@@ -121,6 +145,11 @@ function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <BrowserRouter>
+        {activeOutage && (
+          <div className="bg-rose-500/10 text-rose-400 border-b border-rose-500/30 animate-pulse font-mono text-xs text-center py-2 z-[100] relative w-full top-0 left-0">
+            [ OUTAGE BROADCAST ] {activeOutage}
+          </div>
+        )}
         <Routes>
           <Route path="/login" element={<Login />} />
           <Route path="/submit" element={<PublicIntake />} />

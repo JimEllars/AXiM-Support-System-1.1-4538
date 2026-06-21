@@ -89,32 +89,27 @@ export default function SupportMetrics() {
         let totalRecent = 0;
         let deflectedCount = 0;
         let sumConfidence = 0;
-        let totalLatency = 0;
-        let latencyCount = 0;
+        totalRecent = telemetryData ? telemetryData.length : 0;
         let totalTokens = 0;
+        let totalLatency = 0;
+        let validMetricCount = 0;
 
         if (telemetryData) {
-          totalRecent = telemetryData.length;
           telemetryData.forEach(item => {
-            const score = item.confidence_score || 0;
-            sumConfidence += score;
-            if (score > 90) {
+            if (item.auto_response_draft) {
               deflectedCount++;
             }
+            if (item.confidence_score) {
+              sumConfidence += item.confidence_score;
+            }
             if (item.metadata) {
-              const meta = typeof item.metadata === 'string' ? JSON.parse(item.metadata) : item.metadata;
-              if (meta.latency_ms) {
-                totalLatency += meta.latency_ms;
-                latencyCount++;
-              }
-              if (meta.usage) {
-                totalTokens += (meta.usage.input_tokens || 0) + (meta.usage.output_tokens || 0);
-              }
+              totalTokens += (item.metadata.input_tokens || 0) + (item.metadata.output_tokens || 0);
+              totalLatency += (item.metadata.latency_ms || 0);
+              validMetricCount++;
             }
           });
         }
-
-        const avgLatency = latencyCount > 0 ? Math.round(totalLatency / latencyCount) : 0;
+        const avgLatency = validMetricCount > 0 ? Math.round(totalLatency / validMetricCount) : 0;
 
         const aiRate = totalRecent > 0
           ? ((deflectedCount / totalRecent) * 100).toFixed(1)
@@ -156,7 +151,8 @@ export default function SupportMetrics() {
             avgConfidence: avgConfidence,
             csatScore: avgCsat,
             volumeTrend: volumeTrend,
-            engineHealth: { latency: avgLatency, tokens: totalTokens }
+            avgLatency: avgLatency,
+            totalTokens: totalTokens
           });
           setIsLoading(false);
         }
@@ -317,12 +313,12 @@ export default function SupportMetrics() {
         <div className={`mt-2 text-[10px] font-medium tracking-widest ${metrics.dlqExceptions > 0 ? 'text-rose-500/80' : 'text-emerald-500/80'}`}>DEAD LETTER QUEUE</div>
       </div>
 
-      <div className="glass-panel p-6 rounded-2xl border-l-2 border-fuchsia-500/50 bg-fuchsia-950/20 relative overflow-hidden">
-        {isLoading && <div className="absolute inset-0 bg-zinc-900/50 flex items-center justify-center backdrop-blur-sm z-10"><div className="w-5 h-5 border-2 border-fuchsia-500 border-t-transparent rounded-full animate-spin"></div></div>}
+      <div className="glass-panel p-6 rounded-2xl border-l-2 border-l-fuchsia-500/50 bg-fuchsia-950/15 relative overflow-hidden">
+        {isLoading && <div className="absolute inset-0 bg-zinc-900/50 flex items-center justify-center z-10"><div className="w-5 h-5 border-2 border-fuchsia-500 border-t-transparent rounded-full animate-spin"></div></div>}
         <p className="text-zinc-500 text-xs font-bold uppercase tracking-widest">Onyx Engine Health</p>
-        <h3 className="text-3xl font-black text-fuchsia-400 mt-2">{((metrics.engineHealth?.tokens || 0) / 1000).toFixed(1)}k</h3>
-        <div className="mt-2 text-[10px] text-zinc-500 font-medium tracking-widest flex items-center gap-1">
-          TOKENS 24H • {(metrics.engineHealth?.latency || 0)}ms AVG
+        <h3 className="text-3xl font-black text-fuchsia-400 mt-2">{metrics.avgLatency || 0}<span className="text-xs font-normal text-zinc-500 ml-1">ms</span></h3>
+        <div className="mt-2 text-[10px] text-fuchsia-300/70 font-mono tracking-tighter">
+          24H VOL: {metrics.totalTokens ? `${(metrics.totalTokens / 1000).toFixed(1)}k` : '0'} TOKENS
         </div>
       </div>
     </div>
