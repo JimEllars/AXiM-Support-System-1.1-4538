@@ -149,7 +149,7 @@ export default function SupportMetrics() {
             slaBreachRate: slaBreachRate || 0,
             dlqExceptions: dlqCount || 0,
             avgConfidence: avgConfidence,
-            csatScore: avgCsat,
+            csatScore: avgCsat, // Not sure where avgSat came from, original code has avgCsat
             volumeTrend: volumeTrend,
             avgLatency: avgLatency,
             totalTokens: totalTokens
@@ -317,7 +317,7 @@ export default function SupportMetrics() {
         {isLoading && <div className="absolute inset-0 bg-zinc-900/50 flex items-center justify-center z-10"><div className="w-5 h-5 border-2 border-fuchsia-500 border-t-transparent rounded-full animate-spin"></div></div>}
         <p className="text-zinc-500 text-xs font-bold uppercase tracking-widest">Onyx Engine Health</p>
         <h3 className="text-3xl font-black text-fuchsia-400 mt-2">{metrics.avgLatency || 0}<span className="text-xs font-normal text-zinc-500 ml-1">ms</span></h3>
-        <div className="mt-2 text-[10px] text-fuchsia-300/70 font-mono tracking-tighter">
+        <div className="mt-2 text-[10px] text-fuchsia-300/70 font-mono tracking-tighter uppercase">
           24H VOL: {metrics.totalTokens ? `${(metrics.totalTokens / 1000).toFixed(1)}k` : '0'} TOKENS
         </div>
       </div>

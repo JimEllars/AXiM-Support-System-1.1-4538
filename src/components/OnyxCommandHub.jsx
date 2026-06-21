@@ -10,65 +10,40 @@ import toast from 'react-hot-toast';
 const { FiTerminal, FiSearch, FiZap, FiChevronRight, FiFilter, FiCpu, FiTrash2 } = FiIcons;
 
 export default function OnyxCommandHub() {
-  const { searchQuery, setSearchQuery } = useTicketStore();
+    const { searchQuery, setSearchQuery } = useTicketStore();
   const [isFocused, setIsFocused] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const [liveEvents, setLiveEvents] = useState([]);
-  const [isSocketConnected, setIsSocketConnected] = useState(true);
   const inputRef = useRef(null);
 
   useEffect(() => {
-    let isMounted = true;
+    const fetchRecentEvents = async () => {
+      const { data } = await supabase
+        .from('events_ax2024')
+        .select('*')
+        .in('type', ['action_executed', 'dlq_replay_executed', 'rca_generated', 'error', 'dlq_payload'])
+        .order('payload->timestamp', { ascending: false })
+        .limit(4);
+      if (data) setLiveEvents(data);
+    };
+    fetchRecentEvents();
 
-    // Initial fetch of last 3 events
-    const fetchInitialEvents = async () => {
-      try {
-        const { data, error } = await supabase
-          .from('events_ax2024')
-          .select('*')
-          .in('type', ['action_executed', 'dlq_replay_executed', 'rca_generated', 'error', 'dlq_payload'])
-          .order('created_at', { ascending: false })
-          .limit(3);
+    const eventsChannel = supabase.channel('public:events_hub')
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'events_ax2024' }, (payload) => {
+        setLiveEvents(prev => [payload.new, ...prev].slice(0, 4));
+      })
+      .subscribe();
 
-        if (data && isMounted) {
-          setLiveEvents(data.reverse());
-        }
-      } catch (err) {
-        console.error("Failed to load initial terminal events:", err);
+    const handleGlobalKey = (e) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+        e.preventDefault();
+        inputRef.current?.focus();
       }
     };
-
-    fetchInitialEvents();
-
-    const channel = supabase.channel('public:events_ax2024:terminal')
-      .on('postgres_changes', {
-        event: 'INSERT',
-        schema: 'public',
-        table: 'events_ax2024'
-      }, (payload) => {
-        const newEvent = payload.new;
-        if (['action_executed', 'dlq_replay_executed', 'rca_generated', 'error', 'dlq_payload'].includes(newEvent.type)) {
-          setLiveEvents(prev => {
-            const updated = [...prev, newEvent];
-            if (updated.length > 5) return updated.slice(updated.length - 5);
-            return updated;
-          });
-        }
-      })
-      .on('system', { event: '*' }, (payload) => {
-        if (payload.status === 'error' || payload.status === 'closed') {
-          setIsSocketConnected(false);
-        }
-      })
-      .on('SUBSCRIBE_ERROR', () => setIsSocketConnected(false))
-      .subscribe((status) => {
-        if (status === 'SUBSCRIBED') setIsSocketConnected(true);
-        if (status === 'TIMED_OUT' || status === 'CLOSED' || status === 'CHANNEL_ERROR') setIsSocketConnected(false);
-      });
-
+    window.addEventListener('keydown', handleGlobalKey);
     return () => {
-      isMounted = false;
-      supabase.removeChannel(channel);
+      window.removeEventListener('keydown', handleGlobalKey);
+      supabase.removeChannel(eventsChannel);
     };
   }, []);
 
@@ -185,7 +160,7 @@ export default function OnyxCommandHub() {
         </div>
       </motion.div>
 
-      <div className="flex flex-wrap gap-2 mt-3 px-1">
+                  <div className="flex flex-wrap gap-2 mt-3 px-1">
         {['/filter urgent', '/assign me', '/status open', '/show breached'].map((pill) => (
           <button
             key={pill}
@@ -200,82 +175,28 @@ export default function OnyxCommandHub() {
           </button>
         ))}
       </div>
-      
 
-      {/* AUTO-HEAL ACTION LOG (LIVE FEED) */}
-      <div className="mt-4 bg-black border border-zinc-800/50 rounded-2xl p-4 overflow-hidden relative">
+      <div className="mt-4 bg-black/40 border border-zinc-800/80 backdrop-blur-md rounded-2xl p-4 overflow-hidden relative">
         <div className="absolute top-0 left-0 w-1 h-full bg-cyan-500/50"></div>
-
-        <div className="flex items-center justify-between mb-3">
-          <div className="text-[10px] font-black text-cyan-500 uppercase tracking-widest flex items-center gap-2">
-            <div className="w-1.5 h-1.5 rounded-full bg-cyan-500 animate-pulse"></div>
-            Tier 1 Live Event Stream
-          </div>
+        <div className="text-[10px] font-black text-cyan-500 uppercase tracking-widest mb-3 flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[9px] font-mono tracking-wider uppercase border bg-zinc-950/40 border-zinc-800">
-              <span className={`w-1.5 h-1.5 rounded-full ${isSocketConnected ? 'bg-cyan-400 animate-pulse' : 'bg-rose-500'}`} />
-              <span className={isSocketConnected ? 'text-cyan-400/80' : 'text-rose-400/80'}>
-                {isSocketConnected ? 'STREAM_LIVE' : 'CONN_DEGRADED'}
-              </span>
-            </div>
-            <button
-              onClick={() => { setLiveEvents([]); toast.success("Local layout buffer flushed"); }}
-              className="text-zinc-600 hover:text-rose-400 transition-colors cursor-pointer"
-              title="Clear Local Event Stream"
-            >
-              <SafeIcon icon={FiTrash2} />
-            </button>
+            <div className="w-1.5 h-1.5 rounded-full bg-cyan-500 animate-pulse"></div>
+            Tier 1 Auto-Heal Feed
           </div>
         </div>
-
-        <div className="font-mono text-xs text-zinc-500 space-y-1.5">
+        <div className="font-mono text-xs text-zinc-400 space-y-2 max-h-[120px] overflow-y-auto">
           {liveEvents.length === 0 ? (
-            <div className="flex items-start gap-3 opacity-50">
-              <span className="text-zinc-700 shrink-0">--:--:--</span>
-              <span className="text-cyan-400">LISTENING</span>
-              <span>Awaiting stream data...</span>
-            </div>
+            <div className="text-zinc-600 italic py-1 text-center">No telemetry pulses detected on the wire...</div>
           ) : (
-            liveEvents.map((event) => {
-              const time = new Date(event.created_at).toLocaleTimeString([], { hour12: false });
-              const isError = event.type === 'error' || event.type === 'dlq_payload';
-              let badgeColor = 'text-cyan-400';
-              let badgeText = event.type.replace(/_/g, ' ').toUpperCase();
-
-              if (isError) {
-                badgeColor = 'text-rose-500 bg-rose-500/10 px-1 rounded font-black';
-                badgeText = 'CRITICAL_FAULT';
-              } else if (event.type === 'action_executed') {
-                badgeColor = 'text-emerald-400';
-                badgeText = 'SUCCESS';
-              } else if (event.type === 'rca_generated') {
-                badgeColor = 'text-fuchsia-400';
-                badgeText = 'AUTOMATED';
-              }
-
-              let displayMsg = '';
-              if (event.payload) {
-                 if (typeof event.payload === 'string') displayMsg = event.payload;
-                 else if (event.payload.message) displayMsg = event.payload.message;
-                 else if (event.payload.error) displayMsg = event.payload.error;
-                 else displayMsg = JSON.stringify(event.payload).substring(0, 80) + '...';
-              }
-
+            liveEvents.map((evt) => {
+              const isFault = evt.type === 'error' || evt.type === 'dlq_payload';
               return (
-                <div
-                  key={event.id}
-                  className="flex items-start gap-3 cursor-pointer hover:bg-zinc-900/50 p-1 rounded transition-colors"
-                  onClick={() => {
-                    setSearchQuery(`/inspect ${event.id}`);
-                    inputRef.current?.focus();
-                    toast.success('Trace identifier staged', {
-                        style: { background: '#18181b', color: '#10b981', border: '1px solid #047857' }
-                    });
-                  }}
-                >
-                  <span className="text-zinc-700 shrink-0">{time}</span>
-                  <span className={badgeColor}>{badgeText}</span>
-                  <span className={isError ? "text-rose-300" : ""}>{displayMsg}</span>
+                <div key={evt.id} className="flex items-start gap-3 transition-colors hover:text-zinc-200">
+                  <span className="text-zinc-700 shrink-0">{new Date(evt.payload?.timestamp || evt.created_at).toLocaleTimeString()}</span>
+                  <span className={`font-bold px-1.5 py-0.5 rounded text-[9px] ${isFault ? 'bg-rose-500/10 text-rose-400 border border-rose-500/20' : 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'}`}>
+                    {isFault ? 'FAULT' : 'SUCCESS'}
+                  </span>
+                  <span className="truncate flex-1">{evt.payload?.message || `Ecosystem event: ${evt.type}`}</span>
                 </div>
               );
             })
