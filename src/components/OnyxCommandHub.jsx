@@ -191,7 +191,7 @@ export default function OnyxCommandHub() {
             liveEvents.map((evt) => {
               const isFault = evt.type === 'error' || evt.type === 'dlq_payload';
               return (
-                <div key={evt.id} className="flex items-start gap-3 transition-colors hover:text-zinc-200">
+                <div key={evt.id} className="flex items-start gap-3 transition-all hover:text-zinc-200 animate-fade-in duration-300 transform translate-y-0">
                   <span className="text-zinc-700 shrink-0">{new Date(evt.payload?.timestamp || evt.created_at).toLocaleTimeString()}</span>
                   <span className={`font-bold px-1.5 py-0.5 rounded text-[9px] ${isFault ? 'bg-rose-500/10 text-rose-400 border border-rose-500/20' : 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'}`}>
                     {isFault ? 'FAULT' : 'SUCCESS'}

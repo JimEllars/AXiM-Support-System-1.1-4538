@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
-import { FiDatabase, FiPlus, FiTrash2, FiSearch, FiSave, FiAlertCircle } from 'react-icons/fi';
+import { FiDatabase, FiPlus, FiTrash2, FiSearch, FiSave, FiAlertCircle, FiCheckCircle } from 'react-icons/fi';
 import { supabase } from '../lib/supabaseClient';
 import toast from 'react-hot-toast';
 import { useAuthStore } from '../store/useAuthStore';
@@ -10,6 +10,9 @@ export default function MemoryHub() {
   const [isLoading, setIsLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const [pendingAudits, setPendingAudits] = useState([]);
+  const [selectedAuditId, setSelectedAuditId] = useState(null);
+  const [selectedAuditText, setSelectedAuditText] = useState('');
 
   const [newRule, setNewRule] = useState({
     title: '',
@@ -35,8 +38,25 @@ export default function MemoryHub() {
     }
   };
 
+  const fetchPendingAudits = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('ticket_ai_telemetry')
+        .select('*, support_tickets(subject, description)')
+        .lte('confidence_score', 0.65)
+        .eq('is_curated', false)
+        .order('created_at', { ascending: false });
+
+      if (error) throw error;
+      setPendingAudits(data || []);
+    } catch (error) {
+      console.error('Error fetching pending audits:', error);
+    }
+  };
+
   useEffect(() => {
     fetchEntries();
+    fetchPendingAudits();
   }, []);
 
   const handleCreateRule = async (e) => {
@@ -88,6 +108,45 @@ export default function MemoryHub() {
     }
   };
 
+  const handlePublishToVectorStore = async (auditId) => {
+    if (!selectedAuditText) {
+      toast.error('Curated text is required.');
+      return;
+    }
+    try {
+      // 1. Insert into memory_banks
+      const auditRecord = pendingAudits.find(a => a.ticket_id === auditId);
+      const title = auditRecord?.support_tickets?.subject || `Curated Fix for #${auditId.split('-')[0]}`;
+
+      const { error: insertError } = await supabase
+        .from('memory_banks')
+        .insert({
+          title: title,
+          content: selectedAuditText,
+          metadata: { source: 'curated_audit', original_ticket_id: auditId }
+        });
+
+      if (insertError) throw insertError;
+
+      // 2. Mark as curated in ticket_ai_telemetry
+      const { error: updateError } = await supabase
+        .from('ticket_ai_telemetry')
+        .update({ is_curated: true })
+        .eq('ticket_id', auditId);
+
+      if (updateError) throw updateError;
+
+      toast.success('Curated Playbook Published successfully.');
+      setSelectedAuditId(null);
+      setSelectedAuditText('');
+      fetchPendingAudits();
+      fetchEntries();
+    } catch (error) {
+      console.error('Error publishing curated playbook:', error);
+      toast.error('Failed to publish curated playbook.');
+    }
+  };
+
   const filteredEntries = entries.filter(entry =>
     entry.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
     entry.content.toLowerCase().includes(searchQuery.toLowerCase())
@@ -101,9 +160,66 @@ export default function MemoryHub() {
         </div>
         <div>
           <h1 className="text-3xl font-black text-white tracking-tight">System Memory Hub</h1>
-          <p className="text-zinc-400 mt-1">Manage operational rules and RAG knowledge base for Onyx.</p>
+          <p className="text-zinc-400 mt-1">Manage operational rules, RAG knowledge base for Onyx, and curate low-confidence playbooks.</p>
         </div>
       </div>
+
+      {pendingAudits.length > 0 && (
+        <div className="bg-zinc-900/40 border border-zinc-800 rounded-3xl p-6 shadow-xl mb-8">
+          <h2 className="text-xl font-bold text-white mb-6 flex items-center gap-2">
+            <FiCheckCircle className="text-cyan-400" /> Human-in-the-Loop Curation Grid
+          </h2>
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            {/* Left Pane: Pending Audits List */}
+            <div className="space-y-4 max-h-[400px] overflow-y-auto pr-2">
+              {pendingAudits.map(audit => (
+                <div
+                  key={audit.ticket_id}
+                  onClick={() => {
+                    setSelectedAuditId(audit.ticket_id);
+                    setSelectedAuditText(audit.auto_response_draft || '');
+                  }}
+                  className={`p-4 rounded-xl border cursor-pointer transition-all ${selectedAuditId === audit.ticket_id ? 'border-cyan-500 bg-cyan-500/10' : 'border-zinc-800 bg-black/40 hover:border-zinc-600'}`}
+                >
+                  <div className="flex justify-between items-start mb-2">
+                    <span className="text-xs font-mono font-bold text-zinc-300 truncate pr-4">
+                      {audit.support_tickets?.subject || 'Unknown Subject'}
+                    </span>
+                    <span className="px-2 py-1 bg-red-500/20 text-red-400 border border-red-500/30 rounded text-[10px] font-black uppercase tracking-wider whitespace-nowrap">
+                      Score: {audit.confidence_score}
+                    </span>
+                  </div>
+                  <p className="text-sm text-zinc-500 font-mono line-clamp-3">
+                    {audit.support_tickets?.description || 'No description provided.'}
+                  </p>
+                </div>
+              ))}
+            </div>
+
+            {/* Right Pane: Interactive Editing Workspace */}
+            {selectedAuditId ? (
+              <div className="flex flex-col gap-4 bg-zinc-950/60 border border-zinc-800 p-5 rounded-2xl">
+                <label className="text-xs font-mono text-cyan-400 font-bold uppercase tracking-wider">Refine AI Knowledge Base Injection</label>
+                <textarea
+                  className="w-full min-h-[140px] bg-zinc-900/50 border border-zinc-800 text-zinc-300 font-sans p-3 rounded-xl focus:outline-none focus:border-cyan-500/50 text-sm resize-y"
+                  value={selectedAuditText}
+                  onChange={(e) => setSelectedAuditText(e.target.value)}
+                />
+                <button
+                  onClick={() => handlePublishToVectorStore(selectedAuditId)}
+                  className="w-full py-2.5 bg-gradient-to-r from-cyan-500 to-blue-600 text-black text-xs font-mono font-black tracking-widest rounded-xl hover:from-cyan-400 hover:to-blue-500 transition-all uppercase"
+                >
+                  Publish Curated Playbook
+                </button>
+              </div>
+            ) : (
+              <div className="flex items-center justify-center bg-zinc-950/40 border border-zinc-800/50 rounded-2xl p-6 text-zinc-600 text-sm font-mono text-center">
+                Select a pending audit from the left pane to curate its memory injection.
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
         {/* Create Rule Form */}
