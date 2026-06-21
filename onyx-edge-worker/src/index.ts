@@ -429,13 +429,17 @@ if (url.pathname === "/webhooks/intake") {
 
       const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
 
-      // Process batch arrays with exact runtime operator attribution tracking
+      // Process batch arrays with exact runtime operator attribution tracking and state transition
       const replayPromises = eventIds.map(async (id) => {
         return supabase
           .from("events_ax2024")
           .update({
-            error_message: null,
-            retry_count: 0,
+            type: "dlq_replay_executed", // <-- Shifting type clears item out of DLQ viewport filters
+            payload: {
+              message: "Payload successfully re-injected into operational stream.",
+              error_reason: null,
+              retry_count: 0
+            },
             metadata: {
               replayed_at: new Date().toISOString(),
               triggered_by_operator: operatorId || "system_automated_failover"
@@ -2897,78 +2901,6 @@ async function handleDLQReplay(request: Request, env: Env, ctx: any): Promise<Re
 
     logEnd(supabase, logCtx, startTime, ctx);
     return new Response(JSON.stringify({ success: true, replayed: true }), {
-      status: 200,
-      headers: { 'Content-Type': 'application/json', ...getCorsHeaders(env, request) }
-    });
-
-  } catch (error: any) {
-    logErr(supabase, logCtx, error, ctx);
-    return new Response(JSON.stringify({ error: error.message }), {
-      status: 500,
-      headers: { 'Content-Type': 'application/json', ...getCorsHeaders(env, request) }
-    });
-  }
-}
-
-async function handleDLQBulkReplay(request: Request, env: Env, ctx: any): Promise<Response> {
-  const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
-  const logCtx = createLogContext(request);
-  const startTime = Date.now();
-  ctx.waitUntil(logToEvents(supabase, logCtx, "performance_metric", "Bulk Replay Request start", { headers: request.headers }).catch(() => {}));
-
-  // Validate Authorization
-  const authHeader = request.headers.get("Authorization");
-  if (authHeader !== `Bearer ${env.AXIM_ONYX_SECRET}`) {
-    return new Response(JSON.stringify({ error: "Unauthorized" }), {
-      status: 401,
-      headers: { 'Content-Type': 'application/json', ...getCorsHeaders(env, request) }
-    });
-  }
-
-  try {
-    const payloadBody = await request.json() as any;
-    const { eventIds } = payloadBody;
-
-    if (!eventIds || !Array.isArray(eventIds)) {
-      return new Response(JSON.stringify({ error: "Missing or invalid eventIds" }), {
-        status: 400,
-        headers: { 'Content-Type': 'application/json', ...getCorsHeaders(env, request) }
-      });
-    }
-
-    const { data: eventsToReplay, error: fetchError } = await supabase
-      .from("events_ax2024")
-      .select("*")
-      .in("id", eventIds);
-
-    if (fetchError || !eventsToReplay) {
-      throw fetchError || new Error("Failed to fetch events");
-    }
-
-    const inserts = eventsToReplay.map(event => {
-      const payload = event.payload || {};
-      const replayedPayload = {
-        ...payload,
-        error_reason: null,
-        retry_count: 0,
-        replayed_at: new Date().toISOString()
-      };
-      return {
-        type: "dlq_replay_executed",
-        payload: { original_event_id: event.id, new_payload: replayedPayload }
-      };
-    });
-
-    if (inserts.length > 0) {
-      const { error: insertError } = await supabase.from("events_ax2024").insert(inserts);
-      if (insertError) throw insertError;
-
-      const { error: deleteError } = await supabase.from("events_ax2024").delete().in("id", eventIds);
-      if (deleteError) throw deleteError;
-    }
-
-    logEnd(supabase, logCtx, startTime, ctx);
-    return new Response(JSON.stringify({ success: true, count: eventsToReplay.length }), {
       status: 200,
       headers: { 'Content-Type': 'application/json', ...getCorsHeaders(env, request) }
     });

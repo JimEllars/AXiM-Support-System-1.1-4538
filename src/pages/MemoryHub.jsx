@@ -44,7 +44,7 @@ export default function MemoryHub() {
     try {
       const { data, error } = await supabase
         .from('ticket_ai_telemetry')
-        .select('*, support_tickets(subject, description)')
+        .select('id, ticket_id, *, support_tickets(subject, description)')
         .lte('confidence_score', 75)
         .eq('is_curated', false)
         .order('created_at', { ascending: false });
@@ -192,10 +192,10 @@ export default function MemoryHub() {
                   <div
                     key={audit.ticket_id}
                     onClick={() => {
-                      setSelectedAuditId(audit.ticket_id);
+                      setSelectedAuditId(audit.id);
                       setSelectedAuditText(audit.auto_response_draft || '');
                     }}
-                    className={`p-4 rounded-xl border cursor-pointer transition-all ${selectedAuditId === audit.ticket_id ? 'border-cyan-500 bg-cyan-500/10' : 'border-zinc-800 bg-black/40 hover:border-zinc-600'}`}
+                    className={`p-4 rounded-xl border cursor-pointer transition-all ${selectedAuditId === audit.id ? 'border-cyan-500 bg-cyan-500/10' : 'border-zinc-800 bg-black/40 hover:border-zinc-600'}`}
                   >
                     <div className="flex justify-between items-start mb-2">
                       <span className="text-xs font-mono font-bold text-zinc-300 truncate pr-4">

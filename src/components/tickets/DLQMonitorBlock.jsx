@@ -13,6 +13,7 @@ export default function DLQMonitorBlock() {
   const [expandedId, setExpandedId] = useState(null);
   const [replayConfirmId, setReplayConfirmId] = useState(null);
   const [isReplaying, setIsReplaying] = useState(false);
+  const [selectedEventIds, setSelectedEventIds] = useState([]);
 
   const fetchDLQ = async () => {
     setIsLoading(true);
@@ -71,7 +72,7 @@ export default function DLQMonitorBlock() {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${import.meta.env.VITE_AXIM_ONYX_SECRET || 'onyx_local_dev_secret'}`
         },
-        body: JSON.stringify({ eventIds: dlqEvents.map(e => e.id), operatorId })
+        body: JSON.stringify({ eventIds: selectedEventIds, operatorId })
       });
 
       if (!res.ok) {
@@ -80,6 +81,7 @@ export default function DLQMonitorBlock() {
       }
 
       toast.success('Bulk payload replayed successfully');
+      setSelectedEventIds([]);
       fetchDLQ();
     } catch (err) {
       toast.error(err.message);
@@ -134,7 +136,7 @@ export default function DLQMonitorBlock() {
 
         <div className="flex items-center gap-4">
           <button
-            disabled={isReplaying || dlqEvents.length === 0}
+            disabled={isReplaying || selectedEventIds.length === 0}
             onClick={() => handleBulkReplay()}
             className="relative flex items-center gap-2 px-4 py-2 text-xs font-mono font-black tracking-widest text-cyan-400 bg-zinc-950/80 border border-cyan-500/30 hover:border-cyan-400 rounded-xl disabled:opacity-40 disabled:pointer-events-none uppercase transition-all duration-200 shadow-[0_0_15px_rgba(6,182,212,0.05)] hover:shadow-[0_0_20px_rgba(6,182,212,0.15)] group"
           >
@@ -143,7 +145,7 @@ export default function DLQMonitorBlock() {
             ) : (
               <FiIcons.FiRefreshCw className="w-3.5 h-3.5 text-cyan-500/70 group-hover:text-cyan-400 group-hover:rotate-180 transition-transform duration-500" />
             )}
-            <span>Bulk Replay Tasks ({dlqEvents.length})</span>
+            <span>Bulk Replay Tasks ({selectedEventIds.length})</span>
           </button>
 
           <button onClick={fetchDLQ} className="p-2 hover:bg-zinc-900 rounded-xl text-zinc-500 transition-colors">
@@ -161,6 +163,20 @@ export default function DLQMonitorBlock() {
           return (
             <div key={evt.id} className="border border-rose-900/30 bg-zinc-900/50 rounded-2xl overflow-hidden">
               <div className="p-4 flex items-center justify-between">
+                <div className="mr-4">
+                  <input
+                    type="checkbox"
+                    checked={selectedEventIds.includes(evt.id)}
+                    onChange={(e) => {
+                      if (e.target.checked) {
+                        setSelectedEventIds(prev => [...prev, evt.id]);
+                      } else {
+                        setSelectedEventIds(prev => prev.filter(id => id !== evt.id));
+                      }
+                    }}
+                    className="w-4 h-4 rounded border-zinc-800 bg-zinc-950 text-cyan-500 focus:ring-cyan-500/30 cursor-pointer"
+                  />
+                </div>
                 <div className="flex-1 cursor-pointer" onClick={() => setExpandedId(isExpanded ? null : evt.id)}>
                   <div className="flex items-center gap-3">
                      <span className="text-zinc-300 font-bold text-sm">{p.origin_node || 'Unknown Origin'}</span>
