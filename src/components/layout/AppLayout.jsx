@@ -8,16 +8,26 @@ import SafeIcon from '../../common/SafeIcon';
 
 export default function AppLayout({ children }) {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const [isSocketConnected, setIsSocketConnected] = useState(true);
 
   useEffect(() => {
     const urgentChannel = supabase.channel('global:urgent_alerts')
+      .on('system', { event: '*' }, (payload) => {
+        if (payload.status === 'error' || payload.status === 'closed') {
+          setIsSocketConnected(false);
+        }
+      })
+      .on('SUBSCRIBE_ERROR', () => setIsSocketConnected(false))
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'support_tickets', filter: "priority=eq.urgent" }, (payload) => {
         toast.error(`🚨 URGENT TICKET: ${payload.new.subject}`, {
           duration: 10000,
           style: { background: '#7f1d1d', color: '#fff', border: '1px solid #ef4444' }
         });
       })
-      .subscribe();
+      .subscribe((status) => {
+        if (status === 'SUBSCRIBED') setIsSocketConnected(true);
+        if (status === 'TIMED_OUT' || status === 'CLOSED' || status === 'CHANNEL_ERROR') setIsSocketConnected(false);
+      });
 
     return () => supabase.removeChannel(urgentChannel);
   }, []);
@@ -25,6 +35,11 @@ export default function AppLayout({ children }) {
 
   return (
     <div className="min-h-screen bg-black">
+      {!isSocketConnected && (
+        <div className="bg-rose-500 text-white text-[10px] font-bold uppercase tracking-widest text-center py-1">
+          ⚠️ WebSocket connection lost. Reconnecting...
+        </div>
+      )}
       <div className="md:hidden p-4 bg-zinc-950 flex items-center justify-between border-b border-zinc-900 z-[70] relative">
         <div className="flex items-center gap-3">
           <div className="w-8 h-8 bg-cyan-500 rounded flex items-center justify-center text-black">
