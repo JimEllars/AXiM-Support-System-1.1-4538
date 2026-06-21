@@ -58,6 +58,36 @@ export default function DLQMonitorBlock() {
     fetchDLQ();
   }, []);
 
+
+  const handleBulkReplay = async () => {
+    setIsReplaying(true);
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      const operatorId = user?.id;
+
+      const res = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:54321/functions/v1/onyx-bridge'}/api/dlq/bulk-replay`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${import.meta.env.VITE_AXIM_ONYX_SECRET || 'onyx_local_dev_secret'}`
+        },
+        body: JSON.stringify({ eventIds: dlqEvents.map(e => e.id), operatorId })
+      });
+
+      if (!res.ok) {
+        const text = await res.text();
+        throw new Error(`Bulk replay failed: ${res.status} ${text}`);
+      }
+
+      toast.success('Bulk payload replayed successfully');
+      fetchDLQ();
+    } catch (err) {
+      toast.error(err.message);
+    } finally {
+      setIsReplaying(false);
+    }
+  };
+
   const handleReplay = async (event) => {
     setIsReplaying(true);
     try {
@@ -101,9 +131,25 @@ export default function DLQMonitorBlock() {
             <p className="text-rose-500/60 text-[10px] uppercase font-bold tracking-widest">Unhandled Edge Payloads</p>
           </div>
         </div>
-        <button onClick={fetchDLQ} className="p-2 hover:bg-zinc-900 rounded-xl text-zinc-500 transition-colors">
-          <SafeIcon icon={FiRefreshCw} className={isLoading ? 'animate-spin' : ''} />
-        </button>
+
+        <div className="flex items-center gap-4">
+          <button
+            disabled={isReplaying || dlqEvents.length === 0}
+            onClick={() => handleBulkReplay()}
+            className="relative flex items-center gap-2 px-4 py-2 text-xs font-mono font-black tracking-widest text-cyan-400 bg-zinc-950/80 border border-cyan-500/30 hover:border-cyan-400 rounded-xl disabled:opacity-40 disabled:pointer-events-none uppercase transition-all duration-200 shadow-[0_0_15px_rgba(6,182,212,0.05)] hover:shadow-[0_0_20px_rgba(6,182,212,0.15)] group"
+          >
+            {isReplaying ? (
+              <FiIcons.FiLoader className="w-3.5 h-3.5 text-cyan-400 animate-spin" />
+            ) : (
+              <FiIcons.FiRefreshCw className="w-3.5 h-3.5 text-cyan-500/70 group-hover:text-cyan-400 group-hover:rotate-180 transition-transform duration-500" />
+            )}
+            <span>Bulk Replay Tasks ({dlqEvents.length})</span>
+          </button>
+
+          <button onClick={fetchDLQ} className="p-2 hover:bg-zinc-900 rounded-xl text-zinc-500 transition-colors">
+            <SafeIcon icon={FiRefreshCw} className={isLoading ? 'animate-spin' : ''} />
+          </button>
+        </div>
       </div>
 
       <div className="space-y-3">
