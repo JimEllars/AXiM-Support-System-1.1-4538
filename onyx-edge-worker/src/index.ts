@@ -2915,7 +2915,7 @@ async function handleDLQBulkReplay(request: Request, env: Env, ctx: any): Promis
       throw fetchError || new Error("Failed to fetch events");
     }
 
-    await Promise.all(eventsToReplay.map(async (event) => {
+    const inserts = eventsToReplay.map(event => {
       const payload = event.payload || {};
       const replayedPayload = {
         ...payload,
@@ -2923,14 +2923,19 @@ async function handleDLQBulkReplay(request: Request, env: Env, ctx: any): Promis
         retry_count: 0,
         replayed_at: new Date().toISOString()
       };
-
-      await supabase.from("events_ax2024").insert({
+      return {
         type: "dlq_replay_executed",
         payload: { original_event_id: event.id, new_payload: replayedPayload }
-      });
+      };
+    });
 
-      await supabase.from("events_ax2024").delete().eq("id", event.id);
-    }));
+    if (inserts.length > 0) {
+      const { error: insertError } = await supabase.from("events_ax2024").insert(inserts);
+      if (insertError) throw insertError;
+
+      const { error: deleteError } = await supabase.from("events_ax2024").delete().in("id", eventIds);
+      if (deleteError) throw deleteError;
+    }
 
     logEnd(supabase, logCtx, startTime, ctx);
     return new Response(JSON.stringify({ success: true, count: eventsToReplay.length }), {
