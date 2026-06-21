@@ -414,8 +414,38 @@ if (url.pathname === "/webhooks/intake") {
         return new Response(JSON.stringify({ success: true, message: "Daily digest triggered manually." }), { status: 200, headers: { "Content-Type": "application/json" } });
     }
 
-    if (url.pathname === "/api/dlq/bulk-replay") {
-      return handleDLQBulkReplay(request, env, ctx);
+    if (url.pathname === "/api/dlq/bulk-replay" && request.method === "POST") {
+      const authHeader = request.headers.get("Authorization") || "";
+      if (authHeader !== `Bearer ${env.AXIM_ONYX_SECRET}`) {
+        return new Response(JSON.stringify({ error: "UNAUTHORIZED_REPLAY_REQUEST" }), { status: 401, headers: getCorsHeaders(env, request) });
+      }
+
+      const body: any = await request.json();
+      const { eventIds, operatorId } = body;
+
+      if (!Array.isArray(eventIds) || eventIds.length === 0) {
+        return new Response(JSON.stringify({ error: "INVALID_EVENT_ARRAY_PROFILES" }), { status: 400, headers: getCorsHeaders(env, request) });
+      }
+
+      const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
+
+      // Process batch arrays with exact runtime operator attribution tracking
+      const replayPromises = eventIds.map(async (id) => {
+        return supabase
+          .from("events_ax2024")
+          .update({
+            error_message: null,
+            retry_count: 0,
+            metadata: {
+              replayed_at: new Date().toISOString(),
+              triggered_by_operator: operatorId || "system_automated_failover"
+            }
+          })
+          .eq("id", id);
+      });
+
+      await Promise.all(replayPromises);
+      return new Response(JSON.stringify({ success: true, processed_count: eventIds.length }), { status: 200, headers: getCorsHeaders(env, request) });
     }
 
     if (url.pathname === "/api/dlq/replay") {
