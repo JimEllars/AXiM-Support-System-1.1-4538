@@ -317,6 +317,12 @@ export default function PublicIntake() {
                                     <FiAlertCircle /> {fileError}
                                 </p>
                             )}
+                            {file && !fileError && (
+                              <div className="mt-3 px-4 py-2 bg-cyan-500/5 border border-cyan-500/20 rounded-xl flex items-center justify-between font-mono text-[10px] text-cyan-400">
+                                <span className="uppercase tracking-wider">File Staged for Handshake Ingestion</span>
+                                <span>{parseFloat(file.size / (1024 * 1024)).toFixed(2)} MB</span>
+                              </div>
+                            )}
                         </div>
                     </div>
 

@@ -42,14 +42,13 @@ export const useTicketStore = create((set, get) => ({
   metricsError: false,
   setMetricsError: (err) => set({ metricsError: err }),
 
-  // --- TELEMETRY & TRACE DEEP CONTROL STATES ---
+  // --- CENTRALIZED TRACE & AUDIT TELEMETRY PARAMS ---
   dlqEvents: [],
   activeInspectionTraceId: null,
   isInspectionModalOpen: false,
   isTerminalStreamPaused: false, // <-- State for Task 4
 
   setDlqEvents: (events) => set({ dlqEvents: events }),
-  toggleTerminalStream: () => set((state) => ({ isTerminalStreamPaused: !state.isTerminalStreamPaused })),
 
   fetchLiveDLQData: async () => {
     const { data, error } = await supabase
@@ -65,6 +64,7 @@ export const useTicketStore = create((set, get) => ({
     activeInspectionTraceId: traceId,
     isInspectionModalOpen: true
   }),
+  toggleTerminalStream: () => set((state) => ({ isTerminalStreamPaused: !state.isTerminalStreamPaused })),
 
   isDlqLoading: false,
   setDlqLoading: (loading) => set({ isDlqLoading: loading }),

@@ -796,93 +796,103 @@ function sanitizePayload(obj: any): any {
 
 async function handlePublicWebIngress(request: Request, env: Env, ctx: any): Promise<Response> {
   const origin = request.headers.get("Origin");
-  const allowedOrigins = env.ALLOWED_ORIGINS ? env.ALLOWED_ORIGINS.split(",") : [];
+  const allowedOrigins = env.ALLOWED_ORIGINS ? env.ALLOWED_ORIGINS.split(",") : [
+    "http://localhost:5173",
+    "https://axim.us.com",
+  ];
 
-  if (!origin || !allowedOrigins.includes(origin)) {
+  if (origin && !allowedOrigins.includes(origin)) {
     return new Response(JSON.stringify({ error: "Forbidden: Invalid Origin" }), { status: 403, headers: getCorsHeaders(env, request) });
   }
 
   let decryptedPayload: any = null;
-  const rawPayloadText = await request.text();
+  let pendingAttachmentFile: any = null;
+  const contentType = request.headers.get("content-type") || "";
 
   try {
-    const rawPayload = JSON.parse(rawPayloadText);
+    let encryptedPayloadStr = "";
+    let ivStr = "";
 
-    if (rawPayload.encrypted_payload && rawPayload.iv && rawPayload.auth_tag) {
-      try {
-        const encoder = new TextEncoder();
+    if (contentType.includes("multipart/form-data")) {
+      const formData = await request.clone().formData();
+      encryptedPayloadStr = formData.get("encrypted_payload") as string || "";
+      ivStr = formData.get("iv") as string || "";
 
-        // Derive AES-GCM Key from Secret via SHA-256 to ensure correct byte length
-        const hashBuffer = await crypto.subtle.digest('SHA-256', encoder.encode(env.AXIM_ONYX_SECRET));
-        const aesKey = await crypto.subtle.importKey(
-          "raw",
-          hashBuffer,
-          { name: "AES-GCM" },
-          false,
-          ["decrypt"]
-        );
-
-        const ivBuffer = hexStringToUint8Array(rawPayload.iv);
-        // Concatenate ciphertext and auth tag as Web Crypto expects them together
-        const ciphertextBuffer = hexStringToUint8Array(rawPayload.encrypted_payload);
-        const authTagBuffer = hexStringToUint8Array(rawPayload.auth_tag);
-
-        const combinedBuffer = new Uint8Array(ciphertextBuffer.length + authTagBuffer.length);
-        combinedBuffer.set(ciphertextBuffer);
-        combinedBuffer.set(authTagBuffer, ciphertextBuffer.length);
-
-        const decryptedBuffer = await crypto.subtle.decrypt(
-          { name: "AES-GCM", iv: ivBuffer },
-          aesKey,
-          combinedBuffer
-        );
-
-        const decryptedText = new TextDecoder().decode(decryptedBuffer);
-        const unsafePayload = JSON.parse(decryptedText);
-
-        // Phase 48: Sanitize Payload
-        decryptedPayload = sanitizePayload(unsafePayload);
-      } catch (cryptoError: any) {
-        // Send to Dead Letter Queue metrics
-        const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
-        await supabase.from("events_ax2024").insert({
-          type: "dlq_payload",
-          payload: {
-            reason: "DECRYPTION_FAILED",
-            source: "website_support_form",
-            raw: rawPayloadText
-          }
-        });
-        return new Response(JSON.stringify({ error: "Decryption Failed. Payload integrity compromised." }), { status: 400, headers: getCorsHeaders(env, request) });
+      const file = formData.get("attachment") as File | null;
+      if (file && file.size > 0) {
+        pendingAttachmentFile = file;
       }
     } else {
-      // Legacy plaintext payload (if allowed) - sanitize before parsing further
-      decryptedPayload = sanitizePayload(rawPayload);
+      const jsonBody: any = await request.clone().json();
+      encryptedPayloadStr = jsonBody.encrypted_payload || "";
+      ivStr = jsonBody.iv || "";
     }
-  } catch (parseError) {
-    return new Response(JSON.stringify({ error: "Invalid JSON Payload" }), { status: 400, headers: getCorsHeaders(env, request) });
+
+    if (encryptedPayloadStr && ivStr) {
+      const encoder = new TextEncoder();
+      const hashBuffer = await crypto.subtle.digest('SHA-256', encoder.encode(env.AXIM_ONYX_SECRET));
+
+      const key = await crypto.subtle.importKey(
+        "raw",
+        hashBuffer,
+        { name: "AES-GCM" },
+        false,
+        ["decrypt"]
+      );
+
+      // Decrypt using standard combined ciphertext + tag representation matching PublicIntake.jsx
+      const ivBuffer = Uint8Array.from(atob(ivStr), c => c.charCodeAt(0));
+      const dataBuffer = Uint8Array.from(atob(encryptedPayloadStr), c => c.charCodeAt(0));
+
+      const decryptedBuffer = await crypto.subtle.decrypt(
+        { name: "AES-GCM", iv: ivBuffer },
+        key,
+        dataBuffer
+      );
+
+      const decryptedText = new TextDecoder().decode(decryptedBuffer);
+      decryptedPayload = sanitizePayload(JSON.parse(decryptedText));
+    } else {
+      throw new Error("Missing cryptographic payload properties.");
+    }
+  } catch (parseError: any) {
+    const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
+    await supabase.from("events_ax2024").insert({
+      type: "dlq_payload",
+      payload: { reason: "INGRESS_DECRYPTION_CRASH", error: parseError.message, source: "public_form" }
+    });
+    return new Response(JSON.stringify({ error: "Payload verification failed. Integrity breach." }), { status: 400, headers: getCorsHeaders(env, request) });
   }
 
+  // Proxied routing straight into the validated intake network
   try {
-    const newHeaders = new Headers(request.headers);
-    newHeaders.set("Authorization", `Bearer ${env.AXIM_ONYX_SECRET}`);
-    newHeaders.set("X-Axim-Default-Source", "website");
+    const proxyHeaders = new Headers();
+    proxyHeaders.set("Authorization", `Bearer ${env.AXIM_ONYX_SECRET}`);
+    proxyHeaders.set("X-Axim-Default-Source", "website");
 
-    const newRequest = new Request(request.url, {
-      method: request.method,
-      headers: newHeaders,
-      body: JSON.stringify(decryptedPayload)
+    let proxyBody;
+    if (pendingAttachmentFile) {
+      const forwardFormData = new FormData();
+      forwardFormData.append("payload", JSON.stringify(decryptedPayload));
+      forwardFormData.append("attachment", pendingAttachmentFile);
+      proxyBody = forwardFormData;
+      // Let fetch assign the multipart boundary automatically
+    } else {
+      proxyHeaders.set("Content-Type", "application/json");
+      proxyBody = JSON.stringify(decryptedPayload);
+    }
+
+    const proxyRequest = new Request(request.url, {
+      method: "POST",
+      headers: proxyHeaders,
+      body: proxyBody
     });
 
-    return handleWebhookIntake(newRequest, env, ctx);
-
+    return handleWebhookIntake(proxyRequest, env, ctx);
   } catch (error: any) {
-    console.error("Proxy routing failed error: ", error.message || error);
-    return new Response(JSON.stringify({ error: "Proxy routing failed" }), { status: 500, headers: getCorsHeaders(env, request) });
+    return new Response(JSON.stringify({ error: "Edge routing transaction aborted" }), { status: 500, headers: getCorsHeaders(env, request) });
   }
-
 }
-
 
 async function handleWebhookIntake(request: Request, env: Env, ctx: any): Promise<Response> {
   let payloadText = "";
