@@ -10,7 +10,7 @@ import toast from 'react-hot-toast';
 const { FiTerminal, FiSearch, FiZap, FiChevronRight, FiFilter, FiCpu, FiTrash2 } = FiIcons;
 
 export default function OnyxCommandHub() {
-    const { searchQuery, setSearchQuery } = useTicketStore();
+    const { searchQuery, setSearchQuery , isTerminalStreamPaused, toggleTerminalStream } = useTicketStore();
   const [isFocused, setIsFocused] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const [liveEvents, setLiveEvents] = useState([]);
@@ -68,6 +68,21 @@ export default function OnyxCommandHub() {
 
         const pathParts = window.location.pathname.split('/');
         const ticketId = pathParts[1] === 'ticket' ? pathParts[2] : null;
+
+        // CRITICAL TELEMETRY OVERRIDE: Intercept deep inspection macros
+        if (searchQuery.trim().startsWith('/inspect')) {
+          const targetTraceId = searchQuery.replace('/inspect', '').trim();
+          if (targetTraceId) {
+            setSearchQuery('');
+            inputRef.current?.blur();
+            setIsProcessing(false);
+
+            // Fire global store setter to reveal diagnostic frame
+            useTicketStore.getState().triggerDeepTraceInspection(targetTraceId);
+            return;
+          }
+        }
+
         const result = await onyxService.parseCommand(searchQuery, ticketId);
 
         if (result && result.intent === 'TOOL_PROPOSAL') {
@@ -82,33 +97,9 @@ export default function OnyxCommandHub() {
         }
 
 
-        if (searchQuery.startsWith('/inspect ')) {
-            const eventId = searchQuery.split(' ')[1];
-            if (eventId) {
-                toast.success(`Inspecting trace execution for event: ${eventId}`, {
-                    style: { background: '#18181b', color: '#10b981', border: '1px solid #047857' },
-                    icon: <SafeIcon icon={FiZap} />
-                });
-                setSearchQuery('');
-                inputRef.current?.blur();
-                setIsProcessing(false);
-                return;
-            }
-        }
 
-        if (searchQuery.startsWith('/inspect ')) {
-            const eventId = searchQuery.split(' ')[1];
-            if (eventId) {
-                toast.success(`Inspecting trace execution for event: ${eventId}`, {
-                    style: { background: '#18181b', color: '#10b981', border: '1px solid #047857' },
-                    icon: <SafeIcon icon={FiTerminal} />
-                });
-                setSearchQuery('');
-                inputRef.current?.blur();
-                setIsProcessing(false);
-                return;
-            }
-        }
+
+
 
         if (result.intent === 'SYSTEM_ACTION') {
             if (result.action === 'ASSIGN_TICKET') {
@@ -210,6 +201,13 @@ export default function OnyxCommandHub() {
           <div className="flex items-center gap-2">
             <div className="w-1.5 h-1.5 rounded-full bg-cyan-500 animate-pulse"></div>
             Tier 1 Auto-Heal Feed
+            <button
+              type="button"
+              onClick={() => toggleTerminalStream()}
+              className={`px-2 py-0.5 rounded-md text-[9px] font-mono font-bold tracking-wider transition-all border ${isTerminalStreamPaused ? 'bg-amber-500/10 border-amber-500/30 text-amber-400' : 'bg-zinc-950/40 border-zinc-800 text-zinc-500 hover:text-zinc-300'}`}
+            >
+              {isTerminalStreamPaused ? 'STREAM_FROZEN' : 'FREEZE_FRAME'}
+            </button>
           </div>
         </div>
         <div className="font-mono text-xs text-zinc-400 space-y-2 max-h-[120px] overflow-y-auto">
