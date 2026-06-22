@@ -434,12 +434,9 @@ if (url.pathname === "/webhooks/intake") {
         return supabase
           .from("events_ax2024")
           .update({
-            type: "dlq_replay_executed", // <-- Shifting type clears item out of DLQ viewport filters
-            payload: {
-              message: "Payload successfully re-injected into operational stream.",
-              error_reason: null,
-              retry_count: 0
-            },
+            type: "dlq_replay_executed", // <-- Atomic shift clears item out of DLQ dashboard grid filters
+            error_message: null,
+            retry_count: 0,
             metadata: {
               replayed_at: new Date().toISOString(),
               triggered_by_operator: operatorId || "system_automated_failover"
@@ -452,9 +449,6 @@ if (url.pathname === "/webhooks/intake") {
       return new Response(JSON.stringify({ success: true, processed_count: eventIds.length }), { status: 200, headers: getCorsHeaders(env, request) });
     }
 
-    if (url.pathname === "/api/dlq/replay") {
-      return handleDLQReplay(request, env, ctx);
-    }
 
     if (url.pathname === "/health" || url.pathname === "/api/v1/health") {
       return handleHealthCheck(env, request, ctx);
@@ -2812,104 +2806,3 @@ async function handleDataRetentionSweep(env: Env) {
   }
 }
 
-async function handleDLQReplay(request: Request, env: Env, ctx: any): Promise<Response> {
-  const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
-  const logCtx = createLogContext(request);
-  const startTime = Date.now();
-  ctx.waitUntil(logToEvents(supabase, logCtx, "performance_metric", "Request start", { headers: request.headers }).catch(() => {}));
-
-  // Validate Authorization
-  const authHeader = request.headers.get("Authorization");
-  if (authHeader !== `Bearer ${env.AXIM_ONYX_SECRET}`) {
-    return new Response(JSON.stringify({ error: "Unauthorized" }), {
-      status: 401,
-      headers: { 'Content-Type': 'application/json', ...getCorsHeaders(env, request) }
-    });
-  }
-
-  // Enforce Multi-Tenant Operator RLS Verification over DLQ Replays
-  const xAximSignature = request.headers.get("X-Axim-Signature");
-  if (!xAximSignature) {
-    return new Response(JSON.stringify({ error: "Missing Operator Signature" }), {
-      status: 401,
-      headers: { 'Content-Type': 'application/json', ...getCorsHeaders(env, request) }
-    });
-  }
-
-  const { data: operatorProfile, error: operatorError } = await supabase
-    .from('team_profiles')
-    .select('tenant_id, role')
-    .eq('id', xAximSignature)
-    .single();
-
-  if (operatorError || !operatorProfile) {
-    return new Response(JSON.stringify({ error: "Invalid Operator Profile" }), {
-      status: 401,
-      headers: { 'Content-Type': 'application/json', ...getCorsHeaders(env, request) }
-    });
-  }
-
-  const idempotencyKey = request.headers.get("X-Idempotency-Key");
-  if (idempotencyKey && env.IDEMPOTENCY_KV) {
-    const existingKey = await env.IDEMPOTENCY_KV.get(idempotencyKey);
-    if (existingKey) {
-      return new Response(JSON.stringify({ error: "Conflict: Action already processed", status: "rejected" }), {
-        status: 409,
-        headers: { "Content-Type": "application/json", ...getCorsHeaders(env, request) }
-      });
-    }
-    await env.IDEMPOTENCY_KV.put(idempotencyKey, "processed", { expirationTtl: 86400 });
-  }
-
-  try {
-    const payloadBody = await request.json() as any;
-    const { eventId, payload, tenant_id: targetTenantId } = payloadBody;
-
-    if (targetTenantId && operatorProfile.tenant_id !== targetTenantId && operatorProfile.role !== 'super_admin') {
-      return new Response(JSON.stringify({ error: "Forbidden: Cross-Tenant Execution Blocked" }), {
-        status: 403,
-        headers: { 'Content-Type': 'application/json', ...getCorsHeaders(env, request) }
-      });
-    }
-
-    if (!eventId || !payload) {
-      return new Response(JSON.stringify({ error: "Missing eventId or payload" }), {
-        status: 400,
-        headers: { 'Content-Type': 'application/json', ...getCorsHeaders(env, request) }
-      });
-    }
-
-    // Since we are mocking DLQ by storing payloads in events_ax2024,
-    // we would "re-inject" the payload into the master queue here or via Core API.
-    // We clear error flags and reset retry counters on the payload block.
-
-    const replayedPayload = {
-      ...payload,
-      error_reason: null,
-      retry_count: 0,
-      replayed_at: new Date().toISOString()
-    };
-
-    // Log the replayed action
-    await supabase.from("events_ax2024").insert({
-      type: "dlq_replay_executed",
-      payload: { original_event_id: eventId, new_payload: replayedPayload }
-    });
-
-    // Optionally remove the original dlq_payload event or mark it as resolved
-    await supabase.from("events_ax2024").delete().eq("id", eventId);
-
-    logEnd(supabase, logCtx, startTime, ctx);
-    return new Response(JSON.stringify({ success: true, replayed: true }), {
-      status: 200,
-      headers: { 'Content-Type': 'application/json', ...getCorsHeaders(env, request) }
-    });
-
-  } catch (error: any) {
-    logErr(supabase, logCtx, error, ctx);
-    return new Response(JSON.stringify({ error: error.message }), {
-      status: 500,
-      headers: { 'Content-Type': 'application/json', ...getCorsHeaders(env, request) }
-    });
-  }
-}

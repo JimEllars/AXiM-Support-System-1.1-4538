@@ -10,7 +10,7 @@ import Sidebar from './Sidebar';
 export default function AppLayout({ children }) {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [isSocketConnected, setIsSocketConnected] = useState(true);
-  const [hasNearBreachSla, setHasNearBreachSla] = useState(false);
+  const [hasImminentBreach, setHasImminentBreach] = useState(false);
 
   useEffect(() => {
     const urgentChannel = supabase.channel('global:urgent_alerts')
@@ -35,53 +35,30 @@ export default function AppLayout({ children }) {
   }, []);
 
   useEffect(() => {
-    const checkSlaStatus = async () => {
-      try {
-        const { data, error } = await supabase
-          .from('support_tickets')
-          .select('sla_breach_at')
-          .in('status', ['open', 'pending'])
-          .not('sla_breach_at', 'is', null);
+    const checkSLAStatus = async () => {
+      const { data } = await supabase
+        .from('support_tickets')
+        .select('sla_breach_at')
+        .in('status', ['open', 'pending']);
 
-        if (error) throw error;
-
-        if (data && data.length > 0) {
-          const now = new Date();
-          const hasBreach = data.some(ticket => {
-            const breachTime = new Date(ticket.sla_breach_at);
-            const diffMinutes = (breachTime - now) / (1000 * 60);
-            return diffMinutes <= 15 && diffMinutes >= -1440; // less than 15 mins to breach, or breached within last 24h
-          });
-          setHasNearBreachSla(hasBreach);
-        } else {
-          setHasNearBreachSla(false);
-        }
-      } catch (err) {
-        console.error('Error checking SLA status:', err);
+      if (data) {
+        const nearBreach = data.some(ticket => {
+          const remainingMs = new Date(ticket.big_breach_at || ticket.sla_breach_at).getTime() - Date.now();
+          return remainingMs > 0 && remainingMs <= 15 * 60 * 1000;
+        });
+        setHasImminentBreach(nearBreach);
       }
     };
-
-    checkSlaStatus();
-
-    const slaChannel = supabase.channel('sla_monitor')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'support_tickets' }, () => {
-        checkSlaStatus();
-      })
-      .subscribe();
-
-    const interval = setInterval(checkSlaStatus, 60000); // Check every minute
-
-    return () => {
-      supabase.removeChannel(slaChannel);
-      clearInterval(interval);
-    };
+    checkSLAStatus();
+    const interval = setInterval(checkSLAStatus, 60000);
+    return () => clearInterval(interval);
   }, []);
 
 
 
   return (
     <div className="min-h-screen bg-black">
-      {hasNearBreachSla && (
+      {hasImminentBreach && (
         <div className="w-full bg-rose-950/40 border-b border-rose-500/30 text-rose-400 font-mono text-[10px] uppercase font-black text-center py-1.5 tracking-widest animate-pulse z-[100]">
           ⚠️ CRITICAL ATTENTION REQUIRED: SYSTEM SLA BREACH IMMINENT ON LIVE CASE CHANNELS
         </div>

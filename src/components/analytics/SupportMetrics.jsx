@@ -1,115 +1,104 @@
-import React, { useEffect, useState } from 'react';
-import ReactECharts from 'echarts-for-react';
+import React, { useState, useEffect } from 'react';
 import { supabase } from '../../lib/supabaseClient';
-import { onyxService } from '../../services/onyxService';
+import ReactECharts from 'echarts-for-react';
+import * as FiIcons from 'react-icons/fi';
+import SafeIcon from '../../common/SafeIcon';
+import { useTicketStore } from '../../store/useTicketStore';
 
 export default function SupportMetrics() {
-  const [metrics, setMetrics] = useState({
-    activeQueue: 0,
-    csatScore: 0,
-    escalations: 0,
-    aiDeflectionRate: 0,
-    slaBreachRate: 0,
-    dlqExceptions: 0,
-    engineHealth: { latency: 0, tokens: 0 },
-    volumeTrend: [0, 0, 0, 0, 0, 0, 0]
-  });
-
-  const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState(false);
+  const {
+    supportMetrics: metrics,
+    setSupportMetrics,
+    isMetricsLoading: isLoading,
+    setMetricsLoading: setIsLoading,
+    metricsError: error,
+    setMetricsError: setError
+  } = useTicketStore();
 
   useEffect(() => {
     let isMounted = true;
 
-
     async function fetchMetrics() {
+      if (!isMounted) return;
+      setIsLoading(true);
+      setError(false);
+
       try {
-        // Active Queue Size
-        const { count: openCount, error: openError } = await supabase
+        const { data: tickets, error: ticketErr } = await supabase
           .from('support_tickets')
-          .select('*', { count: 'exact', head: true })
-          .in('status', ['open', 'pending']);
+          .select('status');
 
-        if (openError) console.error("Active Queue Error:", openError);
+        if (ticketErr) throw ticketErr;
 
-        // Escalations
-        const { count: escalatedCount, error: escError } = await supabase
-          .from('support_tickets')
-          .select('*', { count: 'exact', head: true })
-          .eq('priority', 'urgent');
+        const openCount = tickets?.filter(t => t.status === 'open' || t.status === 'pending').length || 0;
+        const escalatedCount = tickets?.filter(t => t.status === 'escalated').length || 0;
 
-        if (escError) console.error("Escalations Error:", escError);
-
-        // SLA breach rate
-        const { count: breachedCount, error: breachError } = await supabase
-          .from('support_tickets')
-          .select('*', { count: 'exact', head: true })
-          .in('status', ['open', 'pending'])
-          .lt('sla_breach_at', new Date().toISOString());
-
-        if (breachError) console.error("Breach Error:", breachError);
-
-        const slaBreachRate = (openCount && breachedCount) ? ((breachedCount / openCount) * 100).toFixed(1) : 0;
-
-        // DLQ Exceptions
-        const { count: dlqCount, error: dlqError } = await supabase
+        const { data: dlqData, error: dlqErr } = await supabase
           .from('events_ax2024')
-          .select('*', { count: 'exact', head: true })
+          .select('id', { count: 'exact' })
           .eq('type', 'dlq_payload');
 
-        if (dlqError) console.error("DLQ Error:", dlqError);
-
-        // AI Deflection Rate & Confidence Score
-        const yesterday = new Date();
-        yesterday.setDate(yesterday.getDate() - 1);
-        const yesterdayIso = yesterday.toISOString();
-
-        // CSAT Score
-        const { data: feedbackData, error: fbError } = await supabase
-          .from("product_feedback")
-          .select("rating")
-          .gte("created_at", yesterdayIso);
-
-        if (fbError) console.error("Feedback Error:", fbError);
-
-        let avgCsat = 0;
-        if (feedbackData && feedbackData.length > 0) {
-          const totalRating = feedbackData.reduce((sum, item) => sum + item.rating, 0);
-          avgCsat = (totalRating / feedbackData.length).toFixed(1);
-        }
+        if (dlqErr) throw dlqErr;
+        const dlqCount = dlqData?.length || 0;
 
 
-        const { data: telemetryData, error: totError } = await supabase
+        const twentyFourHoursAgo = new Date();
+        twentyFourHoursAgo.setHours(twentyFourHoursAgo.getHours() - 24);
+        const cutoffDateString = twentyFourHoursAgo.toISOString();
+
+
+        const { data: telemetry, error: telemetryErr } = await supabase
           .from('ticket_ai_telemetry')
-          .select('confidence_score, metadata, created_at')
-          .gte('created_at', yesterdayIso);
+          .select('confidence_score, deflected, processing_time_ms, tokens_used')
+          .gte('created_at', cutoffDateString);
 
-        if (totError) console.error("Total Telemetry Error:", totError);
+        if (telemetryErr) throw telemetryErr;
 
-        let totalRecent = 0;
         let deflectedCount = 0;
+        let totalRecent = telemetry?.length || 0;
         let sumConfidence = 0;
-        totalRecent = telemetryData ? telemetryData.length : 0;
+        let sumLatency = 0;
         let totalTokens = 0;
-        let totalLatency = 0;
-        let validMetricCount = 0;
 
-        if (telemetryData) {
-          telemetryData.forEach(item => {
-            if (item.auto_response_draft) {
-              deflectedCount++;
-            }
-            if (item.confidence_score) {
-              sumConfidence += item.confidence_score;
-            }
-            if (item.metadata) {
-              totalTokens += (item.metadata.input_tokens || 0) + (item.metadata.output_tokens || 0);
-              totalLatency += (item.metadata.latency_ms || 0);
-              validMetricCount++;
-            }
-          });
+        telemetry?.forEach(t => {
+          if (t.deflected) deflectedCount++;
+          sumConfidence += (t.confidence_score || 0);
+          sumLatency += (t.processing_time_ms || 0);
+          totalTokens += (t.tokens_used || 0);
+        });
+
+        const avgLatency = totalRecent > 0 ? Math.round(sumLatency / totalRecent) : 0;
+
+        const { data: allTickets, error: allTicketsErr } = await supabase
+          .from('support_tickets')
+          .select('status, created_at, sla_breach_at')
+          .gte('created_at', cutoffDateString);
+
+        if (allTicketsErr) throw allTicketsErr;
+
+        let breachedCount = 0;
+        allTickets?.forEach(ticket => {
+          if (ticket.sla_breach_at && new Date(ticket.sla_breach_at) < new Date()) {
+            breachedCount++;
+          }
+        });
+
+        const slaBreachRate = allTickets && allTickets.length > 0
+          ? ((breachedCount / allTickets.length) * 100).toFixed(1)
+          : 0;
+
+
+        const { data: feedbackData, error: feedbackErr } = await supabase
+          .from('product_feedback')
+          .select('satisfaction_score')
+          .gte('created_at', cutoffDateString);
+
+        let sumCsat = 0;
+        let csatCount = feedbackData?.length || 0;
+        if (!feedbackErr && feedbackData) {
+            feedbackData.forEach(f => sumCsat += (f.satisfaction_score || 0));
         }
-        const avgLatency = validMetricCount > 0 ? Math.round(totalLatency / validMetricCount) : 0;
+        const avgCsat = csatCount > 0 ? (sumCsat / csatCount).toFixed(1) : 0;
 
         const aiRate = totalRecent > 0
           ? ((deflectedCount / totalRecent) * 100).toFixed(1)
@@ -142,7 +131,7 @@ export default function SupportMetrics() {
         }
 
         if (isMounted) {
-          setMetrics({
+          setSupportMetrics({
             activeQueue: openCount || 0,
             escalations: escalatedCount || 0,
             aiDeflectionRate: aiRate,

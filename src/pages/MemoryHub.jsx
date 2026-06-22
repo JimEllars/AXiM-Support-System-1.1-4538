@@ -190,7 +190,7 @@ export default function MemoryHub() {
               <div className="space-y-4 max-h-[400px] overflow-y-auto pr-2">
                 {pendingAudits.map(audit => (
                   <div
-                    key={audit.ticket_id}
+                    key={audit.id}
                     onClick={() => {
                       setSelectedAuditId(audit.id);
                       setSelectedAuditText(audit.auto_response_draft || '');
@@ -202,7 +202,7 @@ export default function MemoryHub() {
                         {audit.support_tickets?.subject || 'Unknown Subject'}
                       </span>
                       <span className="px-2 py-1 bg-red-500/20 text-red-400 border border-red-500/30 rounded text-[10px] font-black uppercase tracking-wider whitespace-nowrap">
-                        Score: {audit.confidence_score}
+                        Score: {audit.confidence_score}%
                       </span>
                     </div>
                     <p className="text-sm text-zinc-500 font-mono line-clamp-3">
