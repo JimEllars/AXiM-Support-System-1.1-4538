@@ -82,6 +82,34 @@ export default function OnyxCommandHub() {
         }
 
 
+        if (searchQuery.startsWith('/inspect ')) {
+            const eventId = searchQuery.split(' ')[1];
+            if (eventId) {
+                toast.success(`Inspecting trace execution for event: ${eventId}`, {
+                    style: { background: '#18181b', color: '#10b981', border: '1px solid #047857' },
+                    icon: <SafeIcon icon={FiZap} />
+                });
+                setSearchQuery('');
+                inputRef.current?.blur();
+                setIsProcessing(false);
+                return;
+            }
+        }
+
+        if (searchQuery.startsWith('/inspect ')) {
+            const eventId = searchQuery.split(' ')[1];
+            if (eventId) {
+                toast.success(`Inspecting trace execution for event: ${eventId}`, {
+                    style: { background: '#18181b', color: '#10b981', border: '1px solid #047857' },
+                    icon: <SafeIcon icon={FiTerminal} />
+                });
+                setSearchQuery('');
+                inputRef.current?.blur();
+                setIsProcessing(false);
+                return;
+            }
+        }
+
         if (result.intent === 'SYSTEM_ACTION') {
             if (result.action === 'ASSIGN_TICKET') {
                 const { error } = await supabase.from('support_tickets').update({ assignee_id: result.assignee === 'me' ? 'agent_user' : result.assignee }).eq('id', result.ticketId);

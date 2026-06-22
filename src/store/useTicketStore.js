@@ -23,6 +23,32 @@ export const useTicketStore = create((set, get) => ({
         : [...state.selectedTicketIds, id],
     })),
 
+  // Phase 71: Consolidation of Telemetry / Metrics State
+  supportMetrics: {
+    activeQueue: 0,
+    escalations: 0,
+    aiDeflectionRate: 0,
+    slaBreachRate: 0,
+    dlqExceptions: 0,
+    avgConfidence: 0,
+    csatScore: 0,
+    volumeTrend: [0, 0, 0, 0, 0, 0, 0],
+    avgLatency: 0,
+    totalTokens: 0
+  },
+  setSupportMetrics: (metrics) => set({ supportMetrics: metrics }),
+  isMetricsLoading: false,
+  setMetricsLoading: (loading) => set({ isMetricsLoading: loading }),
+  metricsError: false,
+  setMetricsError: (err) => set({ metricsError: err }),
+
+  dlqEvents: [],
+  setDlqEvents: (events) => set({ dlqEvents: events }),
+  isDlqLoading: false,
+  setDlqLoading: (loading) => set({ isDlqLoading: loading }),
+  selectedDlqEventIds: [],
+  setSelectedDlqEventIds: (ids) => set({ selectedDlqEventIds: ids }),
+
   updateTicketAssignee: (ticketId, assigneeId, department) =>
     set((state) => ({
       tickets: state.tickets.map((t) =>
