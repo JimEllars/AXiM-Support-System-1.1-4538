@@ -825,7 +825,7 @@ async function handlePublicWebIngress(request: Request, env: Env, ctx: any): Pro
 
     if (encryptedPayloadStr && ivStr) {
       const encoder = new TextEncoder();
-      const hashBuffer = await crypto.subtle.digest('SHA-256', encoder.encode(env.AXIM_ONYX_SECRET));
+      const hashBuffer = await crypto.subtle.digest('SHA-256', secretBuffer || encoder.encode(env.AXIM_ONYX_SECRET));
 
       const key = await crypto.subtle.importKey(
         "raw",
@@ -835,7 +835,7 @@ async function handlePublicWebIngress(request: Request, env: Env, ctx: any): Pro
         ["decrypt"]
       );
 
-      // Decrypt using standard combined ciphertext matching PublicIntake.jsx
+      // Decrypt using standard combined ciphertext + tag representation matching PublicIntake.jsx
       const ivBuffer = Uint8Array.from(atob(ivStr), c => c.charCodeAt(0));
       const dataBuffer = Uint8Array.from(atob(encryptedPayloadStr), c => c.charCodeAt(0));
 
@@ -859,6 +859,7 @@ async function handlePublicWebIngress(request: Request, env: Env, ctx: any): Pro
     return new Response(JSON.stringify({ error: "Payload verification failed. Integrity breach." }), { status: 400, headers: getCorsHeaders(env, request) });
   }
 
+  // Proxied routing straight into the validated intake network
   try {
     const proxyHeaders = new Headers();
     proxyHeaders.set("Authorization", `Bearer ${env.AXIM_ONYX_SECRET}`);
@@ -870,6 +871,7 @@ async function handlePublicWebIngress(request: Request, env: Env, ctx: any): Pro
       forwardFormData.append("payload", JSON.stringify(decryptedPayload));
       forwardFormData.append("attachment", pendingAttachmentFile);
       proxyBody = forwardFormData;
+      // Let fetch assign the multipart boundary automatically
     } else {
       proxyHeaders.set("Content-Type", "application/json");
       proxyBody = JSON.stringify(decryptedPayload);
