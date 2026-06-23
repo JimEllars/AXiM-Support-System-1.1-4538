@@ -12,35 +12,16 @@ export default function DLQMonitorBlock() {
   const {
     dlqEvents, setDlqEvents,
     isDlqLoading: isLoading, setDlqLoading: setIsLoading,
-    selectedDlqEventIds: selectedEventIds, setSelectedDlqEventIds: setSelectedEventIds
+    selectedDlqEventIds: selectedEventIds, setSelectedDlqEventIds: setSelectedEventIds,
+    fetchLiveDLQData
   } = useTicketStore();
 
   const [expandedId, setExpandedId] = React.useState(null);
   const [replayConfirmId, setReplayConfirmId] = React.useState(null);
   const [isReplaying, setIsReplaying] = React.useState(false);
 
-  const fetchDLQ = async () => {
-    setIsLoading(true);
-    try {
-      const { data, error } = await supabase
-        .from('events_ax2024')
-        .select('*')
-        .eq('type', 'dlq_payload')
-        .order('created_at', { ascending: false })
-        .limit(10);
-
-      if (error) throw error;
-      setDlqEvents(data || []);
-      setSelectedEventIds([]); // Clear selection buffer on refresh
-    } catch (error) {
-      toast.error('Failed to load DLQ: ' + error.message);
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
   useEffect(() => {
-    fetchDLQ();
+    fetchLiveDLQData();
   }, []);
 
   const handleBulkReplay = async () => {
@@ -61,7 +42,7 @@ export default function DLQMonitorBlock() {
 
       if (!res.ok) throw new Error(`Bulk replay execution failed.`);
       toast.success(`Successfully flushed ${selectedEventIds.length} exceptions from queue.`);
-      fetchDLQ();
+      fetchLiveDLQData();
     } catch (err) {
       toast.error(err.message);
     } finally {
@@ -93,7 +74,7 @@ export default function DLQMonitorBlock() {
             {isReplaying ? <FiLoader className="w-3.5 h-3.5 animate-spin" /> : <FiRefreshCw className="w-3.5 h-3.5" />}
             <span>Bulk Replay Tasks ({selectedEventIds.length})</span>
           </button>
-          <button onClick={fetchDLQ} className="p-2 hover:bg-zinc-900 rounded-xl text-zinc-500 transition-colors">
+          <button onClick={fetchLiveDLQData} className="p-2 hover:bg-zinc-900 rounded-xl text-zinc-500 transition-colors">
             <SafeIcon icon={FiRefreshCw} className={isLoading ? 'animate-spin' : ''} />
           </button>
         </div>
