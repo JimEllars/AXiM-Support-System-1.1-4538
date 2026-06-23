@@ -434,13 +434,8 @@ if (url.pathname === "/webhooks/intake") {
         return supabase
           .from("events_ax2024")
           .update({
-            type: "dlq_replay_executed", // <-- Atomic shift clears item out of DLQ dashboard grid filters
-            error_message: null,
-            retry_count: 0,
-            metadata: {
-              replayed_at: new Date().toISOString(),
-              triggered_by_operator: operatorId || "system_automated_failover"
-            }
+            type: "dlq_replay_executed",
+            error_message: null
           })
           .eq("id", id);
       });
@@ -840,7 +835,7 @@ async function handlePublicWebIngress(request: Request, env: Env, ctx: any): Pro
         ["decrypt"]
       );
 
-      // Decrypt using standard combined ciphertext + tag representation matching PublicIntake.jsx
+      // Decrypt using standard combined ciphertext matching PublicIntake.jsx
       const ivBuffer = Uint8Array.from(atob(ivStr), c => c.charCodeAt(0));
       const dataBuffer = Uint8Array.from(atob(encryptedPayloadStr), c => c.charCodeAt(0));
 
@@ -864,7 +859,6 @@ async function handlePublicWebIngress(request: Request, env: Env, ctx: any): Pro
     return new Response(JSON.stringify({ error: "Payload verification failed. Integrity breach." }), { status: 400, headers: getCorsHeaders(env, request) });
   }
 
-  // Proxied routing straight into the validated intake network
   try {
     const proxyHeaders = new Headers();
     proxyHeaders.set("Authorization", `Bearer ${env.AXIM_ONYX_SECRET}`);
@@ -876,7 +870,6 @@ async function handlePublicWebIngress(request: Request, env: Env, ctx: any): Pro
       forwardFormData.append("payload", JSON.stringify(decryptedPayload));
       forwardFormData.append("attachment", pendingAttachmentFile);
       proxyBody = forwardFormData;
-      // Let fetch assign the multipart boundary automatically
     } else {
       proxyHeaders.set("Content-Type", "application/json");
       proxyBody = JSON.stringify(decryptedPayload);

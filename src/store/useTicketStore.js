@@ -46,29 +46,32 @@ export const useTicketStore = create((set, get) => ({
   dlqEvents: [],
   activeInspectionTraceId: null,
   isInspectionModalOpen: false,
-  isTerminalStreamPaused: false, // <-- State for Task 4
+  isTerminalStreamPaused: false,
+  isDlqLoading: false,
+  selectedDlqEventIds: [],
 
   setDlqEvents: (events) => set({ dlqEvents: events }),
 
   fetchLiveDLQData: async () => {
+    set({ isDlqLoading: true });
     const { data, error } = await supabase
       .from('events_ax2024')
       .select('*')
       .eq('type', 'dlq_payload')
       .order('created_at', { ascending: false })
       .limit(10);
-    if (!error && data) set({ dlqEvents: data });
+    if (!error && data) set({ dlqEvents: data, isDlqLoading: false });
+    else set({ isDlqLoading: false });
   },
 
   triggerDeepTraceInspection: (traceId) => set({
     activeInspectionTraceId: traceId,
     isInspectionModalOpen: true
   }),
+
   toggleTerminalStream: () => set((state) => ({ isTerminalStreamPaused: !state.isTerminalStreamPaused })),
 
-  isDlqLoading: false,
   setDlqLoading: (loading) => set({ isDlqLoading: loading }),
-  selectedDlqEventIds: [],
   setSelectedDlqEventIds: (ids) => set({ selectedDlqEventIds: ids }),
 
   updateTicketAssignee: (ticketId, assigneeId, department) =>
