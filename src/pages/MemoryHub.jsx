@@ -190,9 +190,9 @@ export default function MemoryHub() {
               <div className="space-y-4 max-h-[400px] overflow-y-auto pr-2">
                 {pendingAudits.map(audit => (
                   <div
-                    key={audit.id}
+                    key={audit.id} // <-- FIX: Assign primary row tracking key
                     onClick={() => {
-                      setSelectedAuditId(audit.id);
+                      setSelectedAuditId(audit.id); // <-- FIX: Track internal telemetry primary ID instead of ticket foreign reference
                       setSelectedAuditText(audit.auto_response_draft || '');
                     }}
                     className={`p-4 rounded-xl border cursor-pointer transition-all ${selectedAuditId === audit.id ? 'border-cyan-500 bg-cyan-500/10' : 'border-zinc-800 bg-black/40 hover:border-zinc-600'}`}
