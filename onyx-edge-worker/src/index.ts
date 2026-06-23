@@ -835,7 +835,6 @@ async function handlePublicWebIngress(request: Request, env: Env, ctx: any): Pro
         ["decrypt"]
       );
 
-      // Decrypt using standard combined ciphertext matching PublicIntake.jsx
       const ivBuffer = Uint8Array.from(atob(ivStr), c => c.charCodeAt(0));
       const dataBuffer = Uint8Array.from(atob(encryptedPayloadStr), c => c.charCodeAt(0));
 

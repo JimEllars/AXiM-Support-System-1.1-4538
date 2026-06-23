@@ -195,8 +195,7 @@ export default function MemoryHub() {
                       setSelectedAuditId(audit.id);
                       setSelectedAuditText(audit.auto_response_draft || '');
                     }}
-                    className={`p-4 rounded-xl border cursor-pointer transition-all ${selectedAuditId === audit.id ? 'border-cyan-500 bg-cyan-500/10' : 'border-zinc-800 bg-black/40 hover:border-zinc-600'}`}
-                  >
+                    className={`p-4 rounded-xl border cursor-pointer transition-all ${selectedAuditId === audit.id ? 'border-cyan-500 bg-cyan-500/10' : 'border-zinc-800 bg-black/40 hover:border-zinc-600'}`}>
                     <div className="flex justify-between items-start mb-2">
                       <span className="text-xs font-mono font-bold text-zinc-300 truncate pr-4">
                         {audit.support_tickets?.subject || 'Unknown Subject'}
