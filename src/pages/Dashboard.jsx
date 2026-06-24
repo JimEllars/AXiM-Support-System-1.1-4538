@@ -6,6 +6,7 @@ import OnyxCommandHub from '../components/OnyxCommandHub';
 import CreateTicketModal from '../components/CreateTicketModal';
 import BatchTriageModal from '../components/modals/BatchTriageModal';
 import SystemBroadcastModal from '../components/modals/SystemBroadcastModal';
+import PayloadTraceInspectorModal from '../components/modals/PayloadTraceInspectorModal';
 import SupportMetrics from '../components/analytics/SupportMetrics';
 import DLQMonitorBlock from '../components/tickets/DLQMonitorBlock';
 import AgentPresence from '../components/AgentPresence';
@@ -142,6 +143,8 @@ export default function Dashboard() {
         isOpen={modalType === 'broadcast'} 
         onClose={() => setModalType(null)}
       />
+
+      <PayloadTraceInspectorModal />
     </div>
   );
 }

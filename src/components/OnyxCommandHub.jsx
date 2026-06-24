@@ -76,8 +76,6 @@ export default function OnyxCommandHub() {
             setSearchQuery('');
             inputRef.current?.blur();
             setIsProcessing(false);
-
-            // Fire global store setter to reveal diagnostic frame
             useTicketStore.getState().triggerDeepTraceInspection(targetTraceId);
             return;
           }
