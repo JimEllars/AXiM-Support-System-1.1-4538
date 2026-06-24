@@ -50,8 +50,15 @@ export const useTicketStore = create((set, get) => ({
   subscribeToTicketChanges: () => {
     const channel = supabase
       .channel('global-tickets-feed')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'support_tickets' }, () => {
-        get().fetchTickets();
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'support_tickets' }, (payload) => {
+        set((state) => ({ tickets: [payload.new, ...state.tickets] }));
+        // Optional: Dispatch a global toast event here if required by the UI layer
+      })
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'support_tickets' }, (payload) => {
+        set((state) => ({
+          tickets: state.tickets.map(t => t.id === payload.new.id ? payload.new : t),
+          currentTicket: state.currentTicket?.id === payload.new.id ? payload.new : state.currentTicket
+        }));
       })
       .subscribe();
     return () => supabase.removeChannel(channel);
