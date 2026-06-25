@@ -54,7 +54,7 @@ export default function PublicIntake() {
     }
   };
 
-    const handleSubmit = async () => {
+  const handleSubmit = async () => {
     setIsSubmitting(true);
     setSubmitResult(null);
 
