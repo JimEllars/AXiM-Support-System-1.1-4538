@@ -18,6 +18,11 @@ export const useTicketStore = create((set, get) => ({
   setFilters: (newFilters) => set((state) => ({ filters: { ...state.filters, ...newFilters } })),
   setDlqEvents: (events) => set({ dlqEvents: events }),
   toggleTerminalStream: () => set((state) => ({ isTerminalStreamPaused: !state.isTerminalStreamPaused })),
+  updateTypingStatus: (isTyping, agentInfo) => {
+    // Normally this would broadcast via Supabase Realtime presence
+    // For this mock, we just console log the presence update
+    console.log("Typing presence:", { isTyping, agentInfo });
+  },
 
   fetchTickets: async () => {
     set({ isLoading: true });

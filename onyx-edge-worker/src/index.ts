@@ -1207,7 +1207,18 @@ const { data: ticket, error: ticketError } = await supabase
                   contentType: file.type,
                   upsert: false,
                 });
-              if (uploadError) logErr(supabase, logCtx, uploadError, ctx);
+              if (uploadError) {
+                  logErr(supabase, logCtx, uploadError, ctx);
+              } else {
+                  // CRITICAL FIX: Bind the storage artifact to the relational database table
+                  await supabase.from("support_attachments").insert({
+                     ticket_id: ticket.id,
+                     file_name: file.name,
+                     file_size: file.buffer.byteLength,
+                     content_type: file.type,
+                     file_path: fullPath
+                  });
+              }
             }
 
             // Analyze and insert

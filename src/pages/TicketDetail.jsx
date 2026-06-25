@@ -1,31 +1,52 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabaseClient';
+import { useTicketStore } from '../store/useTicketStore';
 import toast from 'react-hot-toast';
 import MessageThread from '../components/tickets/MessageThread';
 import AutoDraftWhisper from '../components/tickets/AutoDraftWhisper';
 import Customer360 from '../components/tickets/Customer360';
-import { FiArrowLeft, FiSend, FiLock, FiUnlock, FiCheckCircle } from 'react-icons/fi';
+import { FiArrowLeft, FiSend, FiLock, FiUnlock, FiCheckCircle, FiPaperclip, FiFileText } from 'react-icons/fi';
 
 export default function TicketDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
   const [ticket, setTicket] = useState(null);
+  const [attachments, setAttachments] = useState([]);
   const [replyText, setReplyText] = useState('');
   const [isInternal, setIsInternal] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const { updateTypingStatus } = useTicketStore();
+  const typingTimeoutRef = React.useRef(null);
+
+  const handleTyping = (e) => {
+    setReplyText(e.target.value);
+
+    // Fire typing indicator presence
+    updateTypingStatus(true, { agentId: "dash-user-1", name: "Agent" });
+
+    if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+    typingTimeoutRef.current = setTimeout(() => {
+      updateTypingStatus(false, { agentId: "dash-user-1", name: "Agent" });
+    }, 2000);
+  };
 
   useEffect(() => {
-    const fetchTicket = async () => {
+    const fetchTicketData = async () => {
       const { data, error } = await supabase
         .from('support_tickets')
         .select('*, contacts_ax2024(*)')
         .eq('id', id)
         .single();
       if (error) toast.error("Failed to load ticket.");
-      else setTicket(data);
+
+      const { data: attData } = await supabase
+        .from("support_attachments")
+        .select("*")
+        .eq("ticket_id", id);
+      if (attData) setAttachments(attData);
     };
-    fetchTicket();
+    fetchTicketData();
   }, [id]);
 
   const handleSendReply = async () => {
@@ -92,6 +113,30 @@ export default function TicketDetail() {
             </div>
           </div>
 
+          {attachments.length > 0 && (
+            <div className="glass-panel bg-cyan-950/10 border-cyan-900/30 rounded-3xl p-6 mb-6">
+              <h3 className="text-xs font-mono font-bold uppercase tracking-widest text-cyan-500 mb-3 flex items-center gap-2">
+                <FiPaperclip /> Attached Diagnostics
+              </h3>
+              <div className="flex flex-wrap gap-3">
+                {attachments.map(att => (
+                  <a
+                    key={att.id}
+                    href={`${import.meta.env.VITE_SUPABASE_URL}/storage/v1/object/public/ticket_attachments/${att.file_path}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex items-center gap-2 px-4 py-2 bg-black/50 border border-zinc-800 hover:border-cyan-500/50 rounded-xl transition-all group"
+                  >
+                    <FiFileText className="text-zinc-500 group-hover:text-cyan-400 transition-colors" />
+                    <div>
+                      <p className="text-sm font-medium text-zinc-300 group-hover:text-white transition-colors">{att.file_name}</p>
+                      <p className="text-[10px] text-zinc-600 font-mono uppercase">{(att.file_size / 1024 / 1024).toFixed(2)} MB</p>
+                    </div>
+                  </a>
+                ))}
+              </div>
+            </div>
+          )}
           <AutoDraftWhisper ticketId={ticket.id} onApplyDraft={(draft) => setReplyText(draft)} />
 
           <div className="glass-panel bg-zinc-950/80 border-zinc-800 rounded-3xl p-8">
@@ -111,7 +156,7 @@ export default function TicketDetail() {
               </div>
               <textarea
                 value={replyText}
-                onChange={(e) => setReplyText(e.target.value)}
+                onChange={handleTyping}
                 placeholder={isInternal ? "Add an internal note visible only to agents..." : "Draft a response to the customer..."}
                 className={`w-full min-h-[150px] bg-black/50 border rounded-2xl p-4 text-sm focus:outline-none transition-colors resize-y ${isInternal ? 'border-amber-500/30 focus:border-amber-500/60' : 'border-zinc-800 focus:border-cyan-500/50'}`}
                 onKeyDown={(e) => {
