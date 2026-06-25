@@ -267,6 +267,7 @@ export default function TicketList({ onSelectTicket, activeQueue = "All" }) {
           const customerName = ticket.contacts_ax2024?.name || 'Unknown Contact';
 
 
+          const isNew = (new Date().getTime() - new Date(ticket.created_at).getTime()) < 5 * 60 * 1000; // 5 minutes
           const isSelected = selectedTicketIds.includes(ticket.id);
           
           return (
@@ -299,37 +300,30 @@ export default function TicketList({ onSelectTicket, activeQueue = "All" }) {
                   <h4 className="font-bold text-zinc-100 group-hover:text-cyan-400 transition-colors tracking-tight">
                     {ticket.subject}
                   </h4>
-                  <div className="flex items-center gap-3 mt-1">
-                    <span className="mono-font text-[10px] text-zinc-600 font-bold uppercase tracking-tighter">#{ticket.id.slice(0, 8)}</span>
-                    <div className="w-1 h-1 rounded-full bg-zinc-800" />
-                    <span className={`text-[10px] font-black uppercase tracking-widest ${priorityColor}`}>
-                      {ticket.priority}
-                    </span>
-                    <div className="w-1 h-1 rounded-full bg-zinc-800" />
-                    {/* Omnichannel Source Badging */}
-                    <div className="flex items-center gap-1 text-[10px] font-bold text-zinc-500 tracking-wider">
-                      {customerName}
-                      <span className="ml-1 opacity-60">
-                        {ticket.source === 'website' || ticket.source === 'widget' ? <SafeIcon icon={FiGlobe} /> : ticket.source === 'email' ? <SafeIcon icon={FiMail} /> : <SafeIcon icon={FiMessageSquare} />}
-                      </span>
-                    </div>
+                  <div className="text-xs text-zinc-500 font-medium flex items-center gap-2 mt-1">
+                    <span className="text-zinc-400 font-bold">{customerName}</span>
+                    <span className="w-1 h-1 rounded-full bg-zinc-700"></span>
+                    <span>{new Date(ticket.created_at).toLocaleString()}</span>
                   </div>
                 </div>
               </div>
-              
-              <div className="flex items-center gap-3 shrink-0">
-                {ticket.assigned_department && (
-                  <div onClick={() => onSelectTicket(ticket.id)} className={`px-3 py-1 rounded-lg border text-[9px] font-bold uppercase tracking-widest ${
-                    ticket.assigned_department === 'Engineering' ? 'bg-cyan-500/10 border-cyan-500/20 text-cyan-400' :
-                    ticket.assigned_department === 'Legal_Operations' ? 'bg-purple-500/10 border-purple-500/20 text-purple-400' :
-                    ticket.assigned_department === 'Financial_Systems' ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400' :
-                    'bg-zinc-500/10 border-zinc-500/20 text-zinc-400'
-                  }`}>
-                    {ticket.assigned_department.replace('_', ' ')}
-                  </div>
+              <div className="flex items-center gap-6">
+                {ticket.assignee_id && (
+                    <div className="hidden md:flex items-center gap-2 mr-2">
+                        <div className="w-6 h-6 rounded-full bg-indigo-500/20 border border-indigo-500/50 flex items-center justify-center text-indigo-400 text-[10px] font-bold">
+                            {ticket.assignee_id.slice(0, 2).toUpperCase()}
+                        </div>
+                    </div>
                 )}
                 <div onClick={() => onSelectTicket(ticket.id)}>
-                  <SLABadge breachAt={ticket.sla_breach_at} status={ticket.status} />
+                  <div className="flex items-center gap-2">
+                    <SLABadge breachAt={ticket.sla_breach_at} status={ticket.status} />
+                    {isNew && (
+                      <span className="px-2 py-0.5 bg-cyan-500/20 text-cyan-400 border border-cyan-500/30 rounded text-[9px] font-black uppercase tracking-widest animate-pulse shadow-[0_0_10px_rgba(34,211,238,0.2)]">
+                        New
+                      </span>
+                    )}
+                  </div>
                 </div>
                 <div onClick={() => onSelectTicket(ticket.id)} className={`px-4 py-1.5 rounded-lg border text-[10px] font-black uppercase tracking-[0.15em] ${style.color} ${style.border} ${style.bg}`}>
                   {ticket.status}
