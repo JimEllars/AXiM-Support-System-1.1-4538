@@ -68,48 +68,29 @@ export default function MessageThread({ ticketId }) {
   return (
     <div className="space-y-8">
       {messages.map((msg) => {
-        const isAI = msg.sender_id === 'onyx_system';
+        const isCustomer = msg.sender_id === 'customer';
         const isInternal = msg.is_internal_note;
-        
+
         return (
-          <div key={msg.id} className={`flex gap-6 ${isInternal ? 'opacity-90' : ''}`}>
-            <div className={`w-12 h-12 rounded-2xl flex items-center justify-center shrink-0 border-2 transition-all shadow-lg ${
-              isAI ? 'bg-fuchsia-500/10 border-fuchsia-500/40 text-fuchsia-500' :
-              isInternal ? 'bg-amber-500/10 border-amber-500/40 text-amber-500' :
-              'bg-zinc-800 border-zinc-700 text-zinc-400'
+          <div key={msg.id} className={`flex flex-col ${isCustomer ? 'items-start' : 'items-end'} mb-6`}>
+            <div className={`max-w-[85%] rounded-2xl p-4 ${
+              isCustomer
+                ? 'bg-zinc-800/80 border border-zinc-700 text-zinc-200 shadow-md'
+                : isInternal
+                  ? 'bg-[repeating-linear-gradient(45deg,transparent,transparent_10px,rgba(245,158,11,0.02)_10px,rgba(245,158,11,0.02)_20px)] bg-amber-950/10 border-amber-500/30 text-amber-100/90 shadow-[0_0_15px_rgba(245,158,11,0.05)]'
+                  : 'bg-cyan-950/30 border border-cyan-500/20 text-cyan-100'
             }`}>
-              <SafeIcon icon={isAI ? FiCpu : isInternal ? FiLock : FiUser} className="text-xl" />
-            </div>
-            
-            <div className={`flex-1 p-6 rounded-[1.5rem] border transition-all relative overflow-hidden ${
-              isAI ? 'bg-[repeating-linear-gradient(45deg,transparent,transparent_10px,rgba(217,70,239,0.03)_10px,rgba(217,70,239,0.03)_20px)] border-fuchsia-500/30 neon-border-fuchsia' :
-              isInternal ? 'bg-[repeating-linear-gradient(45deg,transparent,transparent_10px,rgba(245,158,11,0.02)_10px,rgba(245,158,11,0.02)_20px)] bg-amber-950/10 border-amber-500/30 shadow-[0_0_15px_rgba(245,158,11,0.05)]' :
-              'bg-zinc-900/40 border-zinc-800 shadow-xl'
-            }`}>
-              <div className="flex justify-between items-center mb-4">
-                <div className="flex items-center gap-3">
-                  <span className={`text-[10px] font-black uppercase tracking-[0.2em] flex items-center gap-2 ${
-                    isAI ? 'text-fuchsia-400' : isInternal ? 'text-amber-400' : 'text-zinc-500'
-                  }`}>
-                    {isAI ? 'Onyx Intelligence' : isInternal ? 'Agent Internal' : 'Customer Relay'}
-                  </span>
-                  {(isInternal || isAI) && (
-                    <span className="absolute top-4 right-4 px-2 py-0.5 bg-amber-500/15 text-amber-400 text-[9px] font-black uppercase tracking-widest rounded border border-amber-500/30 shadow-sm backdrop-blur-sm">
-                      👁️ Internal Note
-                    </span>
-                  )}
-                  {isAI && <div className="w-1.5 h-1.5 rounded-full bg-fuchsia-500 animate-pulse" />}
-                </div>
-                <span className="mono-font text-[10px] text-zinc-600 font-bold">
-                  {formatDistanceToNow(new Date(msg.created_at))} AGO
+              <div className="flex items-center gap-2 mb-2">
+                <span className={`text-[10px] font-black tracking-widest uppercase ${isCustomer ? 'text-zinc-400' : isInternal ? 'text-amber-500' : 'text-cyan-500'}`}>
+                  {isCustomer ? 'Public Intake / Customer' : isInternal ? 'System Telemetry' : 'Support Team'}
+                </span>
+                <span className="text-[9px] text-zinc-500 font-mono">
+                  {new Date(msg.created_at).toLocaleString()}
                 </span>
               </div>
-              <div className={`prose prose-invert max-w-none text-zinc-300 leading-relaxed font-medium ${isAI ? 'mono-font text-sm' : ''}`}>
-                <ReactMarkdown>{msg.message_body}</ReactMarkdown>
+              <div className="prose prose-invert max-w-none text-sm whitespace-pre-wrap">
+                {msg.message_body}
               </div>
-              {msg.metadata?.hitl_log_id && (
-                  <ActionProposalBlock hitlLog={{ id: msg.metadata.hitl_log_id }} />
-              )}
             </div>
           </div>
         );

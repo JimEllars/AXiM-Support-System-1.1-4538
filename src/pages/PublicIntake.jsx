@@ -22,6 +22,8 @@ export default function PublicIntake() {
   const [fileError, setFileError] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitResult, setSubmitResult] = useState(null);
+  const [submitSuccess, setSubmitSuccess] = useState(false);
+  const [ticketIdReceipt, setTicketIdReceipt] = useState(null);
 
   const ONYX_WORKER_URL = import.meta.env.VITE_ONYX_WORKER_URL || 'http://localhost:54321/functions/v1/onyx-bridge';
 
@@ -93,67 +95,60 @@ export default function PublicIntake() {
       const encryptedBase64 = btoa(String.fromCharCode(...new Uint8Array(encryptedBuffer)));
       const ivBase64 = btoa(String.fromCharCode(...iv));
 
-      let bodyToSend;
-      let headersToSend = {};
+      const workerUrl = import.meta.env.VITE_EDGE_WORKER_URL || 'http://localhost:8787';
+
+      let fetchOptions = {
+        method: 'POST',
+        headers: {
+          'Accept': 'application/json'
+        }
+      };
 
       if (file && file.size > 0) {
-        // If there is an attachment, we must use FormData, but we can send the encrypted payload as fields
-        const submitData = new FormData();
-        submitData.append('encrypted_payload', encryptedBase64);
-        submitData.append('iv', ivBase64);
-        submitData.append('attachment', file);
-        bodyToSend = submitData;
+        const formData = new FormData();
+        formData.append('encrypted_payload', encryptedBase64);
+        formData.append('iv', ivBase64);
+        formData.append('attachment', file);
+        fetchOptions.body = formData;
       } else {
-        // If no attachment, send as pure JSON
-        bodyToSend = JSON.stringify({
+        fetchOptions.headers['Content-Type'] = 'application/json';
+        fetchOptions.body = JSON.stringify({
           encrypted_payload: encryptedBase64,
           iv: ivBase64
         });
-        headersToSend = {
-          'Content-Type': 'application/json'
-        };
       }
 
-      const response = await fetch(`${ONYX_WORKER_URL}/api/v1/webhooks/public-ingress`, {
-        method: 'POST',
-        headers: headersToSend,
-        body: bodyToSend
-      });
+      const response = await fetch(`${workerUrl}/api/intake`, fetchOptions);
+
+      if (!response.ok) throw new Error('Ingestion gateway rejected the payload.');
 
       const data = await response.json();
-
-      if (response.ok) {
-        setSubmitResult({ success: true, ticket_id: data.ticket_id });
-      } else {
-        setSubmitResult({ success: false, error: data.error || 'Submission failed' });
-      }
-    } catch (error) {
-      setSubmitResult({ success: false, error: 'Network error or server unreachable' });
+      setSubmitSuccess(true);
+      setTicketIdReceipt(data.ticket_id); // Required for Task 4
+    } catch (err) {
+      setFileError('Transmission failed. Please check network connectivity and try again.');
+      setSubmitResult({ success: false, error: 'Transmission failed. Please check network connectivity and try again.' });
     } finally {
       setIsSubmitting(false);
     }
   };
 
-  if (submitResult?.success) {
+  if (submitSuccess) {
     return (
-      <div className="min-h-screen bg-black flex flex-col justify-center items-center p-4">
-         <motion.div
-            initial={{ opacity: 0, scale: 0.9 }}
-            animate={{ opacity: 1, scale: 1 }}
-            className="bg-zinc-900/50 backdrop-blur-xl border border-zinc-800 rounded-[2rem] p-8 max-w-md w-full text-center shadow-2xl"
-         >
-            <div className="w-20 h-20 bg-emerald-500/10 rounded-full flex items-center justify-center mx-auto mb-6">
-                <FiCheckCircle className="text-4xl text-emerald-400" />
-            </div>
-            <h2 className="text-2xl font-bold text-white mb-2">Request Submitted</h2>
-            <p className="text-zinc-400 mb-6">
-                Thank you. Onyx AI is currently reviewing your request.
-            </p>
-            <div className="bg-black/50 rounded-xl p-4 border border-zinc-800 mb-6">
-                <p className="text-xs text-zinc-500 uppercase tracking-wider mb-1">Ticket ID</p>
-                <p className="font-mono text-cyan-400 text-sm break-all">{submitResult.ticket_id}</p>
-            </div>
-         </motion.div>
+      <div className="min-h-screen bg-black flex items-center justify-center p-4">
+        <div className="max-w-md w-full glass-panel bg-zinc-950/80 border-emerald-500/30 p-8 rounded-3xl text-center space-y-4">
+          <div className="w-16 h-16 bg-emerald-500/10 border border-emerald-500/30 rounded-full flex items-center justify-center mx-auto text-emerald-400 text-2xl mb-4">
+            ✓
+          </div>
+          <h2 className="text-2xl font-black text-emerald-400 tracking-tight">Request Ingested</h2>
+          <p className="text-zinc-400 text-sm">Your support diagnostics have been securely routed to the active resolution swarm.</p>
+          <div className="bg-black/50 border border-zinc-800 p-4 rounded-xl font-mono text-xs text-zinc-500">
+            TRACE_ID: <span className="text-cyan-400">{ticketIdReceipt || 'PENDING_CONFIRMATION'}</span>
+          </div>
+          <button onClick={() => window.location.reload()} className="mt-6 w-full py-3 bg-zinc-900 hover:bg-zinc-800 text-zinc-300 text-xs font-bold uppercase tracking-widest rounded-xl transition-colors">
+            Submit Another Trace
+          </button>
+        </div>
       </div>
     );
   }
