@@ -81,6 +81,28 @@ export default function OnyxCommandHub() {
           }
         }
 
+        if (searchQuery.trim() === '/ping edge') {
+            setSearchQuery('');
+            inputRef.current?.blur();
+            setIsProcessing(true);
+            const start = performance.now();
+            try {
+              const workerUrl = import.meta.env.VITE_EDGE_WORKER_URL || 'http://localhost:8787';
+              await fetch(`${workerUrl}/api/v1/health`);
+              const ms = Math.round(performance.now() - start);
+              toast.success(`Edge Gateway Healthy (${ms}ms)`, {
+                style: { background: '#09090b', color: '#10b981', border: '1px solid rgba(16,185,129,0.2)' }
+              });
+            } catch (err) {
+              toast.error('Edge Gateway Unreachable', {
+                style: { background: '#09090b', color: '#f43f5e', border: '1px solid rgba(244,63,94,0.2)' }
+              });
+            } finally {
+              setIsProcessing(false);
+            }
+            return;
+        }
+
         const result = await onyxService.parseCommand(searchQuery, ticketId);
 
         if (result && result.intent === 'TOOL_PROPOSAL') {

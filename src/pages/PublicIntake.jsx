@@ -54,12 +54,11 @@ export default function PublicIntake() {
     }
   };
 
-  const handleSubmit = async () => {
+    const handleSubmit = async () => {
     setIsSubmitting(true);
     setSubmitResult(null);
 
     try {
-      // Prepare JSON payload
       const payloadObj = {
         customer_name: formData.customer_name,
         customer_email: formData.customer_email,
@@ -69,8 +68,7 @@ export default function PublicIntake() {
         source: 'website'
       };
 
-      // Client-Side AES-256-GCM Encryption
-      const secretKey = import.meta.env.VITE_ONYX_SECRET;
+      const secretKey = import.meta.env.VITE_ONYX_SECRET || 'fallback_dev_secret_key_change_me_in_prod';
       const secretBuffer = new TextEncoder().encode(secretKey);
       const hashBuffer = await window.crypto.subtle.digest('SHA-256', secretBuffer);
 
@@ -118,16 +116,21 @@ export default function PublicIntake() {
         });
       }
 
-      const response = await fetch(`${workerUrl}/api/intake`, fetchOptions);
+      // CRITICAL FIX: Target the correct API route for edge decryption
+      const response = await fetch(`${workerUrl}/api/v1/webhooks/public-ingress`, fetchOptions);
 
-      if (!response.ok) throw new Error('Ingestion gateway rejected the payload.');
+      if (!response.ok) {
+         const errText = await response.text();
+         throw new Error(`Gateway rejected payload: ${response.status}`);
+      }
 
       const data = await response.json();
       setSubmitSuccess(true);
-      setTicketIdReceipt(data.ticket_id); // Required for Task 4
+      setTicketIdReceipt(data.ticket_id);
     } catch (err) {
+      console.error("Ingestion error:", err);
       setFileError('Transmission failed. Please check network connectivity and try again.');
-      setSubmitResult({ success: false, error: 'Transmission failed. Please check network connectivity and try again.' });
+      setSubmitResult({ success: false, error: 'Transmission failed. Secure tunnel could not be established.' });
     } finally {
       setIsSubmitting(false);
     }

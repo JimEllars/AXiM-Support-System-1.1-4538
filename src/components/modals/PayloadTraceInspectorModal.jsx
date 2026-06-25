@@ -25,6 +25,17 @@ export default function PayloadTraceInspectorModal() {
 
   if (!isInspectionModalOpen) return null;
 
+  const renderPayload = () => {
+    if (!traceData) return 'Awaiting packet resolution...';
+    const p = traceData.payload || traceData;
+    if (typeof p === 'string') return p;
+    try {
+      return JSON.stringify(p, null, 2);
+    } catch (e) {
+      return String(p);
+    }
+  };
+
   return (
     <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-[150] flex items-center justify-center p-4">
       <div className="bg-[#09090b]/95 border border-zinc-800/80 w-full max-w-3xl rounded-2xl max-h-[85vh] flex flex-col overflow-hidden shadow-[0_0_50px_rgba(34,211,238,0.1)]">
@@ -49,8 +60,8 @@ export default function PayloadTraceInspectorModal() {
 
           <div className="bg-black/50 p-4 rounded-xl border border-zinc-800/50">
             <span className="text-zinc-600 font-bold uppercase tracking-widest text-[10px] block mb-3">Exception Metadata Stream</span>
-            <pre className="text-[11px] text-zinc-300 overflow-x-auto p-4 bg-[#09090b] rounded-lg border border-zinc-900 shadow-inner max-h-[400px]">
-              {traceData ? JSON.stringify(traceData.payload || traceData, null, 2) : 'Awaiting packet resolution...'}
+            <pre className="text-[11px] text-zinc-300 overflow-x-auto p-4 bg-[#09090b] rounded-lg border border-zinc-900 shadow-inner max-h-[400px] whitespace-pre-wrap break-words">
+              {renderPayload()}
             </pre>
           </div>
         </div>
