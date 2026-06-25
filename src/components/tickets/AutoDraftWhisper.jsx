@@ -1,64 +1,42 @@
-import React from 'react';
-import SafeIcon from '../../common/SafeIcon';
-import * as FiIcons from 'react-icons/fi';
-import { motion } from 'framer-motion';
+import React, { useEffect, useState } from 'react';
+import { supabase } from '../../lib/supabaseClient';
+import { FiCpu, FiCheck } from 'react-icons/fi';
 
-const { FiCpu, FiCopy, FiZap, FiCheck } = FiIcons;
+export default function AutoDraftWhisper({ ticketId, onApplyDraft }) {
+  const [draft, setDraft] = useState(null);
 
-export default function AutoDraftWhisper({ draft, onApply }) {
-  React.useEffect(() => {
-    const handleKeyDown = (e) => {
-      if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
-        if (draft) {
-          e.preventDefault();
-          onApply(draft);
-        }
-      }
+  useEffect(() => {
+    const fetchDraft = async () => {
+      const { data } = await supabase
+        .from('ticket_ai_telemetry')
+        .select('auto_response_draft, confidence_score')
+        .eq('ticket_id', ticketId)
+        .single();
+      if (data && data.auto_response_draft) setDraft(data);
     };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [draft, onApply]);
+    if (ticketId) fetchDraft();
+  }, [ticketId]);
 
   if (!draft) return null;
 
   return (
-    <motion.div 
-      initial={{ opacity: 0, y: 10 }}
-      animate={{ opacity: 1, y: 0 }}
-      className="mb-6 p-6 rounded-3xl bg-fuchsia-500/5 border border-fuchsia-500/20 neon-border-fuchsia relative overflow-hidden group"
-    >
-      <div className="absolute top-0 right-0 p-8 opacity-5 pointer-events-none">
-        <SafeIcon icon={FiCpu} className="text-8xl text-fuchsia-500" />
-      </div>
-
-      <div className="flex items-center justify-between mb-4">
-        <div className="flex items-center gap-3">
-          <div className="w-8 h-8 rounded-lg bg-fuchsia-500 flex items-center justify-center text-black">
-            <SafeIcon icon={FiZap} />
-          </div>
-          <span className="text-[10px] font-black text-fuchsia-400 uppercase tracking-[0.2em]">
-            Onyx AI Suggested Reply
-          </span>
+    <div className="bg-fuchsia-950/20 border border-fuchsia-500/30 rounded-2xl p-5 mb-6 relative overflow-hidden shadow-[0_0_20px_rgba(217,70,239,0.05)]">
+      <div className="absolute top-0 left-0 w-1 h-full bg-fuchsia-500"></div>
+      <div className="flex items-center justify-between mb-3">
+        <div className="flex items-center gap-2 text-fuchsia-400 text-[10px] font-black uppercase tracking-widest">
+          <FiCpu className="animate-pulse text-sm" />
+          Onyx Suggested Response ({draft.confidence_score}% Confidence)
         </div>
-        <button 
-          onClick={() => onApply(draft)}
-          className="flex items-center gap-2 px-4 py-1.5 bg-fuchsia-500 hover:bg-fuchsia-400 text-black rounded-xl text-[10px] font-black uppercase tracking-widest transition-all shadow-lg shadow-fuchsia-500/20"
+        <button
+          onClick={() => onApplyDraft(draft.auto_response_draft)}
+          className="flex items-center gap-2 px-3 py-1.5 bg-fuchsia-500/20 hover:bg-fuchsia-500/40 text-fuchsia-300 rounded-lg text-xs font-bold uppercase transition-colors"
         >
-          <SafeIcon icon={FiCheck} />
-          Apply Draft ⌘↵
+          <FiCheck /> Apply to Editor
         </button>
       </div>
-
-      <p className="text-zinc-300 mono-font text-sm leading-relaxed border-l-2 border-fuchsia-500/30 pl-4 py-1 italic">
-        "{draft}"
-      </p>
-      
-      <div className="mt-4 flex items-center gap-2">
-        <div className="w-1.5 h-1.5 rounded-full bg-fuchsia-500 animate-pulse" />
-        <span className="text-[9px] font-black text-fuchsia-500/60 uppercase tracking-widest">
-          Draft generated based on case context & KB match
-        </span>
+      <div className="text-zinc-300 text-sm font-mono whitespace-pre-wrap pl-2 border-l border-fuchsia-500/20">
+        {draft.auto_response_draft}
       </div>
-    </motion.div>
+    </div>
   );
 }
