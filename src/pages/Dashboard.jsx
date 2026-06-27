@@ -22,6 +22,7 @@ export default function Dashboard() {
   const [modalType, setModalType] = useState(null); // 'create', 'batch', 'broadcast'
   const [refreshKey, setRefreshKey] = useState(0);
   const [activeQueue, setActiveQueue] = useState('All');
+  const [statusFilter, setStatusFilter] = useState('all');
   const queueTabs = ['All', 'Engineering', 'Legal_Operations', 'Financial_Systems', 'General Support'];
 
   const handleAction = (id) => {
@@ -122,7 +123,23 @@ export default function Dashboard() {
             ))}
           </div>
 
-          <TicketList onSelectTicket={(id) => navigate(`/ticket/${id}`)} activeQueue={activeQueue} />
+          <div className="mb-6 flex items-center gap-2 p-1.5 bg-zinc-950/50 border border-zinc-800/50 rounded-xl w-max">
+            {['all', 'open', 'pending', 'resolved'].map(status => (
+              <button
+                key={status}
+                onClick={() => setStatusFilter(status)}
+                className={`px-4 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${
+                  statusFilter === status
+                    ? 'bg-cyan-500/20 text-cyan-400 border border-cyan-500/30 shadow-[0_0_10px_rgba(34,211,238,0.1)]'
+                    : 'text-zinc-500 hover:text-zinc-300 border border-transparent'
+                }`}
+              >
+                {status}
+              </button>
+            ))}
+          </div>
+
+          <TicketList onSelectTicket={(id) => navigate(`/ticket/${id}`)} activeQueue={activeQueue} statusFilter={statusFilter} />
         </main>
           </div>
         </div>

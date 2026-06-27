@@ -91,6 +91,15 @@ export default function MessageThread({ ticketId }) {
               <div className="prose prose-invert max-w-none text-sm whitespace-pre-wrap">
                 {msg.message_body}
               </div>
+
+              {/* CRITICAL INTEGRATION: Surface Action Proposals */}
+              {msg.metadata?.hitl_log_id && (
+                <div className="mt-4 border-t border-black/20 pt-4">
+                  <ActionProposalBlock
+                    hitlLogId={msg.metadata.hitl_log_id}
+                  />
+                </div>
+              )}
             </div>
           </div>
         );
