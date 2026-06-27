@@ -36,7 +36,7 @@ const SkeletonLoader = () => (
   </div>
 );
 
-export default function TicketList({ onSelectTicket, activeQueue = "All" }) {
+export default function TicketList({ onSelectTicket, activeQueue = "All", statusFilter }) {
   const { t } = useTranslation();
   const { tickets, isLoading, fetchTickets, subscribeToTickets, searchQuery, selectedTicketIds, toggleSelectedTicketId } = useTicketStore();
   const { activeOrganization } = useAuthStore();
@@ -47,6 +47,9 @@ export default function TicketList({ onSelectTicket, activeQueue = "All" }) {
 
   // Filter tickets based on queue state, search query, and activeQueue department
   const filteredTickets = tickets.filter(ticket => {
+    // 0. Status Filter
+    if (statusFilter && statusFilter !== 'all' && ticket.status !== statusFilter) return false;
+
     // 1. Department Filter
     if (activeQueue !== 'All' && ticket.assigned_department !== activeQueue) return false;
 

@@ -111,11 +111,12 @@ export default function MemoryHub() {
   };
 
   const handlePublishToVectorStore = async (auditId, updatedText) => {
-    // Preserve baseline state configuration for absolute crash recovery
     const previousAudits = [...pendingAudits];
 
-    // Optimistically filter item out of the UI to ensure 120Hz micro-interaction performance
-    setPendingAudits(prev => prev.filter(item => item.id !== auditId));
+    // Find the specific item before filtering to know its origin table
+    const targetAudit = pendingAudits.find(a => a.id === auditId || a.ticket_id === auditId);
+
+    setPendingAudits(prev => prev.filter(item => item.id !== auditId && item.ticket_id !== auditId));
 
     try {
       const { error: insertError } = await supabase
@@ -124,12 +125,14 @@ export default function MemoryHub() {
 
       if (insertError) throw insertError;
 
-      const { error: updateError } = await supabase
-        .from('ticket_ai_telemetry')
-        .update({ is_curated: true })
-        .eq('id', auditId);
-
-      if (updateError) throw updateError;
+      // CRITICAL FIX: Direct the state resolution to the correct origin table
+      if (targetAudit?.is_hitl_log) {
+        const { error: hitlError } = await supabase.from('hitl_audit_logs').update({ status: 'executed' }).eq('id', targetAudit.id);
+        if (hitlError) throw hitlError;
+      } else {
+        const { error: teleError } = await supabase.from('ticket_ai_telemetry').update({ is_curated: true }).eq('id', auditId);
+        if (teleError) throw teleError;
+      }
 
       showNotification({ type: 'success', message: 'KNOWLEDGE_BASE_VECTOR_INDEXED' });
       setSelectedAuditId(null);
