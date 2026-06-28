@@ -77,6 +77,19 @@ export default function TicketDetail() {
     }
   };
 
+  const handleBroadcastOutage = async () => {
+    if (!window.confirm("Broadcast this issue to the public AXiM Health Status page?")) return;
+    try {
+      await supabase.from("events_ax2024").insert({
+        type: "status_broadcast",
+        payload: { ticket_id: id, subject: ticket.subject, status: 'investigating', timestamp: new Date().toISOString() }
+      });
+      toast.success('Public Status Page Updated', { icon: '📢', style: { background: '#09090b', color: '#f59e0b', border: '1px solid rgba(245,158,11,0.3)' } });
+    } catch (err) {
+      toast.error('Failed to broadcast status.');
+    }
+  };
+
   const handleResolve = async () => {
     if (!window.confirm("Mark this ticket as Resolved?")) return;
     try {
@@ -102,14 +115,28 @@ export default function TicketDetail() {
           <div className="glass-panel bg-zinc-950/80 border-zinc-800 rounded-3xl p-8">
             <div className="flex justify-between items-start mb-4">
               <h1 className="text-3xl font-black tracking-tight">{ticket.subject}</h1>
-              <span className={`px-3 py-1 rounded text-[10px] uppercase font-black tracking-widest ${ticket.priority === 'urgent' ? 'bg-rose-500/20 text-rose-400 border border-rose-500/30' : 'bg-cyan-500/20 text-cyan-400 border border-cyan-500/30'}`}>
-                {ticket.priority}
-              </span>
+              <div className="flex gap-2 items-center">
+                {ticket.priority === 'urgent' && ticket.status !== 'resolved' && (
+                  <button onClick={handleBroadcastOutage} className="px-3 py-1 rounded text-[10px] uppercase font-black tracking-widest bg-amber-500/20 text-amber-400 border border-amber-500/30 hover:bg-amber-500/30 transition-colors">
+                    📢 Broadcast Status
+                  </button>
+                )}
+                {ticket.priority !== 'urgent' && (
+                  <button className="px-3 py-1 rounded text-[10px] uppercase font-black tracking-widest bg-rose-500/20 text-rose-400 border border-rose-500/30 hover:bg-rose-500/30 transition-colors">
+                    Escalate
+                  </button>
+                )}
+                <span className={`px-3 py-1 rounded text-[10px] uppercase font-black tracking-widest ${ticket.priority === 'urgent' ? 'bg-rose-500/20 text-rose-400 border border-rose-500/30' : 'bg-cyan-500/20 text-cyan-400 border border-cyan-500/30'}`}>
+                  {ticket.priority}
+                </span>
+              </div>
             </div>
-            <div className="flex items-center gap-4 text-xs font-mono text-zinc-500">
-              <span>ID: {ticket.id}</span>
-              <span>Status: <span className="text-zinc-300">{ticket.status}</span></span>
-              <span>Customer: <span className="text-zinc-300">{ticket.contacts_ax2024?.email || 'Unknown'}</span></span>
+            <div className="flex items-center gap-3 text-[11px] font-mono text-zinc-500 mt-4 flex-wrap">
+              <span className="bg-zinc-950 px-2.5 py-1.5 rounded-lg border border-zinc-800/80 shadow-inner text-zinc-400">ID: {ticket.id.split('-')[0]}</span>
+              <span className="bg-zinc-950 px-2.5 py-1.5 rounded-lg border border-zinc-800/80 shadow-inner">Status: <span className="text-white font-bold">{ticket.status}</span></span>
+              <span className="bg-zinc-950 px-2.5 py-1.5 rounded-lg border border-zinc-800/80 shadow-inner">Dept: <span className="text-cyan-400 font-bold">{ticket.assigned_department || 'General'}</span></span>
+              <span className="bg-zinc-950 px-2.5 py-1.5 rounded-lg border border-zinc-800/80 shadow-inner">Source: <span className="text-emerald-400 font-bold uppercase">{ticket.metadata?.source || 'Web'}</span></span>
+              <span className="bg-zinc-950 px-2.5 py-1.5 rounded-lg border border-zinc-800/80 shadow-inner">Customer: <span className="text-fuchsia-400 font-bold">{ticket.contacts_ax2024?.email || 'Unknown'}</span></span>
             </div>
           </div>
 
