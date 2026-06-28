@@ -137,10 +137,8 @@ export default function MemoryHub() {
       showNotification({ type: 'success', message: 'KNOWLEDGE_BASE_VECTOR_INDEXED' });
       setSelectedAuditId(null);
       setSelectedAuditText('');
-      fetchEntries();
     } catch (error) {
-      console.error('Vector database ingestion failure, triggering safe UI rollback:', error);
-      // Hard transactional recovery logic preventing loss of human-curated data strings
+      console.error('Vector database ingestion failure:', error);
       setPendingAudits(previousAudits);
       showNotification({ type: 'error', message: 'DATABASE_TRANSACTION_ABORTED_ROLLBACK_TRIGGERED' });
     }

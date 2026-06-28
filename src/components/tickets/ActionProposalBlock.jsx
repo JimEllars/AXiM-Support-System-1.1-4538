@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { FiZap, FiCheck } from 'react-icons/fi';
 import { supabase } from '../../lib/supabaseClient';
 import toast from 'react-hot-toast';
-
+import { v4 as uuidv4 } from 'uuid';
 
 export default function ActionProposalBlock({ hitlLogId, onComplete }) {
   const [isExecuting, setIsExecuting] = useState(false);
@@ -19,7 +19,7 @@ export default function ActionProposalBlock({ hitlLogId, onComplete }) {
   const handleExecute = async () => {
     setIsExecuting(true);
     try {
-      const idempotencyKey = crypto.randomUUID();
+      const idempotencyKey = uuidv4();
       const workerUrl = import.meta.env.VITE_EDGE_WORKER_URL || 'http://localhost:8787';
 
       const res = await fetch(`${workerUrl}/api/v1/actions/resolve`, {
