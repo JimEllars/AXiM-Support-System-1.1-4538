@@ -89,7 +89,7 @@ export default function MessageThread({ ticketId }) {
                 </span>
               </div>
               <div className="prose prose-invert max-w-none text-sm whitespace-pre-wrap">
-                {msg.message_body}
+                <ReactMarkdown>{msg.message_body}</ReactMarkdown>
               </div>
 
               {/* CRITICAL INTEGRATION: Surface Action Proposals */}

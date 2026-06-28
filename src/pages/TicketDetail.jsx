@@ -9,6 +9,7 @@ import Customer360 from '../components/tickets/Customer360';
 import { FiArrowLeft, FiSend, FiLock, FiUnlock, FiCheckCircle, FiPaperclip, FiFileText } from 'react-icons/fi';
 
 export default function TicketDetail() {
+  const { fetchTickets } = useTicketStore();
   const { id } = useParams();
   const navigate = useNavigate();
   const [ticket, setTicket] = useState(null);
@@ -48,6 +49,21 @@ export default function TicketDetail() {
     };
     fetchTicketData();
   }, [id]);
+
+
+  const handleClaim = async () => {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error("Authentication required");
+
+      await supabase.from('support_tickets').update({ assignee_id: user.id }).eq('id', id);
+      setTicket(prev => ({ ...prev, assignee_id: user.id }));
+      fetchTickets(); // Sync global
+      toast.success('Ticket claimed successfully.', { style: { background: '#09090b', color: '#10b981', border: '1px solid rgba(16,185,129,0.3)' } });
+    } catch (err) {
+      toast.error('Failed to claim ticket.');
+    }
+  };
 
   const handleSendReply = async () => {
     if (!replyText.trim()) return;
@@ -137,6 +153,15 @@ export default function TicketDetail() {
               <span className="bg-zinc-950 px-2.5 py-1.5 rounded-lg border border-zinc-800/80 shadow-inner">Dept: <span className="text-cyan-400 font-bold">{ticket.assigned_department || 'General'}</span></span>
               <span className="bg-zinc-950 px-2.5 py-1.5 rounded-lg border border-zinc-800/80 shadow-inner">Source: <span className="text-emerald-400 font-bold uppercase">{ticket.metadata?.source || 'Web'}</span></span>
               <span className="bg-zinc-950 px-2.5 py-1.5 rounded-lg border border-zinc-800/80 shadow-inner">Customer: <span className="text-fuchsia-400 font-bold">{ticket.contacts_ax2024?.email || 'Unknown'}</span></span>
+
+              {!ticket.assignee_id && ticket.status !== 'resolved' && (
+                 <button onClick={handleClaim} className="px-3 py-1.5 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 rounded-lg text-[10px] uppercase font-black tracking-widest transition-colors shadow-inner">
+                   🙋‍♂️ Claim Ticket
+                 </button>
+              )}
+              {ticket.assignee_id && (
+                 <span className="bg-emerald-950/20 px-2.5 py-1.5 rounded-lg border border-emerald-900/30 text-emerald-500 font-bold shadow-inner">Assigned</span>
+              )}
             </div>
           </div>
 
