@@ -36,7 +36,7 @@ const SkeletonLoader = () => (
   </div>
 );
 
-export default function TicketList({ onSelectTicket, activeQueue = "All", statusFilter }) {
+export default function TicketList({ onSelectTicket, activeQueue, statusFilter = 'all' }) {
   const { t } = useTranslation();
   const { tickets, isLoading, fetchTickets, subscribeToTickets, searchQuery, selectedTicketIds, toggleSelectedTicketId } = useTicketStore();
   const { activeOrganization } = useAuthStore();
@@ -45,25 +45,8 @@ export default function TicketList({ onSelectTicket, activeQueue = "All", status
   const [isTriaging, setIsTriaging] = useState(false);
   const previousTicketCount = useRef(tickets.length);
 
-  // Filter tickets based on queue state, search query, and activeQueue department
-  const filteredTickets = tickets.filter(ticket => {
-    // 0. Status Filter
-    if (statusFilter && statusFilter !== 'all' && ticket.status !== statusFilter) return false;
 
-    // 1. Department Filter
-    if (activeQueue !== 'All' && ticket.assigned_department !== activeQueue) return false;
-
-    // 2. Search Filter overrides queue filter
-    if (searchQuery) return true;
-
-    // 3. Queue State Filter
-    if (queueFilter === 'unassigned') return !ticket.assigned_to;
-    if (queueFilter === 'my_queue') return ticket.assigned_to === user?.id;
-
-    return true;
-  });
-
-  // Tab notification effect
+// Tab notification effect
   useEffect(() => {
     if (tickets.length > previousTicketCount.current) {
         document.title = "(1) New Ticket - AXiM Support";
@@ -139,6 +122,13 @@ export default function TicketList({ onSelectTicket, activeQueue = "All", status
 
 
 
+
+  // Filter based on both the Active Queue (Department) and the Status Filter
+  const filteredTickets = tickets.filter(ticket => {
+    const matchesQueue = activeQueue === 'All' || ticket.assigned_department === activeQueue;
+    const matchesStatus = statusFilter === 'all' || ticket.status === statusFilter;
+    return matchesQueue && matchesStatus;
+  });
 
   if (filteredTickets.length === 0) {
     if (searchQuery) {

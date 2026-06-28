@@ -2100,6 +2100,15 @@ async function handleTicketResolved(request: Request, env: Env, ctx: any): Promi
       .update({ rca_generated: true })
       .eq("id", record.id);
 
+    // CRITICAL FIX: Inject the RCA text directly into the message timeline for agents to read
+    await supabase.from("ticket_messages").insert({
+      ticket_id: record.id,
+      sender_id: "onyx_system",
+      message_body: `**[SYSTEM ROOT CAUSE ANALYSIS GENERATED]**\n\n${rcaMarkdown}`,
+      is_internal_note: true,
+      metadata: { is_rca: true }
+    });
+
     logEnd(supabase, logCtx, startTime, ctx);
     return new Response(
       JSON.stringify({ success: true, rca_generated: true }),
