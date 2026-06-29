@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
+import { useTicketStore } from '../store/useTicketStore';
 import TicketList from '../components/TicketList';
 import OnyxCommandHub from '../components/OnyxCommandHub';
 import CreateTicketModal from '../components/CreateTicketModal';
@@ -22,7 +23,7 @@ export default function Dashboard() {
   const [modalType, setModalType] = useState(null); // 'create', 'batch', 'broadcast'
   const [refreshKey, setRefreshKey] = useState(0);
   const [activeQueue, setActiveQueue] = useState('All');
-  const [statusFilter, setStatusFilter] = useState('all');
+  const { setFilters, filters } = useTicketStore();
   const queueTabs = ['All', 'Engineering', 'Legal_Operations', 'Financial_Systems', 'General Support'];
 
   const handleAction = (id) => {
@@ -107,39 +108,42 @@ export default function Dashboard() {
             </div>
           </div>
           
-          <div className="mb-8 flex flex-wrap gap-3">
-            {queueTabs.map((tab) => (
-              <button
-                key={tab}
-                onClick={() => setActiveQueue(tab)}
-                className={`px-4 py-2 rounded-full text-sm font-medium transition-all duration-200 ${
-                  activeQueue === tab
-                    ? 'bg-fuchsia-500/20 text-fuchsia-400 border border-fuchsia-500/30'
-                    : 'text-zinc-400 hover:bg-white/5 border border-transparent'
-                }`}
-              >
-                {tab.replace('_', ' ')}
-              </button>
-            ))}
+          <div className="mb-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div className="flex flex-wrap gap-3">
+              {queueTabs.map((tab) => (
+                <button
+                  key={tab}
+                  onClick={() => setActiveQueue(tab)}
+                  className={`px-4 py-2 rounded-full text-sm font-medium transition-all duration-200 ${
+                    activeQueue === tab
+                      ? 'bg-fuchsia-500/20 text-fuchsia-400 border border-fuchsia-500/30'
+                      : 'text-zinc-400 hover:bg-white/5 border border-transparent'
+                  }`}
+                >
+                  {tab.replace('_', ' ')}
+                </button>
+              ))}
+            </div>
+
+            {/* CRITICAL FIX: Mount status filters tied to Zustand */}
+            <div className="flex items-center gap-2 p-1.5 bg-zinc-950/80 border border-zinc-800/80 rounded-xl w-max shadow-inner">
+              {['all', 'open', 'pending', 'resolved'].map(status => (
+                <button
+                  key={status}
+                  onClick={() => setFilters({ status })}
+                  className={`px-4 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${
+                    (filters?.status || 'all') === status
+                      ? 'bg-cyan-500/20 text-cyan-400 border border-cyan-500/30 shadow-[0_0_10px_rgba(34,211,238,0.1)]'
+                      : 'text-zinc-500 hover:text-zinc-300 border border-transparent'
+                  }`}
+                >
+                  {status}
+                </button>
+              ))}
+            </div>
           </div>
 
-          <div className="mb-6 flex items-center gap-2 p-1.5 bg-zinc-950/50 border border-zinc-800/50 rounded-xl w-max">
-            {['all', 'open', 'pending', 'resolved'].map(status => (
-              <button
-                key={status}
-                onClick={() => setStatusFilter(status)}
-                className={`px-4 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${
-                  statusFilter === status
-                    ? 'bg-cyan-500/20 text-cyan-400 border border-cyan-500/30 shadow-[0_0_10px_rgba(34,211,238,0.1)]'
-                    : 'text-zinc-500 hover:text-zinc-300 border border-transparent'
-                }`}
-              >
-                {status}
-              </button>
-            ))}
-          </div>
-
-          <TicketList onSelectTicket={(id) => navigate(`/ticket/${id}`)} activeQueue={activeQueue} statusFilter={statusFilter} />
+          <TicketList onSelectTicket={(id) => navigate(`/ticket/${id}`)} activeQueue={activeQueue} statusFilter={filters?.status || 'all'} />
         </main>
           </div>
         </div>
