@@ -37,6 +37,10 @@ const SkeletonLoader = () => (
 );
 
 export default function TicketList({ onSelectTicket, activeQueue, statusFilter = 'all' }) {
+  const [currentUser, setCurrentUser] = useState(null);
+  useEffect(() => {
+    supabase.auth.getUser().then(({ data }) => setCurrentUser(data?.user));
+  }, []);
   const { t } = useTranslation();
   const { tickets, isLoading, fetchTickets, subscribeToTickets, searchQuery, selectedTicketIds, toggleSelectedTicketId } = useTicketStore();
   const { activeOrganization } = useAuthStore();
@@ -180,6 +184,14 @@ export default function TicketList({ onSelectTicket, activeQueue, statusFilter =
     }
   }
 
+
+  if (queueFilter === 'my_queue' && !currentUser) {
+    return (
+      <div className="flex justify-center p-12 text-zinc-500 font-mono text-xs animate-pulse tracking-widest uppercase">
+        Verifying Workspace Identity...
+      </div>
+    );
+  }
 
   return (
     <>

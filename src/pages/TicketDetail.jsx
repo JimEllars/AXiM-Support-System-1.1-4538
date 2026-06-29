@@ -19,16 +19,27 @@ export default function TicketDetail() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const { updateTypingStatus } = useTicketStore();
   const typingTimeoutRef = React.useRef(null);
+  const [currentUser, setCurrentUser] = useState(null);
+
+  useEffect(() => {
+    supabase.auth.getUser().then(({ data }) => setCurrentUser(data?.user));
+  }, []);
 
   const handleTyping = (e) => {
     setReplyText(e.target.value);
 
-    // Fire typing indicator presence
-    updateTypingStatus(true, { agentId: "dash-user-1", name: "Agent" });
+    if (!currentUser) return;
+
+    const agentPayload = {
+      agentId: currentUser.id,
+      name: currentUser.email?.split('@')[0] || 'Agent'
+    };
+
+    updateTypingStatus(true, agentPayload);
 
     if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
     typingTimeoutRef.current = setTimeout(() => {
-      updateTypingStatus(false, { agentId: "dash-user-1", name: "Agent" });
+      updateTypingStatus(false, agentPayload);
     }, 2000);
   };
 

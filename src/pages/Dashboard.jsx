@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
+import { supabase } from '../lib/supabaseClient';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 import { useTicketStore } from '../store/useTicketStore';
@@ -20,11 +21,17 @@ const { FiInbox, FiPlus, FiActivity, FiLayers } = FiIcons;
 export default function Dashboard() {
   const { t } = useTranslation();
   const navigate = useNavigate();
-  const [modalType, setModalType] = useState(null); // 'create', 'batch', 'broadcast'
+  const { setFilters, filters, assigneeFilter, setAssigneeFilter } = useTicketStore();
+  const [modalType, setModalType] = useState(null);
   const [refreshKey, setRefreshKey] = useState(0);
   const [activeQueue, setActiveQueue] = useState('All');
-  const { setFilters, filters } = useTicketStore();
+  const [sessionUser, setSessionUser] = useState(null);
   const queueTabs = ['All', 'Engineering', 'Legal_Operations', 'Financial_Systems', 'General Support'];
+
+  useEffect(() => {
+    // Fetch real authenticated user identity for presence
+    supabase.auth.getUser().then(({ data }) => setSessionUser(data?.user));
+  }, []);
 
   const handleAction = (id) => {
     if (id === 'triage') setModalType('batch');
@@ -32,9 +39,9 @@ export default function Dashboard() {
   };
 
   const currentAgent = {
-    agentId: 'dash-user-1',
-    name: 'Greta (Local)',
-    role: 'Senior Architect',
+    agentId: sessionUser?.id || 'pending-auth',
+    name: sessionUser?.email?.split('@')[0] || 'AXiM Agent',
+    role: 'Support Engineer',
     color: 'bg-cyan-500',
   };
 
