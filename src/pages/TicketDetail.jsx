@@ -9,7 +9,7 @@ import Customer360 from '../components/tickets/Customer360';
 import { FiArrowLeft, FiSend, FiLock, FiUnlock, FiCheckCircle, FiPaperclip, FiFileText } from 'react-icons/fi';
 
 export default function TicketDetail() {
-  const { fetchTickets } = useTicketStore();
+  const { fetchTickets, currentTicketAttachments, fetchTicketAttachments, clearCurrentTicketData, activeAgents, updateTypingStatus, joinTicketPresence, leaveTicketPresence } = useTicketStore();
   const { id } = useParams();
   const navigate = useNavigate();
   const [ticket, setTicket] = useState(null);
@@ -17,13 +17,29 @@ export default function TicketDetail() {
   const [replyText, setReplyText] = useState('');
   const [isInternal, setIsInternal] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const { updateTypingStatus } = useTicketStore();
-  const typingTimeoutRef = React.useRef(null);
+    const typingTimeoutRef = React.useRef(null);
   const [currentUser, setCurrentUser] = useState(null);
 
-  useEffect(() => {
-    supabase.auth.getUser().then(({ data }) => setCurrentUser(data?.user));
-  }, []);
+    useEffect(() => {
+    supabase.auth.getUser().then(({ data }) => {
+      setCurrentUser(data?.user);
+      if (data?.user) {
+        if (joinTicketPresence) {
+          joinTicketPresence(id, {
+            agentId: data.user.id,
+            name: data.user.email?.split('@')[0] || 'Agent',
+            role: 'Support Engineer',
+            color: 'bg-cyan-500'
+          });
+        }
+      }
+    });
+
+    return () => {
+      if (leaveTicketPresence) leaveTicketPresence();
+      if (clearCurrentTicketData) clearCurrentTicketData();
+    };
+  }, [id, joinTicketPresence, leaveTicketPresence, clearCurrentTicketData]);
 
   const handleTyping = (e) => {
     setReplyText(e.target.value);
@@ -93,6 +109,8 @@ export default function TicketDetail() {
       // Auto-transition status to pending if agent replies publicly
       if (!isInternal && ticket.status === 'open') {
          await supabase.from('support_tickets').update({ status: 'pending' }).eq('id', id);
+         setTicket(prev => ({ ...prev, status: 'pending' })); // Update local
+         fetchTickets(); // CRITICAL FIX: Update global dashboard cache
       }
 
       setReplyText('');
@@ -226,6 +244,11 @@ export default function TicketDetail() {
                   if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
                     e.preventDefault();
                     handleSendReply();
+                  }
+                  // Quick Macro: /template
+                  if (e.key === ' ' && replyText.trim() === '/template') {
+                    e.preventDefault();
+                    setReplyText('**Hello,**\n\nThank you for reaching out. Upon reviewing your diagnostics...\n\n**Next Steps:**\n- \n- \n\nBest,\nAXiM Support');
                   }
                 }}
               />

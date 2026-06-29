@@ -12,19 +12,49 @@ const { FiX, FiSend, FiLoader, FiCpu, FiTerminal, FiPlus } = FiIcons;
 export default function CreateTicketModal({ isOpen, onClose, onSuccess }) {
   const { t } = useTranslation();
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [formData, setFormData] = useState({ subject: '', description: '', customer_id: '', assigned_department: 'General Support', priority: 'medium' });
+  const [formData, setFormData] = useState({ subject: '', description: '', customer_email: '', customer_name: '', assigned_department: 'General Support', priority: 'medium' });
 
-  const handleSubmit = async (e) => {
+    const handleSubmit = async (e) => {
     e.preventDefault();
     setIsSubmitting(true);
+
     try {
-      await onyxService.createTicket({
-        ...formData,
-        customer_id: '00000000-0000-0000-0000-000000000000'
+      const workerUrl = import.meta.env.VITE_EDGE_WORKER_URL || 'http://localhost:8787';
+      const secret = import.meta.env.VITE_AXIM_ONYX_SECRET || 'fallback';
+
+      // CRITICAL FIX: Route to /webhooks/intake so the worker properly upserts the contact from the email
+      const res = await fetch(`${workerUrl}/webhooks/intake`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${secret}`,
+          'X-Axim-Default-Source': 'internal_agent'
+        },
+        body: JSON.stringify({
+          subject: formData.subject,
+          description: formData.description,
+          customer_email: formData.customer_email,
+          customer_name: formData.customer_name,
+          workflow_category: formData.assigned_department,
+          priority: formData.priority
+        })
       });
+
+      if (!res.ok) {
+        const errText = await res.text();
+        throw new Error(`Ingestion Gateway rejected ticket: ${errText}`);
+      }
+
+      toast.success('Ticket ingested & queued for AI Triage.', {
+         style: { background: '#09090b', color: '#10b981', border: '1px solid rgba(16,185,129,0.3)' }
+      });
+
       onSuccess();
       onClose();
-    } catch (err) { /* silent catch */ } finally {
+      setFormData({ customer_email: '', customer_name: '', subject: '', description: '', assigned_department: 'General Support', priority: 'medium' });
+    } catch (error) {
+      toast.error('Failed to create ticket: ' + error.message);
+    } finally {
       setIsSubmitting(false);
     }
   };
@@ -58,6 +88,33 @@ export default function CreateTicketModal({ isOpen, onClose, onSuccess }) {
             </div>
 
             <form onSubmit={handleSubmit} className="p-10 space-y-8">
+                            <div className="space-y-2">
+                <label className="text-[10px] font-black text-zinc-500 uppercase tracking-[0.3em] flex items-center gap-2">
+                  <SafeIcon icon={FiTerminal} className="text-cyan-500" /> Customer Email
+                </label>
+                <input
+                  required
+                  type="email"
+                  className="w-full px-6 py-4 bg-zinc-950 border border-zinc-800 rounded-2xl focus:border-cyan-500/50 outline-none transition-all text-white font-bold placeholder-zinc-800"
+                  value={formData.customer_email}
+                  onChange={e => setFormData({ ...formData, customer_email: e.target.value })}
+                  placeholder="CUSTOMER_EMAIL@EXAMPLE.COM"
+                />
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-[10px] font-black text-zinc-500 uppercase tracking-[0.3em] flex items-center gap-2">
+                  <SafeIcon icon={FiTerminal} className="text-cyan-500" /> Customer Name
+                </label>
+                <input
+                  required
+                  className="w-full px-6 py-4 bg-zinc-950 border border-zinc-800 rounded-2xl focus:border-cyan-500/50 outline-none transition-all text-white font-bold placeholder-zinc-800"
+                  value={formData.customer_name}
+                  onChange={e => setFormData({ ...formData, customer_name: e.target.value })}
+                  placeholder="CUSTOMER_NAME"
+                />
+              </div>
+
               <div className="space-y-2">
                 <label className="text-[10px] font-black text-zinc-500 uppercase tracking-[0.3em] flex items-center gap-2">
                   <SafeIcon icon={FiTerminal} className="text-cyan-500" /> {t('subject')}
