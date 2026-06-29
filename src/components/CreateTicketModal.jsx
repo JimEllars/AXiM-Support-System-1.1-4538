@@ -11,21 +11,21 @@ const { FiX, FiSend, FiLoader, FiCpu, FiTerminal, FiPlus } = FiIcons;
 
 export default function CreateTicketModal({ isOpen, onClose, onSuccess }) {
   const { t } = useTranslation();
-  const [loading, setLoading] = useState(false);
-  const [form, setForm] = useState({ subject: '', description: '' });
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [formData, setFormData] = useState({ subject: '', description: '', customer_id: '', assigned_department: 'General Support', priority: 'medium' });
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    setLoading(true);
+    setIsSubmitting(true);
     try {
       await onyxService.createTicket({
-        ...form,
+        ...formData,
         customer_id: '00000000-0000-0000-0000-000000000000'
       });
       onSuccess();
       onClose();
     } catch (err) { /* silent catch */ } finally {
-      setLoading(false);
+      setIsSubmitting(false);
     }
   };
 
@@ -65,8 +65,8 @@ export default function CreateTicketModal({ isOpen, onClose, onSuccess }) {
                 <input 
                   required 
                   className="w-full px-6 py-4 bg-zinc-950 border border-zinc-800 rounded-2xl focus:border-cyan-500/50 outline-none transition-all text-white font-bold placeholder-zinc-800"
-                  value={form.subject}
-                  onChange={e => setForm({ ...form, subject: e.target.value })}
+                  value={formData.subject}
+                  onChange={e => setFormData({ ...formData, subject: e.target.value })}
                   placeholder="IDENTIFY_ISSUE_TYPE"
                 />
               </div>
@@ -79,8 +79,8 @@ export default function CreateTicketModal({ isOpen, onClose, onSuccess }) {
                   required 
                   rows={5}
                   className="w-full px-6 py-4 bg-zinc-950 border border-zinc-800 rounded-2xl focus:border-fuchsia-500/50 outline-none transition-all text-zinc-300 font-medium placeholder-zinc-800 resize-none"
-                  value={form.description}
-                  onChange={e => setForm({ ...form, description: e.target.value })}
+                  value={formData.description}
+                  onChange={e => setFormData({ ...formData, description: e.target.value })}
                   placeholder="PROVIDE_DETAILED_LOGS_OR_CONTEXT..."
                 />
               </div>
@@ -100,21 +100,21 @@ export default function CreateTicketModal({ isOpen, onClose, onSuccess }) {
                         e.target.value = null;
                         return;
                       } else {
-                        setForm({ ...form, attachment: file });
+                        setFormData({ ...formData, attachment: file });
                       }
                     } else {
-                      setForm({ ...form, attachment: null });
+                      setFormData({ ...formData, attachment: null });
                     }
                   }}
                 />
               </div>
 
               <button 
-                disabled={loading}
+                disabled={isSubmitting}
                 className="w-full group relative overflow-hidden bg-cyan-600 hover:bg-cyan-500 text-black font-black uppercase tracking-[0.2em] py-5 rounded-2xl transition-all shadow-[0_0_30px_rgba(34,211,238,0.2)] disabled:opacity-50"
               >
                 <div className="relative z-10 flex items-center justify-center gap-3">
-                  {loading ? (
+                  {isSubmitting ? (
                     <>
                       <SafeIcon icon={FiLoader} className="animate-spin text-xl" />
                       <span>ONYX_TRIAGING...</span>
