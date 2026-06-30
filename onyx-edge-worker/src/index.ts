@@ -2548,12 +2548,21 @@ This case has been marked as closed. How did we do? Please let us know by visiti
          console.error("Email dispatch failed:", errText);
          await supabase.from("events_ax2024").insert({
             type: "error",
-            payload: {
-              function: "emailDispatch",
-              ticket_id: record.ticket_id,
-              error: errText,
-              timestamp: new Date().toISOString()
-            }
+            payload: { function: "emailDispatch", ticket_id: record.ticket_id, error: errText, timestamp: new Date().toISOString() }
+         });
+      } else {
+         // Log successful egress for WebSocket UI observability
+         await supabase.from("events_ax2024").insert({
+            type: "email_dispatch_success",
+            payload: { ticket_id: record.ticket_id, recipient: contact.email, timestamp: new Date().toISOString() }
+         });
+
+         // CRITICAL FIX: Inject a permanent visual receipt into the message timeline
+         await supabase.from("ticket_messages").insert({
+            ticket_id: record.ticket_id,
+            sender_id: "system",
+            message_body: `**[SYSTEM EGRESS CONFIRMED]**\n\nReply securely routed to external MTA gateway for: \`${contact.email}\`.`,
+            is_internal_note: true
          });
       }
       } catch (err) {

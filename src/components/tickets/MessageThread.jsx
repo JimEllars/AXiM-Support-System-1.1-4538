@@ -8,10 +8,19 @@ import ReactMarkdown from 'react-markdown';
 const { FiUser, FiCpu, FiLock, FiTerminal } = FiIcons;
 
 import { supabase } from '../../lib/supabaseClient';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 
 export default function MessageThread({ ticketId }) {
   const [messages, setMessages] = useState([]);
+  const messagesEndRef = useRef(null); // CRITICAL FIX: Scroll anchor
+
+  const scrollToBottom = () => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  };
+
+  useEffect(() => {
+    scrollToBottom();
+  }, [messages]); // Trigger whenever messages array updates
 
   useEffect(() => {
     if (!ticketId) return;
@@ -104,6 +113,9 @@ export default function MessageThread({ ticketId }) {
           </div>
         );
       })}
+
+      {/* Scroll Anchor */}
+      <div ref={messagesEndRef} />
     </div>
   );
 }
