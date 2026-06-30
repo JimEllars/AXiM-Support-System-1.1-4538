@@ -18,10 +18,35 @@ export const useTicketStore = create((set, get) => ({
   setFilters: (newFilters) => set((state) => ({ filters: { ...state.filters, ...newFilters } })),
   setDlqEvents: (events) => set({ dlqEvents: events }),
   toggleTerminalStream: () => set((state) => ({ isTerminalStreamPaused: !state.isTerminalStreamPaused })),
+    activeAgents: [],
+
+  joinTicketPresence: (ticketId, agentInfo) => {
+    set(state => {
+      // Check if agent is already in the list
+      const existingIndex = state.activeAgents.findIndex(a => a.agentId === agentInfo.agentId);
+      if (existingIndex >= 0) {
+        const newAgents = [...state.activeAgents];
+        newAgents[existingIndex] = { ...newAgents[existingIndex], ...agentInfo, ticketId };
+        return { activeAgents: newAgents };
+      }
+      return { activeAgents: [...state.activeAgents, { ...agentInfo, ticketId }] };
+    });
+  },
+
+  leaveTicketPresence: () => {
+    set({ activeAgents: [] });
+  },
+
   updateTypingStatus: (isTyping, agentInfo) => {
-    // Normally this would broadcast via Supabase Realtime presence
-    // For this mock, we just console log the presence update
-    console.log("Typing presence:", { isTyping, agentInfo });
+    set(state => {
+      const existingIndex = state.activeAgents.findIndex(a => a.agentId === agentInfo.agentId);
+      if (existingIndex >= 0) {
+        const newAgents = [...state.activeAgents];
+        newAgents[existingIndex] = { ...newAgents[existingIndex], isTyping };
+        return { activeAgents: newAgents };
+      }
+      return { activeAgents: [...state.activeAgents, { ...agentInfo, isTyping }] };
+    });
   },
 
   fetchTickets: async () => {
