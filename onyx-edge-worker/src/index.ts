@@ -564,14 +564,8 @@ async function handleTicketIngestion(request: Request, env: Env, ctx: any): Prom
 }
 
 async function handleVectorSearch(request: Request, env: Env, ctx: any): Promise<Response> {
-  const supabase = createClient(
-    env.SUPABASE_URL,
-    env.SUPABASE_SERVICE_ROLE_KEY,
-  );
+  const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
   const logCtx = createLogContext(request);
-  ctx.waitUntil(logToEvents(supabase, logCtx, "performance_metric", "Request start", {
-    headers: request.headers,
-  }).catch(() => {}));
   const startTime = Date.now();
 
   const authHeader = request.headers.get("Authorization");
@@ -582,37 +576,30 @@ async function handleVectorSearch(request: Request, env: Env, ctx: any): Promise
   try {
     const { query } = (await request.json()) as any;
 
-    let embedding = [];
-    try {
-      const embedRes = await fetch(
-        `${env.CORE_API_URL || "https://api.axim-core.internal"}/functions/v1/generate-embedding`,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${env.AXIM_SERVICE_KEY}`,
-          },
-          body: JSON.stringify({ input: query }),
-        },
-      );
-      if (embedRes.ok) {
-        const embedData: any = await embedRes.json();
-        if (embedData.embedding) embedding = embedData.embedding;
-      } else {
-        logErr(
-          supabase,
-          logCtx,
-          new Error("Embedding API error: " + (await embedRes.text())),
-          ctx
-        );
-        throw new Error("Failed to fetch embedding from Core");
+    // CRITICAL FIX: Cloudflare KV Caching for Semantic Searches
+    const cacheKey = `vector_search_${await hashString(query)}`;
+    if (env.KB_CACHE) {
+      const cached = await env.KB_CACHE.get(cacheKey);
+      if (cached) {
+        console.log(`[KV HIT] Vector search returned from Cloudflare Edge for: ${query}`);
+        return new Response(cached, { headers: { "Content-Type": "application/json", ...getCorsHeaders(env, request) } });
       }
-    } catch (err) {
-      logErr(supabase, logCtx, err, ctx);
-      throw new Error("Embedding generation failed");
     }
 
-    // Use RPC to search pgvector
+    let embedding = [];
+    const embedRes = await fetch(`${env.CORE_API_URL || "https://api.axim-core.internal"}/functions/v1/generate-embedding`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Authorization": `Bearer ${env.AXIM_SERVICE_KEY}` },
+      body: JSON.stringify({ input: query }),
+    });
+
+    if (embedRes.ok) {
+      const embedData: any = await embedRes.json();
+      if (embedData.embedding) embedding = embedData.embedding;
+    } else {
+      throw new Error("Failed to fetch embedding from Core");
+    }
+
     const { data, error } = await supabase.rpc("match_kb_articles", {
       query_embedding: embedding,
       match_threshold: 0.5,
@@ -620,12 +607,7 @@ async function handleVectorSearch(request: Request, env: Env, ctx: any): Promise
     });
 
     if (error || !data || data.length === 0) {
-      return new Response(JSON.stringify([]), {
-        headers: {
-          "Content-Type": "application/json",
-          ...getCorsHeaders(env, request),
-        },
-      });
+      return new Response(JSON.stringify([]), { headers: { "Content-Type": "application/json", ...getCorsHeaders(env, request) } });
     }
 
     const results = data.map((item: any) => ({
@@ -635,17 +617,18 @@ async function handleVectorSearch(request: Request, env: Env, ctx: any): Promise
       relevance: Math.round(item.similarity * 100),
     }));
 
+    const jsonResults = JSON.stringify(results);
+
+    // Write to Cloudflare KV in the background (24 hour TTL)
+    if (env.KB_CACHE) {
+      ctx.waitUntil(env.KB_CACHE.put(cacheKey, jsonResults, { expirationTtl: 86400 }));
+    }
+
     logEnd(supabase, logCtx, startTime, ctx);
-    return new Response(JSON.stringify(results), {
-      headers: {
-        "Content-Type": "application/json",
-        ...getCorsHeaders(env, request),
-      },
-    });
+    return new Response(jsonResults, { headers: { "Content-Type": "application/json", ...getCorsHeaders(env, request) } });
   } catch (e: any) {
     logErr(supabase, logCtx, e, ctx);
-
-    return new Response(JSON.stringify({ error: e instanceof Error ? e.message : String(e) }), { status: 500 });
+    return new Response(JSON.stringify({ error: e instanceof Error ? e.message : String(e) }), { status: 500, headers: getCorsHeaders(env, request) });
   }
 }
 
