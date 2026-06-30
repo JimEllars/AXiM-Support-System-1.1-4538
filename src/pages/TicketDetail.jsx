@@ -48,7 +48,9 @@ export default function TicketDetail() {
 
     const agentPayload = {
       agentId: currentUser.id,
-      name: currentUser.email?.split('@')[0] || 'Agent'
+      name: currentUser.email?.split('@')[0] || 'Agent',
+      role: 'Support Engineer',
+      color: 'bg-cyan-500'
     };
 
     updateTypingStatus(true, agentPayload);
