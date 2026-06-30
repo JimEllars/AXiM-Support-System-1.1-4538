@@ -18,35 +18,43 @@ export default function DLQMonitorBlock() {
 
   const [expandedId, setExpandedId] = React.useState(null);
   const [replayConfirmId, setReplayConfirmId] = React.useState(null);
-  const [isReplaying, setIsReplaying] = React.useState(false);
+  const [isReplaying, setIsReplaying] = React.useState({});
 
   useEffect(() => {
     fetchLiveDLQData();
   }, []);
 
-  const handleBulkReplay = async () => {
-    if (selectedEventIds.length === 0) return;
-    setIsReplaying(true);
+  const handleReplay = async (id) => {
+    setIsReplaying(prev => ({ ...prev, [id]: true }));
     try {
-      const { data: { user } } = await supabase.auth.getUser();
-      const operatorId = user?.id;
+      const workerUrl = import.meta.env.VITE_EDGE_WORKER_URL || 'http://localhost:8787';
+      const secret = import.meta.env.VITE_AXIM_ONYX_SECRET || 'fallback';
 
-      const res = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:54321/functions/v1/onyx-bridge'}/api/dlq/bulk-replay`, {
+      // CRITICAL FIX: Route DLQ replays exclusively through the Edge Gateway
+      const res = await fetch(`${workerUrl}/api/dlq/bulk-replay`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${import.meta.env.VITE_AXIM_ONYX_SECRET || 'onyx_local_dev_secret'}`
+          'Authorization': `Bearer ${secret}`
         },
-        body: JSON.stringify({ eventIds: selectedEventIds, operatorId }) // <-- Pass only surgically checked indices
+        body: JSON.stringify({ eventIds: [id], operatorId: 'system_admin' })
       });
 
-      if (!res.ok) throw new Error(`Bulk replay execution failed.`);
-      toast.success(`Successfully flushed ${selectedEventIds.length} exceptions from queue.`);
-      fetchLiveDLQData();
-    } catch (err) {
-      toast.error(err.message);
+      if (!res.ok) {
+        const errText = await res.text();
+        throw new Error(`Edge rejected replay: ${errText}`);
+      }
+
+      toast.success('Payload re-injected into Edge processing stream.', {
+         style: { background: '#09090b', color: '#10b981', border: '1px solid rgba(16,185,129,0.3)' }
+      });
+
+      // Refresh the local DLQ table
+      useTicketStore.getState().fetchLiveDLQData();
+    } catch (error) {
+      toast.error('Replay execution failed: ' + error.message);
     } finally {
-      setIsReplaying(false);
+      setIsReplaying(prev => ({ ...prev, [id]: false }));
     }
   };
 
@@ -66,14 +74,6 @@ export default function DLQMonitorBlock() {
         </div>
 
         <div className="flex items-center gap-4">
-          <button
-            disabled={isReplaying || selectedEventIds.length === 0}
-            onClick={handleBulkReplay}
-            className="relative flex items-center gap-2 px-4 py-2 text-xs font-mono font-black tracking-widest text-cyan-400 bg-zinc-950/80 border border-cyan-500/30 hover:border-cyan-400 rounded-xl disabled:opacity-40 disabled:pointer-events-none uppercase transition-all duration-200"
-          >
-            {isReplaying ? <FiLoader className="w-3.5 h-3.5 animate-spin" /> : <FiRefreshCw className="w-3.5 h-3.5" />}
-            <span>Bulk Replay Tasks ({selectedEventIds.length})</span>
-          </button>
           <button onClick={fetchLiveDLQData} className="p-2 hover:bg-zinc-900 rounded-xl text-zinc-500 transition-colors">
             <SafeIcon icon={FiRefreshCw} className={isLoading ? 'animate-spin' : ''} />
           </button>
@@ -88,15 +88,6 @@ export default function DLQMonitorBlock() {
           return (
             <div key={evt.id} className="border border-rose-900/30 bg-zinc-900/50 rounded-2xl overflow-hidden flex flex-col">
               <div className="p-4 flex items-center gap-4 justify-between">
-                <input
-                  type="checkbox"
-                  checked={selectedEventIds.includes(evt.id)}
-                  onChange={(e) => {
-                    if (e.target.checked) setSelectedEventIds(prev => [...prev, evt.id]);
-                    else setSelectedEventIds(prev => prev.filter(id => id !== evt.id));
-                  }}
-                  className="w-4 h-4 rounded border-zinc-700 bg-zinc-950 text-cyan-500 focus:ring-cyan-500/30 cursor-pointer"
-                />
                 <div className="flex-1 cursor-pointer" onClick={() => setExpandedId(isExpanded ? null : evt.id)}>
                   <div className="flex items-center gap-3">
                      <span className="text-zinc-300 font-bold text-sm">{p.origin_node || 'Unknown Origin'}</span>
@@ -104,6 +95,13 @@ export default function DLQMonitorBlock() {
                   </div>
                   <div className="text-zinc-500 text-xs mt-1 truncate max-w-xl">{p.error_reason || 'No error reason provided'}</div>
                 </div>
+                <button
+                  onClick={(e) => { e.stopPropagation(); handleReplay(evt.id); }}
+                  disabled={isReplaying[evt.id]}
+                  className="px-3 py-1 bg-zinc-800 text-cyan-400 text-[10px] rounded hover:bg-zinc-700 disabled:opacity-50"
+                >
+                  {isReplaying[evt.id] ? 'Replaying...' : 'Replay'}
+                </button>
               </div>
               {isExpanded && (
                 <div className="px-4 pb-4 border-t border-rose-900/20 pt-4 bg-zinc-950/50">

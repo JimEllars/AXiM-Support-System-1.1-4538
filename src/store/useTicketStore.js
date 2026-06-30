@@ -18,35 +18,43 @@ export const useTicketStore = create((set, get) => ({
   setFilters: (newFilters) => set((state) => ({ filters: { ...state.filters, ...newFilters } })),
   setDlqEvents: (events) => set({ dlqEvents: events }),
   toggleTerminalStream: () => set((state) => ({ isTerminalStreamPaused: !state.isTerminalStreamPaused })),
-    activeAgents: [],
+  // --- COLLABORATIVE PRESENCE STATE ---
+  activeAgents: [],
+  activePresenceChannel: null, // New reference tracker
 
-  joinTicketPresence: (ticketId, agentInfo) => {
-    set(state => {
-      // Check if agent is already in the list
-      const existingIndex = state.activeAgents.findIndex(a => a.agentId === agentInfo.agentId);
-      if (existingIndex >= 0) {
-        const newAgents = [...state.activeAgents];
-        newAgents[existingIndex] = { ...newAgents[existingIndex], ...agentInfo, ticketId };
-        return { activeAgents: newAgents };
-      }
-      return { activeAgents: [...state.activeAgents, { ...agentInfo, ticketId }] };
-    });
+  joinTicketPresence: (ticketId, agentData) => {
+    const channel = supabase.channel(`ticket-presence:${ticketId}`);
+
+    channel
+      .on('presence', { event: 'sync' }, () => {
+        const state = channel.presenceState();
+        const agents = Object.values(state).flat();
+        set({ activeAgents: agents });
+      })
+      .subscribe(async (status) => {
+        if (status === 'SUBSCRIBED') {
+          await channel.track({ ...agentData, isTyping: false });
+        }
+      });
+
+    set({ activePresenceChannel: channel });
   },
 
-  leaveTicketPresence: () => {
-    set({ activeAgents: [] });
+  leaveTicketPresence: async () => {
+    const { activePresenceChannel } = get();
+    if (activePresenceChannel) {
+      await activePresenceChannel.untrack();
+      supabase.removeChannel(activePresenceChannel);
+    }
+    set({ activeAgents: [], activePresenceChannel: null });
   },
 
-  updateTypingStatus: (isTyping, agentInfo) => {
-    set(state => {
-      const existingIndex = state.activeAgents.findIndex(a => a.agentId === agentInfo.agentId);
-      if (existingIndex >= 0) {
-        const newAgents = [...state.activeAgents];
-        newAgents[existingIndex] = { ...newAgents[existingIndex], isTyping };
-        return { activeAgents: newAgents };
-      }
-      return { activeAgents: [...state.activeAgents, { ...agentInfo, isTyping }] };
-    });
+  // CRITICAL FIX: Broadcast typing states globally, not just locally
+  updateTypingStatus: async (isTyping, agentData) => {
+    const { activePresenceChannel } = get();
+    if (activePresenceChannel) {
+      await activePresenceChannel.track({ ...agentData, isTyping });
+    }
   },
 
   fetchTickets: async () => {
