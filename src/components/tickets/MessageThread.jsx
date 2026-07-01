@@ -14,13 +14,21 @@ export default function MessageThread({ ticketId }) {
   const [messages, setMessages] = useState([]);
   const messagesEndRef = useRef(null); // CRITICAL FIX: Scroll anchor
 
-  const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  };
+  const [isInitialLoad, setIsInitialLoad] = useState(true);
 
   useEffect(() => {
-    scrollToBottom();
-  }, [messages]); // Trigger whenever messages array updates
+    if (!messagesEndRef.current) return;
+
+    // Calculate if user is manually scrolled up
+    const isNearBottom = (window.innerHeight + window.scrollY) >= document.body.offsetHeight - 250;
+
+    if (isInitialLoad) {
+      messagesEndRef.current.scrollIntoView({ behavior: "auto" });
+      setIsInitialLoad(false);
+    } else if (isNearBottom) {
+      messagesEndRef.current.scrollIntoView({ behavior: "smooth" });
+    }
+  }, [messages]); // Fires on message array updates
 
   useEffect(() => {
     if (!ticketId) return;
