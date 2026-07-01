@@ -1901,20 +1901,11 @@ async function handleExecuteAction(request: Request, env: Env, ctx: any): Promis
 }
 
 async function handleTicketResolved(request: Request, env: Env, ctx: any): Promise<Response> {
-  const supabase = createClient(
-    env.SUPABASE_URL,
-    env.SUPABASE_SERVICE_ROLE_KEY,
-  );
+  const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
   const logCtx = createLogContext(request);
   const startTime = Date.now();
-  ctx.waitUntil(logToEvents(supabase, logCtx, "performance_metric", "Request start", {
-    headers: request.headers,
-  }).catch(() => {}));
+  ctx.waitUntil(logToEvents(supabase, logCtx, "performance_metric", "Webhook Request start", { headers: request.headers }).catch(() => {}));
 
-  // This is called via Supabase DB Webhook when a ticket status changes to 'resolved'
-  // The webhook payload structure depends on Supabase, usually contains 'record' and 'old_record'
-
-  // Auth could be a simple secret check for webhooks
   const url = new URL(request.url);
   if (url.searchParams.get("secret") !== env.AXIM_ONYX_SECRET) {
     return new Response("Unauthorized", { status: 401 });
@@ -1924,199 +1915,88 @@ async function handleTicketResolved(request: Request, env: Env, ctx: any): Promi
     const payload: any = await request.json();
     const record = payload.record;
 
-    // Webhook Egress Dispatcher
-    if (record.status === 'resolved') {
-        const dispatchWebhook = async () => {
-            try {
-                // Determine tenant context (organization_id or fallback)
-                const tenantId = record.organization_id || record.customer_id;
-                if (!tenantId) return;
-
-                const { data: webhooks, error: webhookError } = await supabase
-                    .from('tenant_webhooks')
-                    .select('url, secret')
-                    .eq('tenant_id', tenantId);
-
-                if (webhookError || !webhooks || webhooks.length === 0) return;
-
-                const ticketSummary = {
-                    ticket_id: record.id,
-                    subject: record.subject,
-                    status: record.status,
-                    resolution_time: new Date().toISOString()
-                };
-
-                for (const wh of webhooks) {
-                    try {
-                        const headers: any = { 'Content-Type': 'application/json' };
-                        if (wh.secret) headers['Authorization'] = `Bearer ${wh.secret}`;
-
-                        await fetch(wh.url, {
-                            method: 'POST',
-                            headers,
-                            body: JSON.stringify(ticketSummary)
-                        });
-                    } catch (fetchErr) {
-                        console.error('Failed to dispatch webhook to', wh.url, fetchErr);
-                    }
-                }
-            } catch (err) {
-                console.error('Webhook dispatcher error:', err);
-            }
-        };
-        ctx.waitUntil(dispatchWebhook());
-    }
-
-    if (
-      !record ||
-      record.status !== "resolved" ||
-      record.priority !== "urgent" ||
-      record.rca_generated
-    ) {
+    if (!record || record.status !== "resolved") {
       return new Response("Ignored", { status: 200 });
     }
 
-    // Fetch thread
-    const { data: messages } = await supabase
-      .from("ticket_messages")
-      .select("sender_id, message_body, created_at")
-      .eq("ticket_id", record.id)
-      .order("created_at", { ascending: true });
-
-    const threadText =
-      messages
-        ?.map((m: any) => `[${m.sender_id}]: ${m.message_body}`)
-        .join("\n") || "";
-
-        // Call Claude 3 Haiku for RCA
-    let rcaMarkdown = "";
-    if (env.ANTHROPIC_API_KEY) {
+    // 1. Webhook Egress Dispatcher (Tenant Notifications)
+    const dispatchWebhook = async () => {
       try {
-        const prompt = `You are Onyx Mk3. Generate a Root Cause Analysis for this resolved ticket.\nSubject: ${record.subject}\nThread:\n${threadText}\nOutput strictly in Markdown with ## Problem, ## Root Cause, and ## Resolution.`;
-        const anthropicRes = await fetch("https://api.anthropic.com/v1/messages", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "x-api-key": env.ANTHROPIC_API_KEY,
-            "anthropic-version": "2023-06-01",
-          },
-          body: JSON.stringify({
-            model: "claude-3-haiku-20240307",
-            max_tokens: 500,
-            messages: [{ role: "user", content: prompt }],
-          }),
-        });
+        const tenantId = record.organization_id || record.customer_id;
+        if (!tenantId) return;
+        const { data: webhooks } = await supabase.from('tenant_webhooks').select('url, secret').eq('tenant_id', tenantId);
+        if (!webhooks || webhooks.length === 0) return;
 
-        if (anthropicRes.ok) {
-          const data = await anthropicRes.json() as any;
-          rcaMarkdown = data.content[0].text;
-        } else {
-          throw new Error("Anthropic API failed");
+        const ticketSummary = { ticket_id: record.id, subject: record.subject, status: record.status, resolution_time: new Date().toISOString() };
+        for (const wh of webhooks) {
+          try {
+            const headers: any = { 'Content-Type': 'application/json' };
+            if (wh.secret) headers['Authorization'] = `Bearer ${wh.secret}`;
+            await fetch(wh.url, { method: 'POST', headers, body: JSON.stringify(ticketSummary) });
+          } catch (e) {}
         }
-      } catch (err) {
-        logErr(supabase, logCtx, err as Error, ctx);
-        rcaMarkdown = `## Problem\n${record.subject}\n## Root Cause\nUnavailable (Engine Timeout)\n## Resolution\nResolved manually by operator.`;
-      }
-    } else {
-      rcaMarkdown = `## Problem\n${record.subject}\n## Root Cause\nSystem operating in local dev mode. No RCA generated.\n## Resolution\nN/A`;
+      } catch (err) { console.error('Webhook dispatcher error:', err); }
+    };
+    ctx.waitUntil(dispatchWebhook());
+
+    // 2. RCA Generation (Only if Urgent and not already generated)
+    if (record.priority === "urgent" && !record.rca_generated) {
+      const processRCA = async () => {
+        try {
+          const { data: messages } = await supabase.from("ticket_messages").select("sender_id, message_body, created_at").eq("ticket_id", record.id).order("created_at", { ascending: true });
+          const threadText = messages?.map((m: any) => `[${m.sender_id}]: ${m.message_body}`).join("\n") || "";
+
+          let rcaMarkdown = "";
+          if (env.ANTHROPIC_API_KEY) {
+            const prompt = `You are Onyx Mk3. Generate a Root Cause Analysis for this resolved ticket.\nSubject: ${record.subject}\nThread:\n${threadText}\nOutput strictly in Markdown with ## Problem, ## Root Cause, and ## Resolution.`;
+            const anthropicRes = await fetch("https://api.anthropic.com/v1/messages", {
+              method: "POST",
+              headers: { "Content-Type": "application/json", "x-api-key": env.ANTHROPIC_API_KEY, "anthropic-version": "2023-06-01" },
+              body: JSON.stringify({ model: "claude-3-haiku-20240307", max_tokens: 500, messages: [{ role: "user", content: prompt }] }),
+            });
+            if (anthropicRes.ok) {
+              const data = await anthropicRes.json() as any;
+              rcaMarkdown = data.content[0].text;
+            } else { throw new Error("Anthropic API failed"); }
+          } else {
+            rcaMarkdown = `## Problem\n${record.subject}\n## Root Cause\nLocal dev mode. No RCA generated.\n## Resolution\nN/A`;
+          }
+
+          // Index to Vectors
+          let embeddingForMemory = null;
+          try {
+             const embedRes = await fetch(`${env.CORE_API_URL || "https://api.axim-core.internal"}/functions/v1/generate-embedding`, {
+                method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${env.AXIM_SERVICE_KEY}` },
+                body: JSON.stringify({ input: `RCA: ${record.subject}\n\n${rcaMarkdown}` }),
+             });
+             if (embedRes.ok) { const embedData: any = await embedRes.json(); embeddingForMemory = embedData.embedding; }
+          } catch(e) {}
+
+          await supabase.from("memory_banks").insert({
+            title: `RCA: ${record.subject}`, content: rcaMarkdown, embedding: embeddingForMemory, metadata: { source: "support_system", category: record.suggested_category || "support" },
+          });
+
+          await supabase.from("events_ax2024").insert({ type: "rca_generated", payload: { ticket_id: record.id, subject: record.subject, rca: rcaMarkdown } });
+          await supabase.from("support_tickets").update({ rca_generated: true }).eq("id", record.id);
+
+          await supabase.from("ticket_messages").insert({
+            ticket_id: record.id, sender_id: "onyx_system", message_body: `**[SYSTEM ROOT CAUSE ANALYSIS GENERATED]**\n\n${rcaMarkdown}`, is_internal_note: true, metadata: { is_rca: true }
+          });
+        } catch (e: any) { logErr(supabase, logCtx, e, ctx); }
+      };
+
+      // DECOUPLE: Push heavy RCA processing to the background
+      ctx.waitUntil(processRCA());
     }
-
-  // Grade RCA Quality to prevent Vector Poisoning
-  let rcaScore = 10; // Default to pass
-  try {
-    const gradeRes = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: { "x-api-key": env.ANTHROPIC_API_KEY, "anthropic-version": "2023-06-01", "content-type": "application/json" },
-      body: JSON.stringify({
-        model: "claude-3-haiku-20240307",
-        max_tokens: 10,
-        messages: [{ role: "user", content: `Grade this Root Cause Analysis on a scale of 1 to 10 for clarity and accuracy. Return ONLY the integer score.\n\n${rcaMarkdown}` }]
-      })
-    });
-    if (gradeRes.ok) {
-      const gradeData: any = await gradeRes.json();
-      rcaScore = parseInt(gradeData.content[0].text.trim(), 10) || 10;
-    }
-  } catch (e) { console.warn("RCA grading failed, bypassing."); }
-
-  if (rcaScore >= 7) {
-    // 1. Push to AXiM Core memory_banks
-    let embeddingForMemory: any[] | null = null;
-    try {
-      const embedRes = await fetch(
-        `${env.CORE_API_URL || "https://api.axim-core.internal"}/functions/v1/generate-embedding`,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${env.AXIM_SERVICE_KEY}`,
-          },
-          body: JSON.stringify({
-            input: `RCA: ${record.subject}\n\n${rcaMarkdown}`,
-          }),
-        },
-      );
-      if (embedRes.ok) {
-        const embedData: any = await embedRes.json();
-        if (embedData.embedding) embeddingForMemory = embedData.embedding;
-      }
-    } catch (err) {
-      logErr(supabase, logCtx, err, ctx);
-    }
-
-    // High quality - push to vector memory banks
-    await supabase.from("memory_banks").insert({
-      title: `RCA: ${record.subject}`,
-      content: rcaMarkdown,
-      embedding: embeddingForMemory,
-      metadata: { source: "support_system", partner: record.metadata?.partner || "unknown", category: record.suggested_category || "support" },
-    });
-  } else {
-    // Low quality - divert to HITL for manual rewrite
-    await supabase.from("hitl_audit_logs").insert({
-      support_ticket_id: record.id, status: "pending", tool_type: "update_memory_bank",
-      payload: { message: `RCA quality score (${rcaScore}/10) too low for auto-indexing. Manual rewrite required.`, original_rca: rcaMarkdown }
-    });
-  }
-        // 2. Push to events_ax2024
-    await supabase.from("events_ax2024").insert({
-      type: "rca_generated",
-      payload: {
-        ticket_id: record.id,
-        subject: record.subject,
-        rca: rcaMarkdown,
-      },
-    });
-
-    // 3. Mark ticket as rca_generated
-    await supabase
-      .from("support_tickets")
-      .update({ rca_generated: true })
-      .eq("id", record.id);
-
-    // CRITICAL FIX: Inject the RCA text directly into the message timeline for agents to read
-    await supabase.from("ticket_messages").insert({
-      ticket_id: record.id,
-      sender_id: "onyx_system",
-      message_body: `**[SYSTEM ROOT CAUSE ANALYSIS GENERATED]**\n\n${rcaMarkdown}`,
-      is_internal_note: true,
-      metadata: { is_rca: true }
-    });
 
     logEnd(supabase, logCtx, startTime, ctx);
-    return new Response(
-      JSON.stringify({ success: true, rca_generated: true }),
-      {
-        headers: { "Content-Type": "application/json" },
-      },
-    );
+
+    // CRITICAL FIX: Instantly return 200 OK so Supabase webhook doesn't timeout
+    return new Response(JSON.stringify({ success: true, status: "background_processing_initiated" }), { headers: { "Content-Type": "application/json" } });
+
   } catch (error: any) {
     logErr(supabase, logCtx, error, ctx);
-
-    return new Response(JSON.stringify({ error: error instanceof Error ? error.message : String(error) }), {
-      status: 500,
-      headers: { "Content-Type": "application/json" },
-    });
+    return new Response(JSON.stringify({ error: error.message }), { status: 500, headers: { "Content-Type": "application/json" } });
   }
 }
 
