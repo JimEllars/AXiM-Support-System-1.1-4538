@@ -5,12 +5,20 @@ import CoreHealthIndicator from './CoreHealthIndicator';
 import { ErrorBoundary } from './ErrorBoundary';
 import * as FiIcons from 'react-icons/fi';
 import SafeIcon from '../../common/SafeIcon';
+import { useTicketStore } from '../../store/useTicketStore';
 import Sidebar from './Sidebar';
 
 export default function AppLayout({ children }) {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [isSocketConnected, setIsSocketConnected] = useState(true);
   const [hasImminentBreach, setHasImminentBreach] = useState(false);
+
+  const { subscribeToDLQChanges } = useTicketStore();
+
+  useEffect(() => {
+    const unsubscribe = subscribeToDLQChanges();
+    return () => unsubscribe();
+  }, [subscribeToDLQChanges]);
 
   useEffect(() => {
     const urgentChannel = supabase.channel('global:urgent_alerts')
