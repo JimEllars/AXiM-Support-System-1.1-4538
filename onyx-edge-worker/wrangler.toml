@@ -20,13 +20,14 @@ SUPABASE_URL = "https://your-supabase-project.supabase.co"
 
 # Wake the worker at 8:00 AM UTC (2:00 AM CST) daily
 [triggers]
-crons = ["0 8 * * *"]
+crons = ["0 0 * * *", "*/15 * * * *"] # Daily digest and 15-minute SLA sweeps
 
 # --- KV NAMESPACE BINDINGS ---
-[[kv_namespaces]]
-binding = "IDEMPOTENCY_KV"
-id = "insert-idempotency-kv-id-here"
 
 [[kv_namespaces]]
 binding = "KB_CACHE"
-id = "insert-kb-cache-kv-id-here"
+id = "64c11d5bc7f64a5dbc20673d9688b4f7"
+
+[[kv_namespaces]]
+binding = "IDEMPOTENCY_KV"
+id = "ee8e5d5f13be45c9a91042cbd5e042df"

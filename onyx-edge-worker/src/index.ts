@@ -576,8 +576,10 @@ async function handleVectorSearch(request: Request, env: Env, ctx: any): Promise
   try {
     const { query } = (await request.json()) as any;
 
-    // CRITICAL FIX: Cloudflare KV Caching for Semantic Searches
-    const cacheKey = `vector_search_${await hashString(query)}`;
+    // CRITICAL FIX: Standardize Cloudflare KV Key format to match engineering report
+    const queryHash = await hashString(query);
+    const cacheKey = `rag_v1:${queryHash}`;
+
     if (env.KB_CACHE) {
       const cached = await env.KB_CACHE.get(cacheKey);
       if (cached) {
@@ -1709,16 +1711,21 @@ async function handleToolCommand(request: Request, env: Env, ctx: any): Promise<
 }
 
 async function handleExecuteAction(request: Request, env: Env, ctx: any): Promise<Response> {
-  const idempotencyKey = request.headers.get("X-Idempotency-Key");
-  if (idempotencyKey && env.IDEMPOTENCY_KV) {
-    const existingKey = await env.IDEMPOTENCY_KV.get(idempotencyKey);
+  const rawIdempotencyKey = request.headers.get("X-Idempotency-Key");
+
+  if (rawIdempotencyKey && env.IDEMPOTENCY_KV) {
+    // CRITICAL FIX: Standardize action idempotency keys
+    const cacheKey = `action_idempotency:${rawIdempotencyKey}`;
+    const existingKey = await env.IDEMPOTENCY_KV.get(cacheKey);
+
     if (existingKey) {
       return new Response(JSON.stringify({ error: "Conflict: Action already processed", status: "rejected" }), {
         status: 409,
         headers: { "Content-Type": "application/json", ...getCorsHeaders(env, request) }
       });
     }
-    await env.IDEMPOTENCY_KV.put(idempotencyKey, "processed", { expirationTtl: 86400 });
+    // Lock the action for 24 hours (86400 seconds)
+    await env.IDEMPOTENCY_KV.put(cacheKey, "processed", { expirationTtl: 86400 });
   }
 
   const supabase = createClient(

@@ -8,7 +8,7 @@
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20260617.1",
-    "@types/node": "^25.7.0",
+    "@types/node": "^25.9.4",
     "esbuild": "^0.17.18",
     "typescript": "^6.0.3",
     "vitest": "^4.1.8",
