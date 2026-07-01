@@ -45,26 +45,28 @@ const ToolCommandSchema = z.object({
 });
 
 // Rate limiting map
-const rateLimitMap = new Map<string, { count: number; resetAt: number }>();
 
-function checkRateLimit(
+
+async function checkRateLimit(
   ip: string,
   maxRequests: number,
+  env: Env,
   windowMs = 60000,
-): boolean {
-  const now = Date.now();
-  const record = rateLimitMap.get(ip);
+): Promise<boolean> {
+  if (!env.IDEMPOTENCY_KV) return true; // Failsafe pass if KV is unbound
 
-  if (!record || now > record.resetAt) {
-    rateLimitMap.set(ip, { count: 1, resetAt: now + windowMs });
-    return true;
+  const key = `ratelimit:${ip}`;
+  const currentCountStr = await env.IDEMPOTENCY_KV.get(key);
+  const currentCount = currentCountStr ? parseInt(currentCountStr) : 0;
+
+  if (currentCount >= maxRequests) {
+    return false; // Rate limit exceeded
   }
 
-  if (record.count >= maxRequests) {
-    return false;
-  }
+  // Cloudflare KV expirationTtl must be at least 60 seconds
+  const ttlSeconds = Math.max(60, Math.floor(windowMs / 1000));
+  await env.IDEMPOTENCY_KV.put(key, (currentCount + 1).toString(), { expirationTtl: ttlSeconds });
 
-  record.count++;
   return true;
 }
 
@@ -903,9 +905,10 @@ async function handleWebhookIntake(request: Request, env: Env, ctx: any): Promis
   const startTime = Date.now();
 
   const clientIP = request.headers.get("CF-Connecting-IP") || "unknown";
-  if (!checkRateLimit(clientIP, 10)) {
+  const isAllowed = await checkRateLimit(clientIP, 10, env);
+  if (!isAllowed) {
     return new Response(
-      JSON.stringify({ error: "Rate limit exceeded for webhooks" }),
+      JSON.stringify({ error: "Rate limit exceeded. Request throttled by Cloudflare KV." }),
       {
         status: 429,
         headers: {
@@ -1739,9 +1742,10 @@ async function handleExecuteAction(request: Request, env: Env, ctx: any): Promis
   const startTime = Date.now();
 
   const clientIP = request.headers.get("CF-Connecting-IP") || "unknown";
-  if (!checkRateLimit(clientIP, 5)) {
+  const isAllowed = await checkRateLimit(clientIP, 5, env);
+  if (!isAllowed) {
     return new Response(
-      JSON.stringify({ error: "Rate limit exceeded for action execution" }),
+      JSON.stringify({ error: "Rate limit exceeded. Request throttled by Cloudflare KV." }),
       {
         status: 429,
         headers: {

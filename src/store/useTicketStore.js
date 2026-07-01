@@ -78,6 +78,24 @@ export const useTicketStore = create((set, get) => ({
     if (!error && data) set({ dlqEvents: data });
   },
 
+  subscribeToDLQChanges: () => {
+    const channel = supabase
+      .channel('global-dlq-feed')
+      .on('postgres_changes', {
+        event: 'INSERT',
+        schema: 'public',
+        table: 'events_ax2024',
+        filter: "type=eq.dlq_payload"
+      }, (payload) => {
+        set((state) => {
+           const updatedDLQ = [payload.new, ...state.dlqEvents].slice(0, 10);
+           return { dlqEvents: updatedDLQ };
+        });
+      })
+      .subscribe();
+    return () => supabase.removeChannel(channel);
+  },
+
   triggerDeepTraceInspection: (traceId) => set({
     activeInspectionTraceId: traceId,
     isInspectionModalOpen: true
