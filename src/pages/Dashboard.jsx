@@ -21,7 +21,7 @@ const { FiInbox, FiPlus, FiActivity, FiLayers } = FiIcons;
 export default function Dashboard() {
   const { t } = useTranslation();
   const navigate = useNavigate();
-  const { setFilters, filters, assigneeFilter, setAssigneeFilter } = useTicketStore();
+  const { setFilters, filters, assigneeFilter, setAssigneeFilter, fetchTickets, subscribeToDLQChanges } = useTicketStore();
   const [modalType, setModalType] = useState(null);
   const [refreshKey, setRefreshKey] = useState(0);
   const [activeQueue, setActiveQueue] = useState('All');
@@ -29,9 +29,16 @@ export default function Dashboard() {
   const queueTabs = ['All', 'Engineering', 'Legal_Operations', 'Financial_Systems', 'General Support'];
 
   useEffect(() => {
-    // Fetch real authenticated user identity for presence
+    // Fetch live session identity
     supabase.auth.getUser().then(({ data }) => setSessionUser(data?.user));
-  }, []);
+
+    // CRITICAL FIX: Mount the real-time DLQ monitoring socket
+    const unsubscribeDLQ = subscribeToDLQChanges();
+
+    return () => {
+      if (unsubscribeDLQ) unsubscribeDLQ();
+    };
+  }, [subscribeToDLQChanges]);
 
   const handleAction = (id) => {
     if (id === 'triage') setModalType('batch');
