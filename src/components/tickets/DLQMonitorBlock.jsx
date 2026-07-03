@@ -4,7 +4,7 @@ import { FiAlertTriangle, FiRotateCw, FiTerminal } from 'react-icons/fi';
 import toast from 'react-hot-toast';
 
 export default function DLQMonitorBlock() {
-  const { dlqEvents } = useTicketStore();
+  const { dlqEvents, clearDLQEvents } = useTicketStore();
   const [isReplaying, setIsReplaying] = useState(false);
 
   const handleBulkReplay = async () => {
@@ -23,6 +23,8 @@ export default function DLQMonitorBlock() {
       });
 
       if (!res.ok) throw new Error("Gateway rejected DLQ replay.");
+
+      clearDLQEvents(); // CRITICAL FIX: Instantly wipe the queue from the UI
 
       toast.success(`Successfully queued ${eventIds.length} payloads for replay.`, {
         icon: <FiRotateCw className="text-cyan-400" />,

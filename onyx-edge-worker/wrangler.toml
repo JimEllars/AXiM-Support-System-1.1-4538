@@ -31,3 +31,7 @@ id = "64c11d5bc7f64a5dbc20673d9688b4f7"
 [[kv_namespaces]]
 binding = "IDEMPOTENCY_KV"
 id = "ee8e5d5f13be45c9a91042cbd5e042df"
+
+[[kv_namespaces]]
+binding = "STATUS_KV"
+id = "fake-status-kv-id-for-now"
