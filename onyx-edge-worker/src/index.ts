@@ -172,6 +172,7 @@ export interface Env {
   CORE_API_URL: string;
   IDEMPOTENCY_KV: KVNamespace;
   KB_CACHE: KVNamespace;
+  STATUS_KV: KVNamespace;
   RESEND_API_KEY?: string;
   RESEND_FROM_EMAIL?: string;
 }
@@ -369,6 +370,30 @@ export default {
 
     if (url.pathname === "/api/v1/onyx/generate-suggestion") {
       return handleGenerateSuggestion(request, env, ctx);
+    }
+
+    // --- PUBLIC ECOSYSTEM STATUS (Cloudflare KV Backed) ---
+    if (url.pathname === "/api/v1/status" && request.method === "GET") {
+      try {
+        // Read directly from the edge KV for 0ms latency global reads
+        const statusStr = env.STATUS_KV ? await env.STATUS_KV.get("current_status") : null;
+        const statusData = statusStr ? JSON.parse(statusStr) : {
+          status: "operational",
+          indicator: "none",
+          description: "All systems operational."
+        };
+
+        return new Response(JSON.stringify(statusData), {
+          status: 200,
+          headers: {
+            ...getCorsHeaders(env, request),
+            "Cache-Control": "public, max-age=60", // 1 minute edge cache
+            "Content-Type": "application/json"
+          }
+        });
+      } catch (err: any) {
+        return new Response(JSON.stringify({ error: "Failed to read edge status" }), { status: 500, headers: getCorsHeaders(env, request) });
+      }
     }
 
     if (url.pathname === "/batch-triage") {
@@ -1982,7 +2007,18 @@ async function handleTicketResolved(request: Request, env: Env, ctx: any): Promi
           await supabase.from("ticket_messages").insert({
             ticket_id: record.id, sender_id: "onyx_system", message_body: `**[SYSTEM ROOT CAUSE ANALYSIS GENERATED]**\n\n${rcaMarkdown}`, is_internal_note: true, metadata: { is_rca: true }
           });
-        } catch (e: any) { logErr(supabase, logCtx, e, ctx); }
+        } catch (e: any) {
+          logErr(supabase, logCtx, e, ctx);
+
+          // CRITICAL FIX: Inform the agent that background AI generation failed
+          await supabase.from("ticket_messages").insert({
+            ticket_id: record.id,
+            sender_id: "onyx_system",
+            message_body: `**[SYSTEM ERROR]**\n\nRoot Cause Analysis generation failed in background worker. Manual RCA required.\n\nTrace: ${e.message}`,
+            is_internal_note: true,
+            metadata: { is_rca: false, error: true }
+          });
+        }
       };
 
       // DECOUPLE: Push heavy RCA processing to the background

@@ -11,6 +11,7 @@ export const useTicketStore = create((set, get) => ({
 
   // --- TELEMETRY & TRACE DEEP CONTROL STATES ---
   dlqEvents: [],
+  clearDLQEvents: () => set({ dlqEvents: [] }), // CRITICAL FIX: Optimistic UI clearing
   activeInspectionTraceId: null,
   isInspectionModalOpen: false,
   isTerminalStreamPaused: false,
