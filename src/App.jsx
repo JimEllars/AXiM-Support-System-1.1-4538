@@ -1,5 +1,5 @@
 import React, { useEffect } from 'react';
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate, useNavigate } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import '@questlabs/react-sdk/dist/style.css';
 import Dashboard from './pages/Dashboard';
@@ -22,6 +22,21 @@ const ProtectedRoute = ({ children }) => {
   if (!session) return <Navigate to="/login" replace />;
   return children;
 };
+
+function AuthListener({ children }) {
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      if (event === 'SIGNED_OUT' || !session) {
+        navigate('/login', { replace: true });
+      }
+    });
+    return () => subscription.unsubscribe();
+  }, [navigate]);
+
+  return children;
+}
 
 function App() {
   const { setSession } = useAuthStore();
@@ -150,34 +165,36 @@ function App() {
             [ OUTAGE BROADCAST ] {activeOutage}
           </div>
         )}
-        <Routes>
-          <Route path="/login" element={<Login />} />
-          <Route path="/submit" element={<PublicIntake />} />
+        <AuthListener>
+          <Routes>
+            <Route path="/login" element={<Login />} />
+            <Route path="/submit" element={<PublicIntake />} />
 
-          <Route path="/" element={
-            <ProtectedRoute>
-              <AppLayout>
-                <Dashboard />
-              </AppLayout>
-            </ProtectedRoute>
-          } />
+            <Route path="/" element={
+              <ProtectedRoute>
+                <AppLayout>
+                  <Dashboard />
+                </AppLayout>
+              </ProtectedRoute>
+            } />
 
-          <Route path="/ticket/:id" element={
-            <ProtectedRoute>
-              <AppLayout>
-                <TicketDetail />
-              </AppLayout>
-            </ProtectedRoute>
-          } />
+            <Route path="/ticket/:id" element={
+              <ProtectedRoute>
+                <AppLayout>
+                  <TicketDetail />
+                </AppLayout>
+              </ProtectedRoute>
+            } />
 
-          <Route path="/memory" element={
-            <ProtectedRoute>
-              <AppLayout>
-                <MemoryHub />
-              </AppLayout>
-            </ProtectedRoute>
-          } />
-        </Routes>
+            <Route path="/memory" element={
+              <ProtectedRoute>
+                <AppLayout>
+                  <MemoryHub />
+                </AppLayout>
+              </ProtectedRoute>
+            } />
+          </Routes>
+        </AuthListener>
         <Toaster position="bottom-right" />
       </BrowserRouter>
     </QueryClientProvider>
