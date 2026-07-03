@@ -2,10 +2,12 @@ import React, { useState } from 'react';
 import { useTicketStore } from '../../store/useTicketStore';
 import { FiAlertTriangle, FiRotateCw, FiTerminal } from 'react-icons/fi';
 import toast from 'react-hot-toast';
+import PayloadTraceInspectorModal from '../modals/PayloadTraceInspectorModal';
 
 export default function DLQMonitorBlock() {
   const { dlqEvents, clearDLQEvents } = useTicketStore();
   const [isReplaying, setIsReplaying] = useState(false);
+  const [inspectPayload, setInspectPayload] = useState(null);
 
   const handleBulkReplay = async () => {
     if (dlqEvents.length === 0) return;
@@ -47,7 +49,7 @@ export default function DLQMonitorBlock() {
   }
 
   return (
-    <div className="bg-rose-950/20 border border-rose-500/30 rounded-2xl p-5 shadow-[0_0_20px_rgba(225,29,72,0.05)]">
+    <div className="bg-rose-950/20 border border-rose-500/30 rounded-2xl p-5 shadow-[0_0_20px_rgba(225,29,72,0.05)] relative">
       <div className="flex items-center justify-between mb-4">
         <div className="flex items-center gap-2 text-rose-400 text-[10px] font-black uppercase tracking-widest">
           <FiAlertTriangle className="animate-pulse text-sm" />
@@ -65,17 +67,28 @@ export default function DLQMonitorBlock() {
 
       <div className="space-y-2 max-h-[200px] overflow-y-auto pr-2">
         {dlqEvents.map(evt => (
-          <div key={evt.id} className="bg-black/50 border border-rose-900/50 rounded-xl p-3 flex justify-between items-center group hover:border-rose-700/50 transition-colors">
+          <div
+            key={evt.id}
+            onClick={() => setInspectPayload(evt)}
+            className="bg-black/50 border border-rose-900/50 rounded-xl p-3 flex justify-between items-center group hover:border-rose-500/50 transition-colors cursor-pointer"
+          >
              <div className="truncate flex-1">
                 <span className="text-[10px] text-zinc-500 font-mono mr-3">{new Date(evt.created_at).toLocaleTimeString()}</span>
                 <span className="text-xs text-rose-200 font-mono truncate">{evt.payload?.error || evt.payload?.reason || 'Unknown Payload Exception'}</span>
              </div>
-             <span className="text-[9px] text-rose-500 font-black uppercase bg-rose-950 px-2 py-0.5 rounded opacity-0 group-hover:opacity-100 transition-opacity">
-                {evt.payload?.source || 'API_GATEWAY'}
+             <span className="text-[9px] text-rose-500 font-black uppercase bg-rose-950 px-2 py-0.5 rounded transition-colors group-hover:bg-rose-500 group-hover:text-black">
+                Inspect
              </span>
           </div>
         ))}
       </div>
+      {inspectPayload && (
+        <PayloadTraceInspectorModal
+          isOpen={true}
+          payloadData={inspectPayload}
+          onClose={() => setInspectPayload(null)}
+        />
+      )}
     </div>
   );
 }
