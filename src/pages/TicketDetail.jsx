@@ -17,6 +17,7 @@ export default function TicketDetail() {
   const [replyText, setReplyText] = useState('');
   const [isInternal, setIsInternal] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [aiDraftUsed, setAiDraftUsed] = useState(false);
     const typingTimeoutRef = React.useRef(null);
   const [currentUser, setCurrentUser] = useState(null);
 
@@ -99,12 +100,19 @@ export default function TicketDetail() {
     setIsSubmitting(true);
     try {
       const { data: { user } } = await supabase.auth.getUser();
+      const messageMetadata = {
+        is_rca: false,
+        ai_draft_adopted: aiDraftUsed, // Record telemetry
+        cf_ray_context: ticket.metadata?.cf_ray || null
+      };
+
       const { error } = await supabase.from('ticket_messages').insert({
         ticket_id: id,
-        sender_id: user?.id || 'agent',
+        sender_id: user?.id || currentUser?.id || 'agent',
         sender_type: 'agent',
         message_body: replyText,
-        is_internal_note: isInternal
+        is_internal_note: isInternal,
+        metadata: messageMetadata
       });
       if (error) throw error;
 
@@ -116,6 +124,7 @@ export default function TicketDetail() {
       }
 
       setReplyText('');
+      setAiDraftUsed(false); // Reset for the next message
       toast.success(isInternal ? 'Internal note added.' : 'Reply sent to customer.');
     } catch (err) {
       toast.error('Failed to send message: ' + err.message);
@@ -183,6 +192,13 @@ export default function TicketDetail() {
               <span className="bg-zinc-950 px-2.5 py-1.5 rounded-lg border border-zinc-800/80 shadow-inner">Status: <span className="text-white font-bold">{ticket.status}</span></span>
               <span className="bg-zinc-950 px-2.5 py-1.5 rounded-lg border border-zinc-800/80 shadow-inner">Dept: <span className="text-cyan-400 font-bold">{ticket.assigned_department || 'General'}</span></span>
               <span className="bg-zinc-950 px-2.5 py-1.5 rounded-lg border border-zinc-800/80 shadow-inner">Source: <span className="text-emerald-400 font-bold uppercase">{ticket.metadata?.source || 'Web'}</span></span>
+
+              {/* CRITICAL FIX: Surface Cloudflare Distributed Trace ID for DevOps handoff */}
+              {ticket.metadata?.cf_ray && (
+                <span className="bg-zinc-950 px-2.5 py-1.5 rounded-lg border border-indigo-500/30 text-indigo-400 shadow-inner">
+                  Trace: <span className="font-bold">{ticket.metadata.cf_ray}</span>
+                </span>
+              )}
               <span className="bg-zinc-950 px-2.5 py-1.5 rounded-lg border border-zinc-800/80 shadow-inner">Customer: <span className="text-fuchsia-400 font-bold">{ticket.contacts_ax2024?.email || 'Unknown'}</span></span>
 
               {!ticket.assignee_id && ticket.status !== 'resolved' && (
@@ -220,7 +236,13 @@ export default function TicketDetail() {
               </div>
             </div>
           )}
-          <AutoDraftWhisper ticketId={ticket.id} onApplyDraft={(draft) => setReplyText(draft)} />
+          <AutoDraftWhisper
+            ticketId={ticket.id}
+            onApplyDraft={(draft) => {
+              setReplyText(draft);
+              setAiDraftUsed(true); // Flag that the AI draft was utilized
+            }}
+          />
 
           <div className="glass-panel bg-zinc-950/80 border-zinc-800 rounded-3xl p-8">
             <MessageThread ticketId={ticket.id} />
