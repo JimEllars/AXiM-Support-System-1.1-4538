@@ -1164,7 +1164,20 @@ async function handleWebhookIntake(request: Request, env: Env, ctx: any): Promis
       assignedDepartment = "Engineering";
     }
 
-const { data: ticket, error: ticketError } = await supabase
+    // CRITICAL FIX: Extract Cloudflare distributed trace ID
+    const cfRayId = request.headers.get("cf-ray") || "unknown_ray";
+
+    // Append the trace ID to the ticket's metadata JSONB column for enterprise debugging
+    const ticketMetadata = {
+      source: normalizedData.source || "api_gateway",
+      browser: request.headers.get("user-agent") || "unknown",
+      cf_ray: cfRayId,
+      operational_status: "Pending Triage",
+      tags: normalizedData.tags,
+      workflow_category: normalizedData.workflow_category,
+    };
+
+    const { data: ticket, error: ticketError } = await supabase
       .from("support_tickets")
       .insert({
         assigned_department: assignedDepartment,
@@ -1172,14 +1185,10 @@ const { data: ticket, error: ticketError } = await supabase
         description: normalizedData.description,
         customer_id: customerId,
         organization_id: customerOrgId,
-        priority: "medium",
+        priority: normalizedData.priority || "medium",
         status: "open",
         sla_breach_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
-        metadata: {
-            source: normalizedData.source,
-            tags: normalizedData.tags,
-            workflow_category: normalizedData.workflow_category,
-        },
+        metadata: ticketMetadata
       })
       .select()
       .single();

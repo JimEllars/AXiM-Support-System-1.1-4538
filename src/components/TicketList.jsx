@@ -128,10 +128,28 @@ export default function TicketList({ onSelectTicket, activeQueue, statusFilter =
 
 
   // Filter based on both the Active Queue (Department) and the Status Filter
-  const filteredTickets = tickets.filter(ticket => {
+  let filteredTickets = tickets.filter(ticket => {
     const matchesQueue = activeQueue === 'All' || ticket.assigned_department === activeQueue;
     const matchesStatus = statusFilter === 'all' || ticket.status === statusFilter;
     return matchesQueue && matchesStatus;
+  });
+
+  // CRITICAL FIX: Safe chronological sort with NaN-prevention for missing SLAs
+  filteredTickets = filteredTickets.sort((a, b) => {
+    // 1. Force resolved tickets to the absolute bottom
+    if (a.status === 'resolved' && b.status !== 'resolved') return 1;
+    if (b.status === 'resolved' && a.status !== 'resolved') return -1;
+
+    // 2. Safely parse timestamps, defaulting to Infinity if null/undefined
+    const timeA = a.sla_breach_at ? new Date(a.sla_breach_at).getTime() : Infinity;
+    const timeB = b.sla_breach_at ? new Date(b.sla_breach_at).getTime() : Infinity;
+
+    // 3. Fallback to creation date if both lack SLAs (e.g., timeA and timeB are both Infinity)
+    if (timeA === Infinity && timeB === Infinity) {
+      return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+    }
+
+    return timeA - timeB;
   });
 
   if (filteredTickets.length === 0) {
