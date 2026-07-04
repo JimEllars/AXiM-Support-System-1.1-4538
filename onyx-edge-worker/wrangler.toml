@@ -13,6 +13,7 @@ SUPABASE_URL = "https://your-supabase-project.supabase.co"
 # Use `wrangler secret put <SECRET_NAME>` to set these in production.
 #
 # - SUPABASE_SERVICE_ROLE_KEY
+# - SUPABASE_ANON_KEY
 # - AXIM_ONYX_SECRET
 # - ANTHROPIC_API_KEY
 # - AXIM_SERVICE_KEY

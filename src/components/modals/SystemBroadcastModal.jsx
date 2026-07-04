@@ -47,14 +47,15 @@ export default function SystemBroadcastModal({ isOpen, onClose }) {
 
     try {
       const workerUrl = import.meta.env.VITE_EDGE_WORKER_URL || 'http://localhost:8787';
-      const secret = import.meta.env.VITE_AXIM_ONYX_SECRET || 'fallback';
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) throw new Error("Active session required for Edge actions.");
 
       // Route to Edge Worker to mutate the global Cloudflare KV
       const res = await fetch(`${workerUrl}/api/v1/status`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${secret}`
+          'Authorization': `Bearer ${session.access_token}`
         },
         body: JSON.stringify({
           status: formData.status,
