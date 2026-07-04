@@ -10,25 +10,13 @@ const { FiUser, FiCpu, FiLock, FiTerminal } = FiIcons;
 import { supabase } from '../../lib/supabaseClient';
 import { useState, useEffect, useRef } from 'react';
 
-export default function MessageThread({ ticketId }) {
+export default function MessageThread({ ticketId, messages: overrideMessages, currentTicketStatus }) {
   const [messages, setMessages] = useState([]);
-  const messagesEndRef = useRef(null); // CRITICAL FIX: Scroll anchor
-
-  const [isInitialLoad, setIsInitialLoad] = useState(true);
+  const bottomRef = useRef(null);
 
   useEffect(() => {
-    if (!messagesEndRef.current) return;
-
-    // Calculate if user is manually scrolled up
-    const isNearBottom = (window.innerHeight + window.scrollY) >= document.body.offsetHeight - 250;
-
-    if (isInitialLoad) {
-      messagesEndRef.current.scrollIntoView({ behavior: "auto" });
-      setIsInitialLoad(false);
-    } else if (isNearBottom) {
-      messagesEndRef.current.scrollIntoView({ behavior: "smooth" });
-    }
-  }, [messages]); // Fires on message array updates
+    bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages]);
 
   useEffect(() => {
     if (!ticketId) return;
@@ -61,29 +49,14 @@ export default function MessageThread({ ticketId }) {
 
   if (!messages || messages.length === 0) {
     return (
-      <div className="space-y-8">
-        {[1, 2, 3].map(i => (
-          <div key={i} className="flex gap-6 animate-pulse">
-            <div className="w-12 h-12 bg-zinc-800 rounded-2xl shrink-0" />
-            <div className="flex-1 p-6 rounded-[1.5rem] bg-zinc-900/40 border border-zinc-800">
-              <div className="flex justify-between items-center mb-4">
-                <div className="h-3 bg-zinc-800 rounded w-1/4" />
-                <div className="h-3 bg-zinc-800 rounded w-1/6" />
-              </div>
-              <div className="space-y-2">
-                <div className="h-4 bg-zinc-800 rounded w-full" />
-                <div className="h-4 bg-zinc-800 rounded w-5/6" />
-                <div className="h-4 bg-zinc-800 rounded w-3/4" />
-              </div>
-            </div>
-          </div>
-        ))}
+      <div className="flex-1 flex items-center justify-center text-zinc-500 font-mono text-xs border-2 border-dashed border-zinc-800/50 rounded-2xl m-6">
+        No messages in this thread.
       </div>
     );
   }
 
   return (
-    <div className="space-y-8">
+    <div className="flex-1 overflow-y-auto p-6 space-y-6 scroll-smooth">
       {messages.map((msg) => {
         const isCustomer = msg.sender_id === 'customer';
         const isInternal = msg.is_internal_note;
@@ -122,8 +95,7 @@ export default function MessageThread({ ticketId }) {
         );
       })}
 
-      {/* Scroll Anchor */}
-      <div ref={messagesEndRef} />
+      <div ref={bottomRef} className="h-1" />
     </div>
   );
 }
