@@ -21,12 +21,14 @@ export default function ActionProposalBlock({ hitlLogId, onComplete }) {
     try {
       const idempotencyKey = uuidv4();
       const workerUrl = import.meta.env.VITE_EDGE_WORKER_URL || 'http://localhost:8787';
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) throw new Error("Active session required for Edge actions.");
 
       const res = await fetch(`${workerUrl}/api/v1/actions/resolve`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${import.meta.env.VITE_AXIM_ONYX_SECRET || 'fallback'}`,
+          'Authorization': `Bearer ${session.access_token}`,
           'X-Idempotency-Key': idempotencyKey
         },
         body: JSON.stringify({ hitlLogId })

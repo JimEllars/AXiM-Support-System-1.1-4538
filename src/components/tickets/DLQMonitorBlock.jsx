@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { useTicketStore } from '../../store/useTicketStore';
 import { FiAlertTriangle, FiRotateCw, FiTerminal } from 'react-icons/fi';
 import toast from 'react-hot-toast';
+import { supabase } from '../../lib/supabaseClient';
 import PayloadTraceInspectorModal from '../modals/PayloadTraceInspectorModal';
 
 export default function DLQMonitorBlock() {
@@ -16,11 +17,12 @@ export default function DLQMonitorBlock() {
     try {
       const eventIds = dlqEvents.map(e => e.id);
       const workerUrl = import.meta.env.VITE_EDGE_WORKER_URL || 'http://localhost:8787';
-      const secret = import.meta.env.VITE_AXIM_ONYX_SECRET || 'fallback';
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) throw new Error("Active session required for Edge actions.");
 
       const res = await fetch(`${workerUrl}/api/dlq/bulk-replay`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${secret}` },
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${session.access_token}` },
         body: JSON.stringify({ eventIds, operatorId: 'admin_dashboard' })
       });
 
