@@ -129,6 +129,28 @@ export const useTicketStore = create((set, get) => ({
     return () => supabase.removeChannel(channel);
   },
 
+
+  subscribeToMessages: (ticketId) => {
+    const channel = supabase
+      .channel(`messages-${ticketId}`)
+      .on('postgres_changes', {
+        event: 'INSERT',
+        schema: 'public',
+        table: 'ticket_messages',
+        filter: `ticket_id=eq.${ticketId}`
+      }, (payload) => {
+        set((state) => {
+          // Ensure we don't duplicate messages already added optimistically
+          const exists = state.currentTicketMessages?.find(m => m.id === payload.new.id);
+          if (exists) return state;
+          return { currentTicketMessages: [...(state.currentTicketMessages || []), payload.new] };
+        });
+      })
+      .subscribe();
+
+    return () => supabase.removeChannel(channel);
+  },
+
   triggerDeepTraceInspection: (traceId) => set({
     activeInspectionTraceId: traceId,
     isInspectionModalOpen: true

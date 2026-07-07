@@ -9,7 +9,7 @@ import Customer360 from '../components/tickets/Customer360';
 import { FiArrowLeft, FiSend, FiLock, FiUnlock, FiCheckCircle, FiPaperclip, FiFileText } from 'react-icons/fi';
 
 export default function TicketDetail() {
-  const { fetchTickets, currentTicketAttachments, fetchTicketAttachments, clearCurrentTicketData, activeAgents, updateTypingStatus, joinTicketPresence, leaveTicketPresence } = useTicketStore();
+  const { fetchTickets, currentTicketMessages, subscribeToMessages, currentTicketAttachments, fetchTicketAttachments, clearCurrentTicketData, activeAgents, updateTypingStatus, joinTicketPresence, leaveTicketPresence } = useTicketStore();
   const { id } = useParams();
   const navigate = useNavigate();
   const [ticket, setTicket] = useState(null);
@@ -69,7 +69,12 @@ export default function TicketDetail() {
         .select('*, contacts_ax2024(*)')
         .eq('id', id)
         .single();
-      if (error) toast.error("Failed to load ticket.");
+
+      if (data) setTicket(data);
+      if (error) {
+        toast.error('Failed to load ticket.');
+        navigate('/dashboard');
+      }
 
       const { data: attData } = await supabase
         .from("support_attachments")
@@ -77,8 +82,20 @@ export default function TicketDetail() {
         .eq("ticket_id", id);
       if (attData) setAttachments(attData);
     };
+
+    if (!id) return;
+
+    // Fetch initial ticket data...
     fetchTicketData();
-  }, [id]);
+
+    // CRITICAL FIX: Mount real-time message stream to prevent triage collisions
+    const unsubscribeMessages = subscribeToMessages(id);
+
+    return () => {
+      if (unsubscribeMessages) unsubscribeMessages();
+      leaveTicketPresence();
+    };
+  }, [id, subscribeToMessages, leaveTicketPresence]);
 
 
   const handleClaim = async () => {
