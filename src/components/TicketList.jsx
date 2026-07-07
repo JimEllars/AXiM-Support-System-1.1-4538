@@ -137,15 +137,31 @@ export default function TicketList({ onSelectTicket, activeQueue, statusFilter =
   useEffect(() => {
     const newestTicket = tickets[0];
     if (newestTicket && newestTicket.priority === 'urgent' && newestTicket.status === 'open') {
-      const isBrandNew = (new Date().getTime() - new Date(newestTicket.created_at).getTime()) < 10000; // 10 seconds
+      const isBrandNew = (new Date().getTime() - new Date(newestTicket.created_at).getTime()) < 10000;
       if (isBrandNew) {
         toast.error(`URGENT TICKET INGESTED: ${newestTicket.subject}`, {
           icon: '🚨',
           style: { background: '#4c0519', color: '#fda4af', border: '1px solid rgba(225,29,72,0.5)' }
         });
+
+        // CRITICAL FIX: Background Tab Alert Hijack
+        if (document.visibilityState === 'hidden') {
+          document.title = `(🚨 URGENT) ${newestTicket.subject} - AXiM Support`;
+        }
       }
     }
   }, [tickets]);
+
+  // Reset the document title once the agent returns to the tab
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        document.title = 'AXiM Support System';
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
+  }, []);
 
   // CRITICAL FIX: Safe chronological sort with NaN-prevention for missing SLAs
   filteredTickets = filteredTickets.sort((a, b) => {

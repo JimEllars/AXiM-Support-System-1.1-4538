@@ -414,9 +414,35 @@ export default {
     if (url.pathname === "/api/v1/webhooks/egress") {
       return handleMessageEgress(request, env, ctx);
     }
+    // --- CSAT FEEDBACK INGESTION ROUTE ---
+    if (url.pathname === "/api/v1/webhooks/feedback" && request.method === "POST") {
+      // 1. Edge Rate Limit (max 5 submissions per minute per IP to prevent review bombing)
+      const clientIP = request.headers.get("CF-Connecting-IP") || "unknown_ip";
+      const isAllowed = await checkRateLimit(clientIP, 5, env, 60000);
 
-    if (url.pathname === '/api/v1/webhooks/feedback') {
-      return handleFeedbackIngress(request, env, ctx);
+      if (!isAllowed) {
+        return new Response(JSON.stringify({ error: "Rate limit exceeded." }), { status: 429, headers: getCorsHeaders(env, request) });
+      }
+
+      try {
+        const body: any = await request.json();
+        const supabaseClient = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY); // Or env.SUPABASE_ANON_KEY as specified
+
+        const { error } = await supabaseClient.from("product_feedback").insert({
+          ticket_id: body.ticket_id,
+          rating: body.rating,
+          feedback_text: body.comments || null,
+          customer_id: body.customer_email || "anonymous"
+        });
+
+        if (error) throw error;
+
+        return new Response(JSON.stringify({ success: true, message: "Feedback processed successfully" }), {
+          status: 200, headers: { "Content-Type": "application/json", ...getCorsHeaders(env, request) }
+        });
+      } catch (err: any) {
+        return new Response(JSON.stringify({ error: err.message }), { status: 500, headers: getCorsHeaders(env, request) });
+      }
     }
 
 
