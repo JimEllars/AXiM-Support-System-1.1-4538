@@ -134,6 +134,19 @@ export default function TicketList({ onSelectTicket, activeQueue, statusFilter =
     return matchesQueue && matchesStatus;
   });
 
+  useEffect(() => {
+    const newestTicket = tickets[0];
+    if (newestTicket && newestTicket.priority === 'urgent' && newestTicket.status === 'open') {
+      const isBrandNew = (new Date().getTime() - new Date(newestTicket.created_at).getTime()) < 10000; // 10 seconds
+      if (isBrandNew) {
+        toast.error(`URGENT TICKET INGESTED: ${newestTicket.subject}`, {
+          icon: '🚨',
+          style: { background: '#4c0519', color: '#fda4af', border: '1px solid rgba(225,29,72,0.5)' }
+        });
+      }
+    }
+  }, [tickets]);
+
   // CRITICAL FIX: Safe chronological sort with NaN-prevention for missing SLAs
   filteredTickets = filteredTickets.sort((a, b) => {
     // 1. Force resolved tickets to the absolute bottom
@@ -290,6 +303,10 @@ export default function TicketList({ onSelectTicket, activeQueue, statusFilter =
           const customerName = ticket.contacts_ax2024?.name || 'Unknown Contact';
 
 
+          // CRITICAL FIX: Highlight unassigned tickets created in the last 2 minutes
+          const isFresh = (new Date().getTime() - new Date(ticket.created_at).getTime()) < 120000 && !ticket.assignee_id;
+          const isAutoHealed = ticket.metadata?.operational_status === 'Resolved-Automated';
+
           const isNew = (new Date().getTime() - new Date(ticket.created_at).getTime()) < 5 * 60 * 1000; // 5 minutes
           const isSelected = selectedTicketIds.includes(ticket.id);
           
@@ -301,14 +318,20 @@ export default function TicketList({ onSelectTicket, activeQueue, statusFilter =
               animate={{ opacity: 1, scale: 1 }} 
               exit={{ opacity: 0, scale: 0.95 }}
               transition={{ duration: 0.2 }}
-              className={`group flex items-center justify-between p-5 border rounded-2xl transition-all duration-200 hover:bg-white/5 cursor-pointer ${
+              className={`group relative flex items-center justify-between p-5 border rounded-2xl transition-all duration-200 cursor-pointer hover:-translate-y-0.5 ${
                   isSelected
                     ? 'bg-fuchsia-500/10 border-fuchsia-500/50'
                     : isEscalated
                       ? 'bg-rose-950/20 border-rose-500/50 shadow-[0_0_15px_rgba(225,29,72,0.2)]'
-                      : 'bg-zinc-900/40 border-zinc-800 hover:border-zinc-600 hover:bg-zinc-800/40'
+                      : isFresh
+                        ? 'bg-cyan-950/20 border-cyan-500/40 hover:shadow-[0_0_20px_rgba(34,211,238,0.1)]'
+                        : 'bg-zinc-950/50 border-zinc-800/80 hover:border-zinc-700 hover:bg-zinc-800/40'
               }`}
             >
+              {/* Inject a tiny dot for fresh tickets */}
+              {isFresh && (
+                <span className="absolute -top-1 -right-1 w-3 h-3 bg-cyan-500 rounded-full animate-ping shadow-[0_0_10px_rgba(34,211,238,0.8)]" />
+              )}
               <div className="flex items-center gap-5">
                 <button
                   onClick={(e) => { e.stopPropagation(); toggleSelectedTicketId(ticket.id); }}

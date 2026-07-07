@@ -97,6 +97,38 @@ export const useTicketStore = create((set, get) => ({
     return () => supabase.removeChannel(channel);
   },
 
+  subscribeToTicketQueue: () => {
+    const channel = supabase
+      .channel('global-ticket-feed')
+      .on('postgres_changes', {
+        event: '*',
+        schema: 'public',
+        table: 'support_tickets'
+      }, (payload) => {
+        set((state) => {
+          let updatedTickets = [...state.tickets];
+
+          if (payload.eventType === 'INSERT') {
+            // Prevent duplicates
+            if (!updatedTickets.find(t => t.id === payload.new.id)) {
+              updatedTickets = [payload.new, ...updatedTickets];
+            }
+          } else if (payload.eventType === 'UPDATE') {
+            updatedTickets = updatedTickets.map(t =>
+              t.id === payload.new.id ? { ...t, ...payload.new } : t
+            );
+          } else if (payload.eventType === 'DELETE') {
+            updatedTickets = updatedTickets.filter(t => t.id !== payload.old.id);
+          }
+
+          return { tickets: updatedTickets };
+        });
+      })
+      .subscribe();
+
+    return () => supabase.removeChannel(channel);
+  },
+
   triggerDeepTraceInspection: (traceId) => set({
     activeInspectionTraceId: traceId,
     isInspectionModalOpen: true
