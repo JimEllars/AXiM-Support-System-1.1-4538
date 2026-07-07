@@ -21,7 +21,7 @@ const { FiInbox, FiPlus, FiActivity, FiLayers } = FiIcons;
 export default function Dashboard() {
   const { t } = useTranslation();
   const navigate = useNavigate();
-  const { setFilters, filters, assigneeFilter, setAssigneeFilter, fetchTickets, subscribeToDLQChanges } = useTicketStore();
+  const { setFilters, filters, assigneeFilter, setAssigneeFilter, slaRiskFilter, setSlaRiskFilter, fetchTickets, subscribeToDLQChanges, subscribeToTicketQueue } = useTicketStore();
   const [modalType, setModalType] = useState(null);
   const [refreshKey, setRefreshKey] = useState(0);
   const [activeQueue, setActiveQueue] = useState('All');
@@ -32,13 +32,18 @@ export default function Dashboard() {
     // Fetch live session identity
     supabase.auth.getUser().then(({ data }) => setSessionUser(data?.user));
 
-    // CRITICAL FIX: Mount the real-time DLQ monitoring socket
+    // Initial data load
+    fetchTickets();
+
+    // CRITICAL FIX: Mount real-time WebSockets for Live Triage
     const unsubscribeDLQ = subscribeToDLQChanges();
+    const unsubscribeTickets = subscribeToTicketQueue();
 
     return () => {
       if (unsubscribeDLQ) unsubscribeDLQ();
+      if (unsubscribeTickets) unsubscribeTickets();
     };
-  }, [subscribeToDLQChanges]);
+  }, [fetchTickets, subscribeToDLQChanges, subscribeToTicketQueue]);
 
   const handleAction = (id) => {
     if (id === 'triage') setModalType('batch');
