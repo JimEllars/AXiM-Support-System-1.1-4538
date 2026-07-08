@@ -362,7 +362,56 @@ export default {
       return handleOnyxBridgeStream(request, env, ctx);
     }
 
-    if (url.pathname === "/api/v1/onyx-bridge/draft") {
+
+    // --- LIVE ONYX INVESTIGATION STREAM (SSE Proxy) ---
+    if (url.pathname === "/api/v1/onyx-bridge/stream" && request.method === "POST") {
+      // 1. Strict JWT Edge Validation
+      const authHeader = request.headers.get("Authorization") || "";
+      const token = authHeader.replace("Bearer ", "").trim();
+      if (!token) return new Response(JSON.stringify({ error: "UNAUTHORIZED" }), { status: 401, headers: getCorsHeaders(env, request) });
+
+      const supabaseAuth = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY, { global: { headers: { Authorization: `Bearer ${token}` } }});
+      const { data: { user }, error: authError } = await supabaseAuth.auth.getUser();
+      if (authError || !user) return new Response(JSON.stringify({ error: "FORBIDDEN" }), { status: 403, headers: getCorsHeaders(env, request) });
+
+      try {
+        const body: any = await request.json();
+        const prompt = `You are Onyx Mk3, an internal enterprise AI. Perform a rapid, live triage investigation of the following support ticket. Stream your thought process step-by-step using bullet points.\n\nTicket Subject: ${body.subject}\nTicket Description: ${body.description}`;
+
+        if (!env.DEEPSEEK_API_KEY) throw new Error("Deepseek API key missing from edge environment.");
+
+        // 2. Open Streaming Connection to Deepseek
+        const deepseekRes = await fetch("https://api.deepseek.com/chat/completions", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${env.DEEPSEEK_API_KEY}`
+          },
+          body: JSON.stringify({
+            model: "deepseek-chat",
+            max_tokens: 400,
+            messages: [{ role: "user", content: prompt }],
+            stream: true // CRITICAL FIX: Enable native chunk streaming
+          }),
+        });
+
+        if (!deepseekRes.ok) throw new Error("Upstream AI Provider Failed");
+
+        // 3. Pipe the native stream back to the React client
+        return new Response(deepseekRes.body, {
+          status: 200,
+          headers: {
+            "Content-Type": "text/event-stream", // Required for SSE
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            ...getCorsHeaders(env, request)
+          }
+        });
+      } catch (err: any) {
+        return new Response(JSON.stringify({ error: err.message }), { status: 500, headers: getCorsHeaders(env, request) });
+      }
+    }
+if (url.pathname === "/api/v1/onyx-bridge/draft") {
       return handleAutoDraft(request, env, ctx);
     }
 
@@ -428,7 +477,7 @@ export default {
 
       try {
         const body: any = await request.json();
-        const supabaseClient = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY); // Or env.SUPABASE_ANON_KEY as specified
+        const supabaseClient = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY); // Or env.SUPABASE_SERVICE_ROLE_KEY as specified
 
         const { error } = await supabaseClient.from("product_feedback").insert({
           ticket_id: body.ticket_id,
