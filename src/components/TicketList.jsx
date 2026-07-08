@@ -131,7 +131,14 @@ export default function TicketList({ onSelectTicket, activeQueue, statusFilter =
   let filteredTickets = tickets.filter(ticket => {
     const matchesQueue = activeQueue === 'All' || ticket.assigned_department === activeQueue;
     const matchesStatus = statusFilter === 'all' || ticket.status === statusFilter;
-    return matchesQueue && matchesStatus;
+
+    const searchLower = searchQuery.toLowerCase();
+    const matchesSearch = searchQuery === '' ||
+                          ticket.subject.toLowerCase().includes(searchLower) ||
+                          ticket.id.toLowerCase().includes(searchLower) ||
+                          (ticket.customer_id && ticket.customer_id.toLowerCase().includes(searchLower));
+
+    return matchesQueue && matchesStatus && matchesSearch;
   });
 
   useEffect(() => {

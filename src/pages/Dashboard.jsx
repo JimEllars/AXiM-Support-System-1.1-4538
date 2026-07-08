@@ -21,7 +21,7 @@ const { FiInbox, FiPlus, FiActivity, FiLayers } = FiIcons;
 export default function Dashboard() {
   const { t } = useTranslation();
   const navigate = useNavigate();
-  const { setFilters, filters, assigneeFilter, setAssigneeFilter, slaRiskFilter, setSlaRiskFilter, fetchTickets, subscribeToDLQChanges, subscribeToTicketQueue } = useTicketStore();
+  const { setFilters, filters, assigneeFilter, setAssigneeFilter, slaRiskFilter, setSlaRiskFilter, fetchTickets, subscribeToDLQChanges, subscribeToTicketQueue, searchQuery, setSearchQuery } = useTicketStore();
   const [modalType, setModalType] = useState(null);
   const [refreshKey, setRefreshKey] = useState(0);
   const [activeQueue, setActiveQueue] = useState('All');
@@ -142,6 +142,14 @@ export default function Dashboard() {
                   {tab.replace('_', ' ')}
                 </button>
               ))}
+              {/* CRITICAL FIX: Quick text search input */}
+              <input
+                type="text"
+                placeholder="Search ID, Email, or Subject..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="px-4 py-2 bg-zinc-950/80 border border-zinc-800/80 rounded-full text-sm text-white focus:outline-none focus:border-cyan-500/50 shadow-inner min-w-[250px]"
+              />
             </div>
 
             {/* CRITICAL FIX: Mount status filters tied to Zustand */}

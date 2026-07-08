@@ -7,6 +7,8 @@ export const useTicketStore = create((set, get) => ({
   isLoading: false,
   error: null,
   filters: { status: 'all', priority: 'all', search: '' },
+  searchQuery: '',
+  setSearchQuery: (query) => set({ searchQuery: query }),
   isCoreOnline: true,
   realtimeSocketStatus: 'CLOSED',
 

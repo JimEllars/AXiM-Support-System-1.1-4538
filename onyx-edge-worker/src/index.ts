@@ -910,9 +910,27 @@ async function handlePublicWebIngress(request: Request, env: Env, ctx: any): Pro
        body: `secret=${env.TURNSTILE_SECRET_KEY}&response=${turnstileToken}`
     });
 
-    const turnstileData: any = await turnstileVerify.json();
-    if (!turnstileData.success) {
-       return new Response(JSON.stringify({ error: "Security check failed. Payload rejected." }), { status: 403, headers: getCorsHeaders(env, request) });
+    const outcome: any = await turnstileVerify.json();
+    if (!outcome.success) {
+      // CRITICAL FIX: Asynchronous Edge Threat Logging
+      const logThreat = async () => {
+        try {
+          const clientIP = request.headers.get("CF-Connecting-IP") || "unknown_ip";
+          const supabaseAdmin = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
+          await supabaseAdmin.from("events_ax2024").insert({
+            type: "threat_blocked",
+            payload: {
+              reason: "turnstile_validation_failed",
+              ip: clientIP,
+              cf_ray: request.headers.get("cf-ray") || "unknown",
+              timestamp: new Date().toISOString()
+            }
+          });
+        } catch (e) { /* silent catch for background thread */ }
+      };
+      ctx.waitUntil(logThreat()); // Non-blocking edge execution
+
+      return new Response(JSON.stringify({ error: "Bot verification failed.", details: outcome['error-codes'] }), { status: 403, headers: getCorsHeaders(env, request) });
     }
 
     const cfRayId = request.headers.get("cf-ray") || "unknown_ray";
