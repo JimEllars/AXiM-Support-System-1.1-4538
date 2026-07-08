@@ -1,46 +1,97 @@
-import React, { useEffect, useState } from 'react';
+import React, { useState, useEffect } from 'react';
+import { FiUser, FiBriefcase, FiDollarSign, FiAlertCircle } from 'react-icons/fi';
 import { supabase } from '../../lib/supabaseClient';
-import { FiUser, FiClock } from 'react-icons/fi';
+import { useNavigate } from 'react-router-dom';
 
 export default function Customer360({ customerId }) {
-  const [history, setHistory] = useState([]);
+  const [profile, setProfile] = useState(null);
+  const [otherTickets, setOtherTickets] = useState([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const navigate = useNavigate();
 
   useEffect(() => {
-    if (!customerId) return;
-    const fetchHistory = async () => {
-      const { data } = await supabase
-        .from('support_tickets')
-        .select('id, subject, status, created_at')
-        .eq('customer_id', customerId)
-        .order('created_at', { ascending: false })
-        .limit(4);
-      if (data) setHistory(data);
+    const fetchContext = async () => {
+      setIsLoading(true);
+      try {
+        // Fetch CRM Profile
+        const { data: crmData } = await supabase.from('contacts_ax2024').select('*').eq('email', customerId).single();
+        if (crmData) setProfile(crmData);
+
+        // CRITICAL FIX: Fetch other active tickets to prevent duplicate triage
+        const { data: ticketData } = await supabase
+          .from('support_tickets')
+          .select('id, subject, status, created_at')
+          .eq('customer_id', customerId)
+          .neq('status', 'resolved')
+          .neq('status', 'closed')
+          .order('created_at', { ascending: false })
+          .limit(3);
+        if (ticketData) setOtherTickets(ticketData);
+
+      } catch (err) {
+        console.error('Failed to load 360 context:', err);
+      } finally {
+        setIsLoading(false);
+      }
     };
-    fetchHistory();
+    if (customerId) fetchContext();
   }, [customerId]);
 
-  if (!history.length) return null;
+  if (isLoading) {
+    return <div className="bg-zinc-900/40 border border-zinc-800 rounded-2xl p-5 animate-pulse h-32" />;
+  }
 
   return (
     <div className="bg-zinc-900/40 border border-zinc-800 rounded-2xl p-5">
       <div className="flex items-center gap-2 text-zinc-400 text-xs font-bold uppercase tracking-widest mb-4">
-        <FiUser className="text-cyan-500" /> Customer 360 History
+        <FiUser className="text-cyan-500" /> Customer 360
+        {customerId && <span className="text-[10px] text-zinc-600 ml-auto">{customerId}</span>}
       </div>
-      <div className="space-y-3">
-        {history.map(t => (
-          <div key={t.id} className="p-3 bg-black/40 border border-zinc-800/50 rounded-xl hover:border-zinc-700 transition-colors cursor-default">
-            <div className="flex justify-between items-start mb-1">
-              <span className="text-xs font-bold text-zinc-300 truncate pr-2" title={t.subject}>{t.subject}</span>
-              <span className={`text-[9px] uppercase font-black px-1.5 py-0.5 rounded ${t.status === 'resolved' || t.status === 'closed' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' : 'bg-amber-500/10 text-amber-400 border border-amber-500/20'}`}>
-                {t.status}
-              </span>
+
+      {profile ? (
+        <div className="space-y-3 mb-6">
+          {profile.first_name && (
+            <div className="flex justify-between items-center text-xs border-b border-zinc-800/30 pb-2">
+              <span className="text-zinc-500 font-mono">Name</span>
+              <span className="text-zinc-200 font-bold">{profile.first_name} {profile.last_name}</span>
             </div>
-            <div className="text-[10px] text-zinc-600 font-mono flex items-center gap-1">
-              <FiClock /> {new Date(t.created_at).toLocaleDateString()}
+          )}
+          {profile.company && (
+            <div className="flex justify-between items-center text-xs border-b border-zinc-800/30 pb-2">
+              <span className="text-zinc-500 font-mono">Company</span>
+              <span className="text-indigo-300 font-bold flex items-center gap-1.5"><FiBriefcase/> {profile.company}</span>
             </div>
+          )}
+          {profile.lifetime_value > 0 && (
+            <div className="flex justify-between items-center text-xs">
+              <span className="text-zinc-500 font-mono">LTV</span>
+              <span className="text-emerald-400 font-black flex items-center gap-1"><FiDollarSign/> {profile.lifetime_value.toLocaleString()}</span>
+            </div>
+          )}
+        </div>
+      ) : (
+        <p className="text-xs text-zinc-500 italic mb-6">No extended CRM profile found.</p>
+      )}
+
+      {/* Cross-Ticket Context Block */}
+      {otherTickets.length > 1 && (
+        <div className="bg-rose-950/20 border border-rose-900/50 rounded-xl p-3">
+          <div className="flex items-center gap-2 text-[10px] text-rose-400 uppercase tracking-widest font-black mb-2">
+            <FiAlertCircle /> Other Active Tickets ({otherTickets.length - 1})
           </div>
-        ))}
-      </div>
+          <div className="space-y-2">
+            {otherTickets.map(t => (
+              <div
+                key={t.id}
+                onClick={() => navigate(`/ticket/${t.id}`)}
+                className="text-xs text-zinc-300 hover:text-rose-300 cursor-pointer truncate transition-colors bg-black/40 px-2 py-1.5 rounded"
+              >
+                {t.subject}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
