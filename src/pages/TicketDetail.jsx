@@ -36,7 +36,7 @@ export default function TicketDetail() {
       }
     });
 
-    return () => {
+  return () => {
       if (leaveTicketPresence) leaveTicketPresence();
       if (clearCurrentTicketData) clearCurrentTicketData();
     };
@@ -167,14 +167,24 @@ export default function TicketDetail() {
     if (!window.confirm("Mark this ticket as Resolved?")) return;
     try {
       await supabase.from('support_tickets').update({ status: 'resolved' }).eq('id', id);
-      toast.success('Ticket Resolved');
+      toast.success('Ticket Resolved. Egress dispatcher queued to notify customer with CSAT survey.', {
+           icon: '📬',
+           style: { background: '#09090b', color: '#10b981', border: '1px solid rgba(16,185,129,0.3)', whiteSpace: 'pre-wrap' }
+        });
       navigate('/dashboard');
     } catch (err) {
       toast.error('Failed to resolve.');
     }
   };
 
-  if (!ticket) return <div className="min-h-screen bg-black flex items-center justify-center"><div className="animate-spin w-8 h-8 border-2 border-cyan-500 border-t-transparent rounded-full" /></div>;
+  // Lock historical edits
+  const isTicketClosed = ticket?.status === 'resolved' || ticket?.status === 'closed';
+
+  // CRITICAL FIX: Active Collision Prevention Lock
+  const isAnotherAgentTyping = activeAgents.some(a => a.isTyping && a.agentId !== currentUser?.id);
+  const isComposerDisabled = isTicketClosed || isAnotherAgentTyping || isSubmitting;
+
+    if (!ticket) return <div className="min-h-screen bg-black flex items-center justify-center"><div className="animate-spin w-8 h-8 border-2 border-cyan-500 border-t-transparent rounded-full" /></div>;
 
   return (
     <div className="min-h-screen bg-black p-8 text-white pb-32">
@@ -267,7 +277,23 @@ export default function TicketDetail() {
             {/* Reply Composer */}
             <div className="mt-8 pt-8 border-t border-zinc-900">
               <div className="flex items-center justify-between mb-3">
-                <label className="text-xs font-mono font-bold uppercase tracking-widest text-zinc-400">Response Editor</label>
+                <div className="flex items-center gap-3">
+                  <label className="text-xs font-mono font-bold uppercase tracking-widest text-zinc-400">Response Editor</label>
+                  {isAnotherAgentTyping && (
+                    <span className="px-2 py-0.5 bg-rose-500/20 text-rose-400 border border-rose-500/30 rounded text-[9px] uppercase font-black animate-pulse shadow-[0_0_10px_rgba(225,29,72,0.3)]">
+                      🔒 Locked: Another agent is drafting
+                    </span>
+                  )}
+                  {!isTicketClosed && !isAnotherAgentTyping && (
+                     <AutoDraftWhisper
+                       ticketId={ticket.id}
+                       onApplyDraft={(draft) => {
+                         setReplyText(draft);
+                         setAiDraftUsed(true); // Flag that the AI draft was utilized
+                       }}
+                     />
+                  )}
+                </div>
                 <button
                   onClick={() => setIsInternal(!isInternal)}
                   className={`flex items-center gap-2 px-3 py-1.5 rounded text-[10px] uppercase font-black tracking-widest transition-colors ${isInternal ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30' : 'bg-zinc-800 text-zinc-400 hover:text-white'}`}
@@ -281,6 +307,7 @@ export default function TicketDetail() {
                 onChange={handleTyping}
                 placeholder={isInternal ? "Add an internal note visible only to agents..." : "Draft a response to the customer..."}
                 className={`w-full min-h-[150px] bg-black/50 border rounded-2xl p-4 text-sm focus:outline-none transition-colors resize-y ${isInternal ? 'border-amber-500/30 focus:border-amber-500/60' : 'border-zinc-800 focus:border-cyan-500/50'}`}
+                disabled={isComposerDisabled}
                 onKeyDown={(e) => {
                   if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
                     e.preventDefault();

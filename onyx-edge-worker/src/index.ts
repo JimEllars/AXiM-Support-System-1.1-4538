@@ -162,6 +162,7 @@ async function logToEvents(
 }
 
 export interface Env {
+  TURNSTILE_SECRET_KEY: string;
   ADMIN_EMAIL?: string;
   ALLOWED_ORIGINS?: string;
   SUPABASE_URL: string;
@@ -897,6 +898,26 @@ async function handlePublicWebIngress(request: Request, env: Env, ctx: any): Pro
   }
 
   try {
+    // CRITICAL FIX: Verify Cloudflare Turnstile token
+    const turnstileToken = decryptedPayload.cf_turnstile_response;
+    if (!turnstileToken) {
+       return new Response(JSON.stringify({ error: "Missing Turnstile security token." }), { status: 403, headers: getCorsHeaders(env, request) });
+    }
+
+    const turnstileVerify = await fetch('https://challenges.cloudflare.com/turnstile/v0/siteverify', {
+       method: 'POST',
+       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+       body: `secret=${env.TURNSTILE_SECRET_KEY}&response=${turnstileToken}`
+    });
+
+    const turnstileData: any = await turnstileVerify.json();
+    if (!turnstileData.success) {
+       return new Response(JSON.stringify({ error: "Security check failed. Payload rejected." }), { status: 403, headers: getCorsHeaders(env, request) });
+    }
+
+    const cfRayId = request.headers.get("cf-ray") || "unknown_ray";
+    // ... proceed with the existing proxy logic ...
+
     const proxyHeaders = new Headers();
     proxyHeaders.set("Authorization", `Bearer ${env.AXIM_ONYX_SECRET}`);
     proxyHeaders.set("X-Axim-Default-Source", "website");
