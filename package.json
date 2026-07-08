@@ -11,6 +11,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@marsidev/react-turnstile": "^1.5.3",
     "@questlabs/react-sdk": "^2.2.92",
     "@supabase/supabase-js": "^2.39.0",
     "@tailwindcss/typography": "^0.5.20",
