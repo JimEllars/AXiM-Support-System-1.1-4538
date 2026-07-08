@@ -3,7 +3,7 @@ import { motion } from 'framer-motion';
 import { useTicketStore } from '../../store/useTicketStore';
 
 export default function CoreHealthIndicator() {
-  const { isCoreOnline: isOnline, setCoreOnlineStatus: setIsOnline } = useTicketStore();
+  const { isCoreOnline: isOnline, setCoreOnlineStatus: setIsOnline, realtimeSocketStatus } = useTicketStore();
 
   useEffect(() => {
     const checkHealth = async () => {
@@ -46,6 +46,20 @@ export default function CoreHealthIndicator() {
       animate={{ opacity: 1, y: 0 }}
       className={`fixed top-6 right-8 flex items-center gap-3 px-4 py-2 rounded-full border ${colorClasses} backdrop-blur-md z-50`}
     >
+      {/* Realtime WebSocket Telemetry */}
+      <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-black/40 border border-zinc-800/50">
+        <span className="text-[9px] uppercase tracking-widest text-zinc-500 font-bold">WSS Feed</span>
+        <div className="flex items-center gap-1.5">
+          <span className={`w-1.5 h-1.5 rounded-full ${
+            realtimeSocketStatus === 'SUBSCRIBED' ? 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.8)]' :
+            realtimeSocketStatus === 'CHANNEL_ERROR' ? 'bg-rose-500 animate-ping' :
+            'bg-amber-500 animate-pulse'
+          }`} />
+          <span className="text-[10px] text-zinc-300 font-mono">
+            {realtimeSocketStatus === 'SUBSCRIBED' ? 'SYNCED' : 'CONNECTING'}
+          </span>
+        </div>
+      </div>
       <div className="relative flex h-2 w-2">
         <span className={`absolute inline-flex h-full w-full rounded-full opacity-75 ${dotClasses}`}></span>
         <span className={`relative inline-flex rounded-full h-2 w-2 ${isOnline ? 'bg-emerald-500' : 'bg-rose-500'}`}></span>

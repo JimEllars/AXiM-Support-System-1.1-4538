@@ -1,6 +1,8 @@
 import React from 'react';
 import SafeIcon from '../common/SafeIcon';
 import * as FiIcons from 'react-icons/fi';
+import { useTicketStore } from '../store/useTicketStore';
+import { FiRefreshCw } from 'react-icons/fi';
 
 const { FiZap, FiShield, FiCpu, FiMessageSquare, FiFlag } = FiIcons;
 
@@ -12,6 +14,15 @@ const ACTIONS = [
 ];
 
 export default function DashboardQuickActions({ onAction }) {
+  const { fetchTickets } = useTicketStore();
+  const [isSyncing, setIsSyncing] = React.useState(false);
+
+  const handleForceSync = async () => {
+    setIsSyncing(true);
+    await fetchTickets();
+    setTimeout(() => setIsSyncing(false), 500);
+  };
+
   return (
     <>
       {ACTIONS.map((action) => (
@@ -29,6 +40,17 @@ export default function DashboardQuickActions({ onAction }) {
           </div>
         </button>
       ))}
+      <button
+        onClick={handleForceSync}
+        disabled={isSyncing}
+        className="flex flex-col items-center justify-center gap-2 p-4 bg-zinc-900/50 border border-zinc-800/50 rounded-2xl hover:bg-zinc-800 transition-colors group"
+      >
+        <div className="w-10 h-10 rounded-full bg-cyan-500/10 flex items-center justify-center text-cyan-400 group-hover:bg-cyan-500/20 transition-colors">
+          <FiRefreshCw className={isSyncing ? "animate-spin text-lg" : "text-lg"} />
+        </div>
+        <span className="text-xs font-bold text-zinc-300">Force Sync</span>
+        <span className="text-[9px] text-zinc-500 text-center px-2">Pull latest queue state</span>
+      </button>
     </>
   );
 }

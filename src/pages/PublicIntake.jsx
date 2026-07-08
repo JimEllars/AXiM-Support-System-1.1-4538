@@ -1,4 +1,5 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
+import { Turnstile } from '@marsidev/react-turnstile';
 import { motion, AnimatePresence } from 'framer-motion';
 import { FiUser, FiMail, FiTag, FiFileText, FiPaperclip, FiCheckCircle, FiAlertCircle } from 'react-icons/fi';
 
@@ -16,6 +17,7 @@ export default function PublicIntake() {
   }, []);
 
 
+  const turnstileRef = useRef(null);
   const [step, setStep] = useState(1);
   const [turnstileToken, setTurnstileToken] = useState(null);
   const [formData, setFormData] = useState({
@@ -124,8 +126,10 @@ export default function PublicIntake() {
       setTicketIdReceipt(result.reference_code || result.ticket_id || 'N/A');
     } catch (err) {
       setSubmitResult({ error: err.message || 'An unexpected error occurred during submission.' });
-      if (window.turnstile) window.turnstile.reset();
-      setTurnstileToken(null);
+      if (err.message.includes("verification failed") || err.message.includes("Token")) {
+        turnstileRef.current?.reset();
+        setTurnstileToken('');
+      }
     } finally {
       setIsSubmitting(false);
     }
@@ -384,12 +388,14 @@ export default function PublicIntake() {
                             Edit
                         </button>
                         <div className="flex-1 flex flex-col gap-4">
-              <div
-                className="cf-turnstile flex justify-center"
-                data-sitekey={import.meta.env.VITE_TURNSTILE_SITE_KEY || "1x00000000000000000000AA"}
-                data-callback="setTurnstileToken"
-                data-theme="dark"
-              ></div>
+              <div className="mb-6 flex justify-center">
+                <Turnstile
+                  ref={turnstileRef}
+                  siteKey={import.meta.env.VITE_TURNSTILE_SITE_KEY || '1x00000000000000000000AA'}
+                  onSuccess={(token) => setTurnstileToken(token)}
+                  options={{ theme: 'dark' }}
+                />
+              </div>
               <button
                 type="submit"
                 onClick={handleSubmit}

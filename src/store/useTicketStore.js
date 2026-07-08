@@ -8,6 +8,7 @@ export const useTicketStore = create((set, get) => ({
   error: null,
   filters: { status: 'all', priority: 'all', search: '' },
   isCoreOnline: true,
+  realtimeSocketStatus: 'CLOSED',
 
   // --- TELEMETRY & TRACE DEEP CONTROL STATES ---
   dlqEvents: [],
@@ -89,11 +90,25 @@ export const useTicketStore = create((set, get) => ({
         filter: "type=eq.dlq_payload"
       }, (payload) => {
         set((state) => {
-           const updatedDLQ = [payload.new, ...state.dlqEvents].slice(0, 10);
-           return { dlqEvents: updatedDLQ };
+           const exists = state.dlqEvents.find(e => e.id === payload.new.id);
+           if (exists) return state;
+           return { dlqEvents: [payload.new, ...state.dlqEvents].slice(0, 10) };
         });
       })
-      .subscribe();
+      // CRITICAL FIX: Synchronize deletions across all multi-player clients
+      .on('postgres_changes', {
+        event: 'DELETE',
+        schema: 'public',
+        table: 'events_ax2024'
+      }, (payload) => {
+        set((state) => ({
+          dlqEvents: state.dlqEvents.filter(e => e.id !== payload.old.id)
+        }));
+      })
+      .subscribe((status) => {
+        set({ realtimeSocketStatus: status }); // Hook for Task 3
+      });
+
     return () => supabase.removeChannel(channel);
   },
 
