@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { supabase } from '../lib/supabaseClient';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
@@ -22,6 +22,21 @@ export default function Dashboard() {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const { setFilters, filters, assigneeFilter, setAssigneeFilter, slaRiskFilter, setSlaRiskFilter, fetchTickets, subscribeToDLQChanges, subscribeToTicketQueue, searchQuery, setSearchQuery } = useTicketStore();
+
+  // CRITICAL FIX: Local search state to prevent global re-renders on every keystroke
+  const [localSearch, setLocalSearch] = useState(searchQuery);
+  const debounceRef = useRef(null);
+
+  const handleSearchChange = (e) => {
+    const val = e.target.value;
+    setLocalSearch(val);
+
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+
+    debounceRef.current = setTimeout(() => {
+      setSearchQuery(val);
+    }, 300); // 300ms debounce
+  };
   const [modalType, setModalType] = useState(null);
   const [refreshKey, setRefreshKey] = useState(0);
   const [activeQueue, setActiveQueue] = useState('All');
@@ -143,11 +158,12 @@ export default function Dashboard() {
                 </button>
               ))}
               {/* CRITICAL FIX: Quick text search input */}
+              {/* Quick text search input (Debounced) */}
               <input
                 type="text"
                 placeholder="Search ID, Email, or Subject..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
+                value={localSearch}
+                onChange={handleSearchChange}
                 className="px-4 py-2 bg-zinc-950/80 border border-zinc-800/80 rounded-full text-sm text-white focus:outline-none focus:border-cyan-500/50 shadow-inner min-w-[250px]"
               />
             </div>
