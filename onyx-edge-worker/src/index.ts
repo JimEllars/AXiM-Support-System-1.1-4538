@@ -169,6 +169,7 @@ export interface Env {
   SUPABASE_SERVICE_ROLE_KEY: string;
   AXIM_ONYX_SECRET: string;
   ANTHROPIC_API_KEY: string;
+  DEEPSEEK_API_KEY?: string;
   AXIM_SERVICE_KEY: string;
   CORE_API_URL: string;
   IDEMPOTENCY_KV: KVNamespace;
@@ -973,7 +974,25 @@ async function handleWebhookIntake(request: Request, env: Env, ctx: any): Promis
   if (!request.headers.get("X-Axim-Default-Source")) {
     const isVerified = await verifyWebhookSignature(request, env, payloadText);
     if (!isVerified) {
-      return new Response(JSON.stringify({ error: "Unauthorized: Invalid Signature" }), { status: 401, headers: getCorsHeaders(env, request) });
+      // CRITICAL FIX: Asynchronously log malicious internal ecosystem pings
+      const logHmacThreat = async () => {
+        try {
+          const supabaseAdmin = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
+          await supabaseAdmin.from("events_ax2024").insert({
+            type: "threat_blocked",
+            payload: {
+              reason: "invalid_hmac_or_internal_key",
+              ip: request.headers.get("CF-Connecting-IP") || "unknown",
+              cf_ray: request.headers.get("cf-ray") || "unknown",
+              target_route: new URL(request.url).pathname,
+              timestamp: new Date().toISOString()
+            }
+          });
+        } catch (e) { /* silent catch */ }
+      };
+      ctx.waitUntil(logHmacThreat());
+
+      return new Response(JSON.stringify({ error: "UNAUTHORIZED_ECOSYSTEM_NODE" }), { status: 401, headers: getCorsHeaders(env, request) });
     }
   }
   const contentLength = request.headers.get("content-length");
@@ -1099,7 +1118,27 @@ async function handleWebhookIntake(request: Request, env: Env, ctx: any): Promis
       // If it's NOT coming from our internal public ingress proxy, enforce the HMAC signature
       const isInternalProxy = request.headers.get("X-Axim-Default-Source") === "website";
       if (!isInternalProxy && !(await verifyWebhookSignature(request, env, rawText))) {
-          return new Response(JSON.stringify({ error: "Invalid Webhook Signature" }), { status: 401, headers: getCorsHeaders(env, request) });
+        // CRITICAL FIX: Asynchronously log malicious internal ecosystem pings
+        const logHmacThreat = async () => {
+          try {
+            const supabaseAdmin = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
+            await supabaseAdmin.from("events_ax2024").insert({
+              type: "threat_blocked",
+              payload: {
+                reason: "invalid_hmac_or_internal_key",
+                ip: request.headers.get("CF-Connecting-IP") || "unknown",
+                cf_ray: request.headers.get("cf-ray") || "unknown",
+                target_route: new URL(request.url).pathname,
+                timestamp: new Date().toISOString()
+              }
+            });
+          } catch (e) { /* silent catch */ }
+        };
+        ctx.waitUntil(logHmacThreat());
+
+        return new Response(JSON.stringify({ error: "UNAUTHORIZED_ECOSYSTEM_NODE" }), {
+          status: 401, headers: getCorsHeaders(env, request)
+        });
       }
       const payload: any = await request.json();
 
@@ -2046,7 +2085,26 @@ async function handleTicketResolved(request: Request, env: Env, ctx: any): Promi
           const threadText = messages?.map((m: any) => `[${m.sender_id}]: ${m.message_body}`).join("\n") || "";
 
           let rcaMarkdown = "";
-          if (env.ANTHROPIC_API_KEY) {
+
+          if (env.DEEPSEEK_API_KEY) {
+            // Primary AI Provider: Deepseek (Cost Optimized)
+            const prompt = `You are Onyx Mk3. Generate a Root Cause Analysis for this resolved ticket.\nSubject: ${record.subject}\nThread:\n${threadText}\nOutput strictly in Markdown with ## Problem, ## Root Cause, and ## Resolution. DO NOT include conversational filler.`;
+            const deepseekRes = await fetch("https://api.deepseek.com/chat/completions", {
+              method: "POST",
+              headers: { "Content-Type": "application/json", "Authorization": `Bearer ${env.DEEPSEEK_API_KEY}` },
+              body: JSON.stringify({
+                model: "deepseek-chat",
+                max_tokens: 500,
+                messages: [{ role: "user", content: prompt }]
+              }),
+            });
+            if (deepseekRes.ok) {
+              const data = await deepseekRes.json() as any;
+              rcaMarkdown = data.choices[0].message.content;
+            } else { throw new Error("Deepseek API failed"); }
+
+          } else if (env.ANTHROPIC_API_KEY) {
+            // Secondary AI Provider: Anthropic (Fallback)
             const prompt = `You are Onyx Mk3. Generate a Root Cause Analysis for this resolved ticket.\nSubject: ${record.subject}\nThread:\n${threadText}\nOutput strictly in Markdown with ## Problem, ## Root Cause, and ## Resolution.`;
             const anthropicRes = await fetch("https://api.anthropic.com/v1/messages", {
               method: "POST",
@@ -2058,7 +2116,7 @@ async function handleTicketResolved(request: Request, env: Env, ctx: any): Promi
               rcaMarkdown = data.content[0].text;
             } else { throw new Error("Anthropic API failed"); }
           } else {
-            rcaMarkdown = `## Problem\n${record.subject}\n## Root Cause\nLocal dev mode. No RCA generated.\n## Resolution\nN/A`;
+            rcaMarkdown = `## Problem\n${record.subject}\n## Root Cause\nLocal dev mode. No AI keys provided. No RCA generated.\n## Resolution\nN/A`;
           }
 
           // Index to Vectors
