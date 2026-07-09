@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+content = """import React, { useState, useEffect } from 'react';
 import { FiActivity, FiDatabase, FiCpu } from 'react-icons/fi';
 import { useTicketStore } from '../../store/useTicketStore';
 import { supabase } from '../../lib/supabaseClient';
@@ -17,7 +17,7 @@ export default function CoreHealthIndicator() {
           .eq('metadata->>ai_draft_adopted', 'true');
 
         if (!error && count !== null) setAiAdoptions(count);
-      } catch (e) { console.error('Failed to fetch AI telemetry', e); }
+      } catch (e) {}
     };
 
     const verifyDbHealth = async () => {
@@ -70,4 +70,7 @@ export default function CoreHealthIndicator() {
       )}
     </div>
   );
-}
+}"""
+
+with open('src/components/layout/CoreHealthIndicator.jsx', 'w') as f:
+    f.write(content)

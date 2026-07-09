@@ -800,6 +800,14 @@ async function handleBatchTriage(request: Request, env: Env, ctx: any): Promise<
  * Enforces origin rules and tags sandbox escalation for zero-day faults.
  */
 
+function threatVerifyPayloadSanitizer(payload: any): any {
+  return serializeTelemetryPayload(sanitizePayload(payload));
+}
+
+function serializeTelemetryPayload(payload: any): any {
+  return JSON.parse(JSON.stringify(payload));
+}
+
 // AST Payload Sanitization
 function sanitizePayload(obj: any): any {
   if (typeof obj === 'string') {
