@@ -355,63 +355,7 @@ export default {
     }
 
     // 2. Route Handling
-// --- LIVE ONYX INVESTIGATION STREAM (SSE Proxy) ---
-    if (url.pathname === "/api/v1/onyx-bridge/stream" && request.method === "POST") {
-      const authHeader = request.headers.get("Authorization") || "";
-      const token = authHeader.replace("Bearer ", "").trim();
-      if (!token) return new Response(JSON.stringify({ error: "UNAUTHORIZED_STREAM" }), { status: 401, headers: getCorsHeaders(env, request) });
 
-      const supabaseAuth = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY, {
-        global: { headers: { Authorization: `Bearer ${token}` } }
-      });
-      const { data: { user }, error: authError } = await supabaseAuth.auth.getUser();
-      if (authError || !user) return new Response(JSON.stringify({ error: "INVALID_SESSION" }), { status: 403, headers: getCorsHeaders(env, request) });
-
-      try {
-        const body: any = await request.json();
-        const prompt = `You are Onyx Mk3, an internal enterprise AI. Perform a rapid, live triage investigation of the following support ticket. Stream your thought process step-by-step using clear bullet points.\n\nSubject: ${body.subject}\nDescription: ${body.description}`;
-
-        if (env.DEEPSEEK_API_KEY) {
-          // Primary Provider: Deepseek
-          const deepseekRes = await fetch("https://api.deepseek.com/chat/completions", {
-            method: "POST",
-            headers: { "Content-Type": "application/json", "Authorization": `Bearer ${env.DEEPSEEK_API_KEY}` },
-            body: JSON.stringify({
-              model: "deepseek-chat",
-              max_tokens: 400,
-              messages: [{ role: "user", content: prompt }],
-              stream: true
-            }),
-          });
-          if (!deepseekRes.ok) throw new Error("Deepseek streaming ingress dropped.");
-          return new Response(deepseekRes.body, {
-            status: 200,
-            headers: { "Content-Type": "text/event-stream", "Cache-Control": "no-cache", "Connection": "keep-alive", ...getCorsHeaders(env, request) }
-          });
-        } else if (env.ANTHROPIC_API_KEY) {
-          // Fallback Provider: Anthropic Claude
-          const anthropicRes = await fetch("https://api.anthropic.com/v1/messages", {
-            method: "POST",
-            headers: { "Content-Type": "application/json", "x-api-key": env.ANTHROPIC_API_KEY, "anthropic-version": "2023-06-01" },
-            body: JSON.stringify({
-              model: "claude-3-haiku-20240307",
-              max_tokens: 400,
-              messages: [{ role: "user", content: prompt }],
-              stream: true
-            }),
-          });
-          if (!anthropicRes.ok) throw new Error("Fallback Anthropic streaming ingress dropped.");
-          return new Response(anthropicRes.body, {
-            status: 200,
-            headers: { "Content-Type": "text/event-stream", "Cache-Control": "no-cache", "Connection": "keep-alive", ...getCorsHeaders(env, request) }
-          });
-        } else {
-          throw new Error("No upstream AI environment bindings present on Cloudflare Edge.");
-        }
-      } catch (err: any) {
-        return new Response(JSON.stringify({ error: err.message }), { status: 500, headers: getCorsHeaders(env, request) });
-      }
-    }
 if (url.pathname === "/api/v1/onyx-bridge/draft") {
       return handleAutoDraft(request, env, ctx);
     }
@@ -1909,7 +1853,6 @@ async function handleExecuteAction(request: Request, env: Env, ctx: any): Promis
   const rawIdempotencyKey = request.headers.get("X-Idempotency-Key");
 
   if (rawIdempotencyKey && env.IDEMPOTENCY_KV) {
-    // CRITICAL FIX: Standardize action idempotency keys
     const cacheKey = `action_idempotency:${rawIdempotencyKey}`;
     const existingKey = await env.IDEMPOTENCY_KV.get(cacheKey);
 
@@ -1919,45 +1862,32 @@ async function handleExecuteAction(request: Request, env: Env, ctx: any): Promis
         headers: { "Content-Type": "application/json", ...getCorsHeaders(env, request) }
       });
     }
-    // Lock the action for 24 hours (86400 seconds)
     await env.IDEMPOTENCY_KV.put(cacheKey, "processed", { expirationTtl: 86400 });
   }
 
-  const supabase = createClient(
-    env.SUPABASE_URL,
-    env.SUPABASE_SERVICE_ROLE_KEY,
-  );
+  const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
   const logCtx = createLogContext(request);
-  ctx.waitUntil(logToEvents(supabase, logCtx, "performance_metric", "Request start", {
-    headers: request.headers,
-  }).catch(() => {}));
+  ctx.waitUntil(logToEvents(supabase, logCtx, "performance_metric", "Request start", { headers: request.headers }).catch(() => {}));
   const startTime = Date.now();
 
   const clientIP = request.headers.get("CF-Connecting-IP") || "unknown";
   const isAllowed = await checkRateLimit(clientIP, 5, env);
   if (!isAllowed) {
-    return new Response(
-      JSON.stringify({ error: "Rate limit exceeded. Request throttled by Cloudflare KV." }),
-      {
-        status: 429,
-        headers: {
-          "Content-Type": "application/json",
-          ...getCorsHeaders(env, request),
-        },
-      },
-    );
-  }
-
-  const authHeader = request.headers.get("Authorization");
-  if (authHeader !== `Bearer ${env.AXIM_ONYX_SECRET}`) {
-    return new Response(JSON.stringify({ error: "Unauthorized" }), {
-      status: 401,
-      headers: {
-        "Content-Type": "application/json",
-        ...getCorsHeaders(env, request),
-      },
+    return new Response(JSON.stringify({ error: "Rate limit exceeded. Request throttled by Cloudflare KV." }), {
+      status: 429, headers: { "Content-Type": "application/json", ...getCorsHeaders(env, request) }
     });
   }
+
+  // CRITICAL FIX: Eradicate old static secret check in favor of active session verification
+  const authHeader = request.headers.get("Authorization") || "";
+  const token = authHeader.replace("Bearer ", "").trim();
+  if (!token) return new Response(JSON.stringify({ error: "UNAUTHORIZED_ACTION_EXECUTION" }), { status: 401, headers: getCorsHeaders(env, request) });
+
+  const supabaseAuth = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY, {
+    global: { headers: { Authorization: `Bearer ${token}` } }
+  });
+  const { data: { user }, error: authError } = await supabaseAuth.auth.getUser();
+  if (authError || !user) return new Response(JSON.stringify({ error: "INVALID_SESSION" }), { status: 403, headers: getCorsHeaders(env, request) });
 
   try {
     const rawPayload: any = await request.json();
@@ -1966,26 +1896,15 @@ async function handleExecuteAction(request: Request, env: Env, ctx: any): Promis
       payload = ToolCommandSchema.parse(rawPayload);
     } catch (zodError) {
       if (zodError instanceof z.ZodError) {
-        return new Response(
-          JSON.stringify({
-            error: "Action payload validation failed",
-            details: zodError.issues,
-          }),
-          {
-            status: 400,
-            headers: {
-              "Content-Type": "application/json",
-              ...getCorsHeaders(env, request),
-            },
-          },
-        );
+        return new Response(JSON.stringify({ error: "Action payload validation failed", details: zodError.issues }), {
+          status: 400, headers: { "Content-Type": "application/json", ...getCorsHeaders(env, request) }
+        });
       }
       throw zodError;
     }
 
     const { hitlLogId } = payload;
 
-    // Fetch hitl log
     const { data: hitlLog, error: fetchError } = await supabase
       .from("hitl_audit_logs")
       .select("*")
@@ -1994,34 +1913,15 @@ async function handleExecuteAction(request: Request, env: Env, ctx: any): Promis
 
     if (fetchError) throw fetchError;
 
-    // Idempotency check
     if (hitlLog.status === "executed") {
       logEnd(supabase, logCtx, startTime, ctx);
-      return new Response(
-        JSON.stringify({
-          success: true,
-          executed: true,
-          message: "Action already executed.",
-        }),
-        {
-          status: 200,
-          headers: {
-            "Content-Type": "application/json",
-            ...getCorsHeaders(env, request),
-          },
-        },
-      );
+      return new Response(JSON.stringify({ success: true, executed: true, message: "Action already executed." }), {
+        status: 200, headers: { "Content-Type": "application/json", ...getCorsHeaders(env, request) }
+      });
     }
 
-    // Step 1: The AXiM Core API Proxy Handshake
-    // Proxy the request through the AXiM Core Ecosystem Vault
+    const coreProxyUrl = env.CORE_API_URL ? `${env.CORE_API_URL}/functions/v1/api-proxy` : "https://api.axim-core.internal/v1/proxy";
 
-
-    const coreProxyUrl = env.CORE_API_URL
-      ? `${env.CORE_API_URL}/functions/v1/api-proxy`
-      : "https://api.axim-core.internal/v1/proxy";
-
-    // The AXiM Core API Proxy Handshake implementation
     const proxyResponse = await fetch(coreProxyUrl, {
       method: "POST",
       headers: {
@@ -2029,22 +1929,16 @@ async function handleExecuteAction(request: Request, env: Env, ctx: any): Promis
         Authorization: `Bearer ${env.AXIM_SERVICE_KEY}`,
         "Idempotency-Key": hitlLogId,
       },
-      body: JSON.stringify({
-        action: hitlLog.tool_type,
-        payload: hitlLog.payload,
-      }),
+      body: JSON.stringify({ action: hitlLog.tool_type, payload: hitlLog.payload }),
     });
 
     if (!proxyResponse.ok) {
       if (proxyResponse.status === 401 || proxyResponse.status === 403) {
-        throw new Error(
-          "Vault Access Denied: Core rejected the credential request.",
-        );
+        throw new Error("Vault Access Denied: Core rejected the credential request.");
       }
       throw new Error(`Core API Proxy Failed: ${await proxyResponse.text()}`);
     }
 
-    // Update ticket with execution message
     if (hitlLog.support_ticket_id) {
       await supabase.from("ticket_messages").insert({
         ticket_id: hitlLog.support_ticket_id,
@@ -2052,42 +1946,24 @@ async function handleExecuteAction(request: Request, env: Env, ctx: any): Promis
         message_body: `ACTION EXECUTED VIA CORE PROXY: ${hitlLog.tool_type} completed successfully.`,
       });
 
-      // Log to telemetry events table
       await supabase.from("events_ax2024").insert({
         type: "action_executed",
-        payload: {
-          ticket_id: hitlLog.support_ticket_id,
-          action: hitlLog.tool_type,
-          hitl_log_id: hitlLogId,
-          status: "success",
-        },
+        payload: { ticket_id: hitlLog.support_ticket_id, action: hitlLog.tool_type, hitl_log_id: hitlLogId, status: "success" },
       });
     }
 
-    await supabase
-      .from("hitl_audit_logs")
-      .update({ status: "executed" })
-      .eq("id", hitlLogId);
+    await supabase.from("hitl_audit_logs").update({ status: "executed" }).eq("id", hitlLogId);
+
+    const cfRayId = request.headers.get("cf-ray") || "unknown_ray";
 
     logEnd(supabase, logCtx, startTime, ctx);
-    return new Response(
-      JSON.stringify({ success: true, executed: true, proxied: true }),
-      {
-        headers: {
-          "Content-Type": "application/json",
-          ...getCorsHeaders(env, request),
-        },
-      },
-    );
+    return new Response(JSON.stringify({ success: true, executed: true, proxied: true, cf_ray: cfRayId }), {
+      headers: { "Content-Type": "application/json", ...getCorsHeaders(env, request) },
+    });
   } catch (error: any) {
     logErr(supabase, logCtx, error, ctx);
-
     return new Response(JSON.stringify({ error: error instanceof Error ? error.message : String(error) }), {
-      status: 500,
-      headers: {
-        "Content-Type": "application/json",
-        ...getCorsHeaders(env, request),
-      },
+      status: 500, headers: { "Content-Type": "application/json", ...getCorsHeaders(env, request) },
     });
   }
 }
@@ -2276,7 +2152,7 @@ async function handleGenerateSuggestion(request: Request, env: Env, ctx: any): P
   ctx.waitUntil(logToEvents(supabase, logCtx, "performance_metric", "Request start", { headers: request.headers }).catch(() => {}));
   const startTime = Date.now();
 
-  // Enforce zero-trust dynamic JWT validation rather than old static secret checks
+  // 1. Enforce zero-trust dynamic JWT validation rather than old static secret checks
   const authHeader = request.headers.get("Authorization") || "";
   const token = authHeader.replace("Bearer ", "").trim();
   if (!token) return new Response(JSON.stringify({ error: "UNAUTHORIZED_SUGGESTION" }), { status: 401, headers: getCorsHeaders(env, request) });
@@ -2312,12 +2188,13 @@ async function handleGenerateSuggestion(request: Request, env: Env, ctx: any): P
 
     const contextText = memoryBanks?.map((m: any) => `Title: ${m.title}\nContent: ${m.content}`).join("\n\n") || "No context found.";
 
-    const prompt = `You are Onyx, an expert AXiM Support AI. Write a professional, helpful support response draft for the agent to review and send to the customer.\n\nTicket Subject: ${subject}\nDescription: ${description}\n\nHistory:\n${historyText}\n\nContext:\n${contextText}\n\nOutput only the suggested reply text:`;
+    const prompt = `You are Onyx, an expert AXiM Support AI. Write a professional and helpful support response draft for the agent to review and send to the customer.\n\nTicket Subject: ${subject}\nTicket Description: ${description}\n\nRecent Conversation History:\n${historyText || "No previous replies."}\n\nContext from Memory Banks:\n${contextText}\n\nOutput ONLY the suggested response text:`;
 
     let draft = "";
     let modelProvenance = "unknown";
 
     if (env.DEEPSEEK_API_KEY) {
+      // Primary AI Provider: Deepseek (Cost-Optimized Strategy)
       const deepseekRes = await fetch("https://api.deepseek.com/v1/chat/completions", {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${env.DEEPSEEK_API_KEY}` },
@@ -2331,8 +2208,9 @@ async function handleGenerateSuggestion(request: Request, env: Env, ctx: any): P
         const data: any = await deepseekRes.json();
         draft = data.choices[0].message.content;
         modelProvenance = "Deepseek-V3";
-      } else { throw new Error("Deepseek suggestion failed."); }
+      } else { throw new Error("Deepseek suggestion api failure."); }
     } else if (env.ANTHROPIC_API_KEY) {
+      // Secondary Fallback AI Provider: Anthropic Claude
       const anthropicRes = await fetch("https://api.anthropic.com/v1/messages", {
         method: "POST",
         headers: { "Content-Type": "application/json", "x-api-key": env.ANTHROPIC_API_KEY, "anthropic-version": "2023-06-01" },
@@ -2346,9 +2224,9 @@ async function handleGenerateSuggestion(request: Request, env: Env, ctx: any): P
         const data: any = await anthropicRes.json();
         draft = data.content[0].text;
         modelProvenance = "Claude-3-Haiku";
-      } else { throw new Error("Anthropic suggestion failed."); }
+      } else { throw new Error("Anthropic suggestion api failure."); }
     } else {
-      draft = `[AUTO-FALLBACK] Context findings:\n\n${contextText}`;
+      draft = `[AUTO-FALLBACK] Primary knowledge base playbooks context:\n\n${contextText}`;
       modelProvenance = "System-Fallback";
     }
 
