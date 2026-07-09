@@ -586,7 +586,7 @@ async function handleTicketIngestion(request: Request, env: Env, ctx: any): Prom
                 method: "POST",
                 headers: {
                   "Content-Type": "application/json",
-                  Authorization: `Bearer ${env.AXIM_SERVICE_KEY}`,
+                  Authorization: `Bearer ${env.SUPABASE_SERVICE_ROLE_KEY}`,
                 },
                 body: JSON.stringify({
                   ticket_id: ticket.id,
@@ -644,7 +644,7 @@ async function handleVectorSearch(request: Request, env: Env, ctx: any): Promise
     let embedding = [];
     const embedRes = await fetch(`${env.CORE_API_URL || "https://api.axim-core.internal"}/functions/v1/generate-embedding`, {
       method: "POST",
-      headers: { "Content-Type": "application/json", "Authorization": `Bearer ${env.AXIM_SERVICE_KEY}` },
+      headers: { "Content-Type": "application/json", "Authorization": `Bearer ${env.SUPABASE_SERVICE_ROLE_KEY}` },
       body: JSON.stringify({ input: query }),
     });
 
@@ -1381,7 +1381,7 @@ async function handleWebhookIntake(request: Request, env: Env, ctx: any): Promis
                   method: "POST",
                   headers: {
                     "Content-Type": "application/json",
-                    "Authorization": `Bearer ${env.AXIM_SERVICE_KEY}`
+                    "Authorization": `Bearer ${env.SUPABASE_SERVICE_ROLE_KEY}`
                   },
                   body: JSON.stringify({
                     ticket_id: ticket.id,
@@ -1529,7 +1529,7 @@ async function getCachedRAGContext(queryText: string, env: Env, supabase: any, c
   try {
     const embedRes = await fetch(`${env.CORE_API_URL || "https://api.axim-core.internal"}/functions/v1/generate-embedding`, {
       method: "POST",
-      headers: { "Content-Type": "application/json", "Authorization": `Bearer ${env.AXIM_SERVICE_KEY}` },
+      headers: { "Content-Type": "application/json", "Authorization": `Bearer ${env.SUPABASE_SERVICE_ROLE_KEY}` },
       body: JSON.stringify({ input: queryText }),
     });
 
@@ -1858,8 +1858,7 @@ async function handleExecuteAction(request: Request, env: Env, ctx: any): Promis
 
     if (existingKey) {
       return new Response(JSON.stringify({ error: "Conflict: Action already processed", status: "rejected" }), {
-        status: 409,
-        headers: { "Content-Type": "application/json", ...getCorsHeaders(env, request) }
+        status: 409, headers: { "Content-Type": "application/json", ...getCorsHeaders(env, request) }
       });
     }
     await env.IDEMPOTENCY_KV.put(cacheKey, "processed", { expirationTtl: 86400 });
@@ -1878,7 +1877,7 @@ async function handleExecuteAction(request: Request, env: Env, ctx: any): Promis
     });
   }
 
-  // CRITICAL FIX: Eradicate old static secret check in favor of active session verification
+  // CRITICAL FIX: Eradicate static secret exposure in favor of active user session tokens
   const authHeader = request.headers.get("Authorization") || "";
   const token = authHeader.replace("Bearer ", "").trim();
   if (!token) return new Response(JSON.stringify({ error: "UNAUTHORIZED_ACTION_EXECUTION" }), { status: 401, headers: getCorsHeaders(env, request) });
@@ -1967,7 +1966,6 @@ async function handleExecuteAction(request: Request, env: Env, ctx: any): Promis
     });
   }
 }
-
 async function handleTicketResolved(request: Request, env: Env, ctx: any): Promise<Response> {
   const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
   const logCtx = createLogContext(request);
@@ -2053,7 +2051,7 @@ async function handleTicketResolved(request: Request, env: Env, ctx: any): Promi
           let embeddingForMemory = null;
           try {
              const embedRes = await fetch(`${env.CORE_API_URL || "https://api.axim-core.internal"}/functions/v1/generate-embedding`, {
-                method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${env.AXIM_SERVICE_KEY}` },
+                method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${env.SUPABASE_SERVICE_ROLE_KEY}` },
                 body: JSON.stringify({ input: `RCA: ${record.subject}\n\n${rcaMarkdown}` }),
              });
              if (embedRes.ok) { const embedData: any = await embedRes.json(); embeddingForMemory = embedData.embedding; }
@@ -2152,7 +2150,7 @@ async function handleGenerateSuggestion(request: Request, env: Env, ctx: any): P
   ctx.waitUntil(logToEvents(supabase, logCtx, "performance_metric", "Request start", { headers: request.headers }).catch(() => {}));
   const startTime = Date.now();
 
-  // 1. Enforce zero-trust dynamic JWT validation rather than old static secret checks
+  // Enforce zero-trust dynamic JWT validation rather than old static secret checks
   const authHeader = request.headers.get("Authorization") || "";
   const token = authHeader.replace("Bearer ", "").trim();
   if (!token) return new Response(JSON.stringify({ error: "UNAUTHORIZED_SUGGESTION" }), { status: 401, headers: getCorsHeaders(env, request) });
@@ -2171,7 +2169,7 @@ async function handleGenerateSuggestion(request: Request, env: Env, ctx: any): P
     let embedding = [];
     const embedRes = await fetch(`${env.CORE_API_URL || "https://api.axim-core.internal"}/functions/v1/generate-embedding`, {
       method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${env.AXIM_SERVICE_KEY}` },
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${env.SUPABASE_SERVICE_ROLE_KEY}` },
       body: JSON.stringify({ input: `${subject} ${description || ""}` }),
     });
 
@@ -2194,7 +2192,7 @@ async function handleGenerateSuggestion(request: Request, env: Env, ctx: any): P
     let modelProvenance = "unknown";
 
     if (env.DEEPSEEK_API_KEY) {
-      // Primary AI Provider: Deepseek (Cost-Optimized Strategy)
+      // Primary Provider: Deepseek
       const deepseekRes = await fetch("https://api.deepseek.com/v1/chat/completions", {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${env.DEEPSEEK_API_KEY}` },
@@ -2208,9 +2206,9 @@ async function handleGenerateSuggestion(request: Request, env: Env, ctx: any): P
         const data: any = await deepseekRes.json();
         draft = data.choices[0].message.content;
         modelProvenance = "Deepseek-V3";
-      } else { throw new Error("Deepseek suggestion api failure."); }
+      } else { throw new Error("Deepseek suggestion connection failed."); }
     } else if (env.ANTHROPIC_API_KEY) {
-      // Secondary Fallback AI Provider: Anthropic Claude
+      // Secondary Fallback Provider: Anthropic Claude
       const anthropicRes = await fetch("https://api.anthropic.com/v1/messages", {
         method: "POST",
         headers: { "Content-Type": "application/json", "x-api-key": env.ANTHROPIC_API_KEY, "anthropic-version": "2023-06-01" },
@@ -2224,9 +2222,9 @@ async function handleGenerateSuggestion(request: Request, env: Env, ctx: any): P
         const data: any = await anthropicRes.json();
         draft = data.content[0].text;
         modelProvenance = "Claude-3-Haiku";
-      } else { throw new Error("Anthropic suggestion api failure."); }
+      } else { throw new Error("Anthropic suggestion connection failed."); }
     } else {
-      draft = `[AUTO-FALLBACK] Primary knowledge base playbooks context:\n\n${contextText}`;
+      draft = `[AUTO-FALLBACK] Guideline playbooks context retrieved:\n\n${contextText}`;
       modelProvenance = "System-Fallback";
     }
 
@@ -2418,7 +2416,7 @@ async function handleFeedbackIngress(request: Request, env: Env, ctx: any): Prom
 
 async function handleSandboxResolution(request: Request, env: Env, ctx: any): Promise<Response> {
   const authHeader = request.headers.get("Authorization");
-  if (authHeader !== `Bearer ${env.AXIM_SERVICE_KEY}`) {
+  if (authHeader !== `Bearer ${env.SUPABASE_SERVICE_ROLE_KEY}`) {
     return new Response(JSON.stringify({ error: "Unauthorized Vault Access" }), {
       status: 401,
       headers: { "Content-Type": "application/json", ...getCorsHeaders(env, request) }
