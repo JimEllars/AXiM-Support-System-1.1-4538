@@ -924,16 +924,20 @@ async function handlePublicWebIngress(request: Request, env: Env, ctx: any): Pro
         try {
           const clientIP = request.headers.get("CF-Connecting-IP") || "unknown_ip";
           const supabaseAdmin = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
+
+          const flatThreatPayload = {
+            reason: "turnstile_validation_failed",
+            ip: clientIP,
+            cf_ray: request.headers.get("cf-ray") || "unknown",
+            timestamp: new Date().toISOString(),
+            error_codes: outcome['error-codes'] || []
+          };
+
           await supabaseAdmin.from("events_ax2024").insert({
             type: "threat_blocked",
-            payload: {
-              reason: "turnstile_validation_failed",
-              ip: clientIP,
-              cf_ray: request.headers.get("cf-ray") || "unknown",
-              timestamp: new Date().toISOString()
-            }
+            payload: JSON.parse(JSON.stringify(flatThreatPayload)) // Enforce structural clean copy serialization
           });
-        } catch (e) { /* silent catch for background thread */ }
+        } catch (e) { /* background failsafe block pass */ }
       };
       ctx.waitUntil(logThreat()); // Non-blocking edge execution
 
@@ -1885,7 +1889,7 @@ async function handleExecuteAction(request: Request, env: Env, ctx: any): Promis
     });
   }
 
-  // CRITICAL FIX: Eradicate static secret exposure in favor of active user session tokens
+  // CRITICAL FIX: Eradicate static secret matching tokens in favor of dynamic session verification
   const authHeader = request.headers.get("Authorization") || "";
   const token = authHeader.replace("Bearer ", "").trim();
   if (!token) return new Response(JSON.stringify({ error: "UNAUTHORIZED_ACTION_EXECUTION" }), { status: 401, headers: getCorsHeaders(env, request) });
@@ -1933,7 +1937,7 @@ async function handleExecuteAction(request: Request, env: Env, ctx: any): Promis
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${env.AXIM_SERVICE_KEY}`,
+        Authorization: `Bearer ${env.SUPABASE_SERVICE_ROLE_KEY}`,
         "Idempotency-Key": hitlLogId,
       },
       body: JSON.stringify({ action: hitlLog.tool_type, payload: hitlLog.payload }),
