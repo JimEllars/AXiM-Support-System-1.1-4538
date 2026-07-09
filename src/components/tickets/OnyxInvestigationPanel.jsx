@@ -2,6 +2,7 @@ import React, { useState, useRef } from 'react';
 import { FiCpu, FiTerminal, FiPlay, FiPaperclip, FiCheck } from 'react-icons/fi';
 import ReactMarkdown from 'react-markdown';
 import { supabase } from '../../lib/supabaseClient';
+import toast from 'react-hot-toast';
 
 export default function OnyxInvestigationPanel({ ticketId, subject, description }) {
   const [streamText, setStreamText] = useState('');
@@ -77,18 +78,32 @@ export default function OnyxInvestigationPanel({ ticketId, subject, description 
 
   const pinToThread = async () => {
     if (!streamText || isPinned) return;
+
+    // UI Optimism lock
+    setIsPinned(true);
+
     try {
       const { data: { user } } = await supabase.auth.getUser();
-      await supabase.from('ticket_messages').insert({
+      const { error } = await supabase.from('ticket_messages').insert({
         ticket_id: ticketId,
         sender_id: user?.id || 'onyx_system',
         message_body: `**[ONYX LIVE TRIAGE CAPTURE]**\n\n${streamText}`,
         is_internal_note: true,
         metadata: { is_rca: false, model_provenance: 'Deepseek-V3' }
       });
-      setIsPinned(true);
+
+      if (error) throw error;
+
+      toast.success('Investigation Pinned to Thread', {
+        icon: '📌', style: { background: '#09090b', color: '#10b981', border: '1px solid rgba(16,185,129,0.3)' }
+      });
     } catch (error) {
+      // Revert optimistic lock on failure
+      setIsPinned(false);
       console.error("Failed to pin note", error);
+      toast.error('Failed to pin investigation. Check network connection.', {
+        style: { background: '#4c0519', color: '#fda4af', border: '1px solid rgba(225,29,72,0.5)' }
+      });
     }
   };
 

@@ -14,6 +14,7 @@ export const useTicketStore = create((set, get) => ({
 
   // --- TELEMETRY & TRACE DEEP CONTROL STATES ---
   dlqEvents: [],
+  threatEvents: [], // CRITICAL FIX: Track edge security events
   clearDLQEvents: () => set({ dlqEvents: [] }), // CRITICAL FIX: Optimistic UI clearing
   activeInspectionTraceId: null,
   isInspectionModalOpen: false,
@@ -73,42 +74,48 @@ export const useTicketStore = create((set, get) => ({
   },
 
   fetchLiveDLQData: async () => {
-    const { data, error } = await supabase
-      .from('events_ax2024')
-      .select('*')
-      .eq('type', 'dlq_payload')
-      .order('created_at', { ascending: false })
-      .limit(10);
-    if (!error && data) set({ dlqEvents: data });
+    try {
+      const { data: dlqData } = await supabase
+        .from('events_ax2024')
+        .select('*')
+        .eq('type', 'dlq_payload')
+        .order('created_at', { ascending: false })
+        .limit(10);
+      if (dlqData) set({ dlqEvents: dlqData });
+
+      const { data: threatData } = await supabase
+        .from('events_ax2024')
+        .select('*')
+        .eq('type', 'threat_blocked')
+        .order('created_at', { ascending: false })
+        .limit(10);
+      if (threatData) set({ threatEvents: threatData });
+    } catch (e) {
+      console.error("Telemetry fetch failed", e);
+    }
   },
 
   subscribeToDLQChanges: () => {
     const channel = supabase
-      .channel('global-dlq-feed')
-      .on('postgres_changes', {
-        event: 'INSERT',
-        schema: 'public',
-        table: 'events_ax2024',
-        filter: "type=eq.dlq_payload"
-      }, (payload) => {
+      .channel('global-telemetry-feed')
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'events_ax2024' }, (payload) => {
         set((state) => {
-           const exists = state.dlqEvents.find(e => e.id === payload.new.id);
-           if (exists) return state;
-           return { dlqEvents: [payload.new, ...state.dlqEvents].slice(0, 10) };
+           if (payload.new.type === 'dlq_payload') {
+             const exists = state.dlqEvents.find(e => e.id === payload.new.id);
+             return exists ? state : { dlqEvents: [payload.new, ...state.dlqEvents].slice(0, 10) };
+           }
+           if (payload.new.type === 'threat_blocked') {
+             const exists = state.threatEvents.find(e => e.id === payload.new.id);
+             return exists ? state : { threatEvents: [payload.new, ...state.threatEvents].slice(0, 10) };
+           }
+           return state;
         });
       })
-      // CRITICAL FIX: Synchronize deletions across all multi-player clients
-      .on('postgres_changes', {
-        event: 'DELETE',
-        schema: 'public',
-        table: 'events_ax2024'
-      }, (payload) => {
-        set((state) => ({
-          dlqEvents: state.dlqEvents.filter(e => e.id !== payload.old.id)
-        }));
+      .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'events_ax2024' }, (payload) => {
+        set((state) => ({ dlqEvents: state.dlqEvents.filter(e => e.id !== payload.old.id) }));
       })
       .subscribe((status) => {
-        set({ realtimeSocketStatus: status }); // Hook for Task 3
+        set({ realtimeSocketStatus: status });
       });
 
     return () => supabase.removeChannel(channel);
