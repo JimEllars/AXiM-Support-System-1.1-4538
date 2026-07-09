@@ -1,73 +1,86 @@
 import React, { useState, useEffect } from 'react';
-import { FiActivity, FiDatabase, FiCpu } from 'react-icons/fi';
+import { motion } from 'framer-motion';
 import { useTicketStore } from '../../store/useTicketStore';
-import { supabase } from '../../lib/supabaseClient';
 
 export default function CoreHealthIndicator() {
-  const { realtimeSocketStatus } = useTicketStore();
-  const [aiAdoptions, setAiAdoptions] = useState(0);
-  const [isDbHealthy, setIsDbHealthy] = useState(true);
+  const { isCoreOnline: isOnline, setCoreOnlineStatus: setIsOnline, realtimeSocketStatus } = useTicketStore();
+  const [uptimeSeconds, setUptimeSeconds] = useState(0);
 
   useEffect(() => {
-    const fetchAITelemetry = async () => {
+    const checkHealth = async () => {
       try {
-        const { count, error } = await supabase
-          .from('ticket_messages')
-          .select('*', { count: 'exact', head: true })
-          .eq('metadata->>ai_draft_adopted', 'true');
+        // CRITICAL FIX: Redirect fallback URL away from dead port 54321 to active edge port 8787
+        const workerUrl = import.meta.env.VITE_EDGE_WORKER_URL || import.meta.env.VITE_ONYX_WORKER_URL || 'http://localhost:8787';
+        const res = await fetch(`${workerUrl}/health`, {
+          method: 'GET',
+          signal: AbortSignal.timeout(4000),
+        });
 
-        if (!error && count !== null) setAiAdoptions(count);
-      } catch (e) { console.error('Failed to fetch AI telemetry', e); }
+        if (res.ok) {
+          const data = await res.json();
+          setIsOnline(data.status === 'healthy' || data.status === 'degraded');
+        } else {
+          setIsOnline(false);
+        }
+      } catch (error) {
+        setIsOnline(false);
+      }
     };
 
-    const verifyDbHealth = async () => {
-      try {
-        const { error } = await supabase.from('support_tickets').select('id').limit(1);
-        setIsDbHealthy(!error);
-      } catch (e) { setIsDbHealthy(false); }
-    };
+    checkHealth();
+    const healthInterval = setInterval(checkHealth, 30000); // Poll every 30 seconds
 
-    fetchAITelemetry();
-    verifyDbHealth();
-    const interval = setInterval(() => { fetchAITelemetry(); verifyDbHealth(); }, 30000);
-    return () => clearInterval(interval);
-  }, []);
+    // THE 5% FEATURE BLOCK: Lightweight telemetry session uptime tracker
+    const uptimeInterval = setInterval(() => {
+      setUptimeSeconds(prev => prev + 1);
+    }, 1000);
+
+    return () => {
+      clearInterval(healthInterval);
+      clearInterval(uptimeInterval);
+    };
+  }, [setIsOnline]);
+
+  const formatUptime = (totalSeconds) => {
+    const mins = Math.floor(totalSeconds / 60);
+    const secs = totalSeconds % 60;
+    return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+  };
+
+  const isWssHealthy = realtimeSocketStatus === 'SUBSCRIBED';
 
   return (
-    <div className="flex flex-wrap items-center gap-2 font-mono text-[9px] font-bold tracking-widest text-zinc-500 uppercase select-none">
-
-      {/* Edge Routing Node State */}
-      <div className="flex items-center gap-1.5 px-2.5 py-1 bg-zinc-950/60 border border-zinc-800/80 rounded-md">
-        <span>EDGE</span>
-        <span className="w-1 h-1 rounded-full bg-emerald-400 shadow-[0_0_6px_rgba(16,185,129,0.6)]" />
-      </div>
-
-      {/* Database Node State */}
-      <div className="flex items-center gap-2 px-2 py-1 bg-zinc-950/60 border border-zinc-800/80 rounded-md">
-        <span>CORE DB</span>
-        <span className={`w-1.5 h-1.5 rounded-full ${isDbHealthy ? 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.6)]' : 'bg-rose-500 animate-pulse'}`} />
-      </div>
-
-      {/* Multiplayer Socket State */}
-      <div className="flex items-center gap-2 px-3 py-1 bg-zinc-950/60 border border-zinc-800/50 rounded-md">
-        <span>WSS FEED</span>
-        <div className="flex items-center gap-1.5">
-          <span className={`w-1.5 h-1.5 rounded-full ${
-            realtimeSocketStatus === 'SUBSCRIBED' ? 'bg-emerald-400 shadow-[0_0_8px_rgba(16,185,129,0.8)]' : 'bg-amber-500 animate-pulse'
-          }`} />
-          <span className="text-zinc-400 truncate max-w-[45px]">
-            {realtimeSocketStatus === 'SUBSCRIBED' ? 'LIVE' : 'CONN'}
-          </span>
+    <motion.div
+      initial={{ opacity: 0, y: -10 }}
+      animate={{ opacity: 1, y: 0 }}
+      className="fixed top-6 right-8 flex items-center gap-4 px-4 py-2 bg-zinc-950/80 border border-zinc-800 backdrop-blur-md rounded-xl shadow-2xl z-50 font-mono text-[10px]"
+    >
+      {/* Edge Node Pipeline State */}
+      <div className="flex items-center gap-2 border-r border-zinc-800 pr-3">
+        <div className="relative flex h-2 w-2">
+          <span className={`absolute inline-flex h-full w-full rounded-full opacity-75 ${isOnline ? 'bg-emerald-400' : 'bg-rose-500 animate-ping'}`} />
+          <span className={`relative inline-flex rounded-full h-2 w-2 ${isOnline ? 'bg-emerald-500' : 'bg-rose-500'}`} />
         </div>
+        <span className={isOnline ? 'text-zinc-400 font-bold' : 'text-rose-400 font-black animate-pulse'}>
+          {isOnline ? 'EDGE: OK' : 'EDGE: LOSS'}
+        </span>
       </div>
 
-      {/* AI Adoption Telemetry Flag */}
-      {aiAdoptions > 0 && (
-        <div className="flex items-center gap-1.5 px-2.5 py-1 bg-fuchsia-950/20 border border-fuchsia-500/20 text-fuchsia-400 rounded-md shadow-[0_0_10px_rgba(217,70,239,0.05)] font-mono">
-          <span>AI ROI:</span>
-          <span className="font-black text-white">{aiAdoptions}</span>
+      {/* Multiplayer Realtime WebSocket State */}
+      <div className="flex items-center gap-2 border-r border-zinc-800 pr-3">
+        <div className="relative flex h-2 w-2">
+          <span className={`absolute inline-flex h-full w-full rounded-full opacity-75 ${isWssHealthy ? 'bg-cyan-400' : 'bg-amber-500 animate-ping'}`} />
+          <span className={`relative inline-flex rounded-full h-2 w-2 ${isWssHealthy ? 'bg-cyan-500' : 'bg-amber-500'}`} />
         </div>
-      )}
-    </div>
+        <span className={isWssHealthy ? 'text-zinc-400 font-bold' : 'text-amber-400 font-black'}>
+          WSS: {isWssHealthy ? 'LIVE' : 'CONN'}
+        </span>
+      </div>
+
+      {/* Polish Metric Clock */}
+      <div className="text-zinc-500 font-mono text-[9px]">
+        UP: <span className="text-zinc-300 font-bold">{formatUptime(uptimeSeconds)}</span>
+      </div>
+    </motion.div>
   );
 }
