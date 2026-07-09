@@ -365,48 +365,57 @@ export default {
 
     // --- LIVE ONYX INVESTIGATION STREAM (SSE Proxy) ---
     if (url.pathname === "/api/v1/onyx-bridge/stream" && request.method === "POST") {
-      // 1. Strict JWT Edge Validation
       const authHeader = request.headers.get("Authorization") || "";
       const token = authHeader.replace("Bearer ", "").trim();
-      if (!token) return new Response(JSON.stringify({ error: "UNAUTHORIZED" }), { status: 401, headers: getCorsHeaders(env, request) });
+      if (!token) return new Response(JSON.stringify({ error: "UNAUTHORIZED_STREAM" }), { status: 401, headers: getCorsHeaders(env, request) });
 
-      const supabaseAuth = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY, { global: { headers: { Authorization: `Bearer ${token}` } }});
+      const supabaseAuth = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY, {
+        global: { headers: { Authorization: `Bearer ${token}` } }
+      });
       const { data: { user }, error: authError } = await supabaseAuth.auth.getUser();
-      if (authError || !user) return new Response(JSON.stringify({ error: "FORBIDDEN" }), { status: 403, headers: getCorsHeaders(env, request) });
+      if (authError || !user) return new Response(JSON.stringify({ error: "INVALID_SESSION" }), { status: 403, headers: getCorsHeaders(env, request) });
 
       try {
         const body: any = await request.json();
-        const prompt = `You are Onyx Mk3, an internal enterprise AI. Perform a rapid, live triage investigation of the following support ticket. Stream your thought process step-by-step using bullet points.\n\nTicket Subject: ${body.subject}\nTicket Description: ${body.description}`;
+        const prompt = `You are Onyx Mk3, an internal enterprise AI. Perform a rapid, live triage investigation of the following support ticket. Stream your thought process step-by-step using clear bullet points.\n\nSubject: ${body.subject}\nDescription: ${body.description}`;
 
-        if (!env.DEEPSEEK_API_KEY) throw new Error("Deepseek API key missing from edge environment.");
-
-        // 2. Open Streaming Connection to Deepseek
-        const deepseekRes = await fetch("https://api.deepseek.com/chat/completions", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "Authorization": `Bearer ${env.DEEPSEEK_API_KEY}`
-          },
-          body: JSON.stringify({
-            model: "deepseek-chat",
-            max_tokens: 400,
-            messages: [{ role: "user", content: prompt }],
-            stream: true // CRITICAL FIX: Enable native chunk streaming
-          }),
-        });
-
-        if (!deepseekRes.ok) throw new Error("Upstream AI Provider Failed");
-
-        // 3. Pipe the native stream back to the React client
-        return new Response(deepseekRes.body, {
-          status: 200,
-          headers: {
-            "Content-Type": "text/event-stream", // Required for SSE
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-            ...getCorsHeaders(env, request)
-          }
-        });
+        if (env.DEEPSEEK_API_KEY) {
+          // Primary Provider: Deepseek
+          const deepseekRes = await fetch("https://api.deepseek.com/chat/completions", {
+            method: "POST",
+            headers: { "Content-Type": "application/json", "Authorization": `Bearer ${env.DEEPSEEK_API_KEY}` },
+            body: JSON.stringify({
+              model: "deepseek-chat",
+              max_tokens: 400,
+              messages: [{ role: "user", content: prompt }],
+              stream: true
+            }),
+          });
+          if (!deepseekRes.ok) throw new Error("Deepseek streaming ingress dropped.");
+          return new Response(deepseekRes.body, {
+            status: 200,
+            headers: { "Content-Type": "text/event-stream", "Cache-Control": "no-cache", "Connection": "keep-alive", ...getCorsHeaders(env, request) }
+          });
+        } else if (env.ANTHROPIC_API_KEY) {
+          // Fallback Provider: Anthropic Claude
+          const anthropicRes = await fetch("https://api.anthropic.com/v1/messages", {
+            method: "POST",
+            headers: { "Content-Type": "application/json", "x-api-key": env.ANTHROPIC_API_KEY, "anthropic-version": "2023-06-01" },
+            body: JSON.stringify({
+              model: "claude-3-haiku-20240307",
+              max_tokens: 400,
+              messages: [{ role: "user", content: prompt }],
+              stream: true
+            }),
+          });
+          if (!anthropicRes.ok) throw new Error("Fallback Anthropic streaming ingress dropped.");
+          return new Response(anthropicRes.body, {
+            status: 200,
+            headers: { "Content-Type": "text/event-stream", "Cache-Control": "no-cache", "Connection": "keep-alive", ...getCorsHeaders(env, request) }
+          });
+        } else {
+          throw new Error("No upstream AI environment bindings present on Cloudflare Edge.");
+        }
       } catch (err: any) {
         return new Response(JSON.stringify({ error: err.message }), { status: 500, headers: getCorsHeaders(env, request) });
       }

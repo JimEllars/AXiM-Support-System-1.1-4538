@@ -39,11 +39,19 @@ export default function ActionProposalBlock({ hitlLogId, onComplete }) {
         throw new Error(`Execution rejected: ${errText}`);
       }
 
+      const responseData = await res.json();
+      const executionTrace = responseData.cf_ray || "unknown";
+
+      // CRITICAL FIX: Mutate state variables locally to instantly collapse controls on completion
       setLogDetails(prev => ({ ...prev, status: 'executed' }));
-      toast.success(`Action executed securely via core gateway.`, {
-         style: { background: '#09090b', color: '#10b981', border: '1px solid rgba(16,185,129,0.3)' }
+
+      toast.success(`Action executed securely.\nTrace: ${executionTrace}`, {
+         style: { background: '#09090b', color: '#10b981', border: '1px solid rgba(16,185,129,0.3)', whiteSpace: 'pre-wrap' }
       });
-      if (onComplete) onComplete();
+
+      if (onComplete) {
+        onComplete();
+      }
     } catch (e) {
       toast.error(e.message);
     } finally {
