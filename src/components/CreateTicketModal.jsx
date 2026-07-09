@@ -6,6 +6,7 @@ import SafeIcon from '../common/SafeIcon';
 import * as FiIcons from 'react-icons/fi';
 import { onyxService } from '../services/onyxService';
 import toast from 'react-hot-toast';
+import { getEdgeWorkerUrl } from '../lib/edgeWorkerUrl';
 
 const { FiX, FiSend, FiLoader, FiCpu, FiTerminal, FiPlus } = FiIcons;
 
@@ -19,7 +20,7 @@ export default function CreateTicketModal({ isOpen, onClose, onSuccess }) {
     setIsSubmitting(true);
 
     try {
-      const workerUrl = import.meta.env.VITE_EDGE_WORKER_URL || 'http://localhost:8787';
+      const workerUrl = getEdgeWorkerUrl();
       const secret = import.meta.env.VITE_AXIM_ONYX_SECRET || 'fallback';
 
       // CRITICAL FIX: Route to /webhooks/intake so the worker properly upserts the contact from the email

@@ -8,7 +8,11 @@
     "build": "npm run lint && vite build",
     "lint": "eslint .",
     "lint:error": "eslint . --quiet",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "dev:worker": "npm --prefix onyx-edge-worker run dev",
+    "build:worker": "npm --prefix onyx-edge-worker run build",
+    "test:worker": "npm --prefix onyx-edge-worker run test -- --run",
+    "deploy:worker": "npm --prefix onyx-edge-worker run deploy"
   },
   "dependencies": {
     "@marsidev/react-turnstile": "^1.5.3",

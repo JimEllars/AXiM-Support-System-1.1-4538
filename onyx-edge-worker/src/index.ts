@@ -323,10 +323,74 @@ async function handleSLASweep(env: Env) {
       }
     }
 
+    async function handleStatusMutation(request: Request, env: Env): Promise<Response> {
+      if (!env.STATUS_KV) {
+        return new Response(JSON.stringify({ error: "STATUS_KV binding is not configured." }), {
+          status: 500,
+          headers: { "Content-Type": "application/json", ...getCorsHeaders(env, request) },
+        });
+      }
+
+      const authHeader = request.headers.get("Authorization");
+      if (authHeader !== `Bearer ${env.AXIM_ONYX_SECRET}`) {
+        return new Response(JSON.stringify({ error: "Unauthorized" }), {
+          status: 401,
+          headers: { "Content-Type": "application/json", ...getCorsHeaders(env, request) },
+        });
+      }
+
+      const body: any = await request.json();
+      const statusData = {
+        status: body?.status || "operational",
+        indicator: body?.indicator || "none",
+        description: body?.description || "All systems operational.",
+        updated_at: new Date().toISOString(),
+      };
+
+      await env.STATUS_KV.put("current_status", JSON.stringify(statusData));
+
+      return new Response(JSON.stringify({ success: true, status: statusData }), {
+        status: 200,
+        headers: { "Content-Type": "application/json", ...getCorsHeaders(env, request) },
+      });
+    }
+
     console.log('[handleSLASweep] SLA sweep completed successfully.');
   } catch (error) {
     console.error('[handleSLASweep] Unhandled exception in SLA sweep:', error);
   }
+}
+
+async function handleStatusMutation(request: Request, env: Env): Promise<Response> {
+  if (!env.STATUS_KV) {
+    return new Response(JSON.stringify({ error: "STATUS_KV binding is not configured." }), {
+      status: 500,
+      headers: { "Content-Type": "application/json", ...getCorsHeaders(env, request) },
+    });
+  }
+
+  const authHeader = request.headers.get("Authorization");
+  if (authHeader !== `Bearer ${env.AXIM_ONYX_SECRET}`) {
+    return new Response(JSON.stringify({ error: "Unauthorized" }), {
+      status: 401,
+      headers: { "Content-Type": "application/json", ...getCorsHeaders(env, request) },
+    });
+  }
+
+  const body: any = await request.json();
+  const statusData = {
+    status: body?.status || "operational",
+    indicator: body?.indicator || "none",
+    description: body?.description || "All systems operational.",
+    updated_at: new Date().toISOString(),
+  };
+
+  await env.STATUS_KV.put("current_status", JSON.stringify(statusData));
+
+  return new Response(JSON.stringify({ success: true, status: statusData }), {
+    status: 200,
+    headers: { "Content-Type": "application/json", ...getCorsHeaders(env, request) },
+  });
 }
 
 export default {
@@ -369,26 +433,32 @@ if (url.pathname === "/api/v1/onyx-bridge/draft") {
     }
 
     // --- PUBLIC ECOSYSTEM STATUS (Cloudflare KV Backed) ---
-    if (url.pathname === "/api/v1/status" && request.method === "GET") {
-      try {
-        // Read directly from the edge KV for 0ms latency global reads
-        const statusStr = env.STATUS_KV ? await env.STATUS_KV.get("current_status") : null;
-        const statusData = statusStr ? JSON.parse(statusStr) : {
-          status: "operational",
-          indicator: "none",
-          description: "All systems operational."
-        };
+    if (url.pathname === "/api/v1/status") {
+      if (request.method === "POST") {
+        return handleStatusMutation(request, env);
+      }
 
-        return new Response(JSON.stringify(statusData), {
-          status: 200,
-          headers: {
-            ...getCorsHeaders(env, request),
-            "Cache-Control": "public, max-age=60", // 1 minute edge cache
-            "Content-Type": "application/json"
-          }
-        });
-      } catch (err: any) {
-        return new Response(JSON.stringify({ error: "Failed to read edge status" }), { status: 500, headers: getCorsHeaders(env, request) });
+      if (request.method === "GET") {
+        try {
+          // Read directly from the edge KV for 0ms latency global reads
+          const statusStr = env.STATUS_KV ? await env.STATUS_KV.get("current_status") : null;
+          const statusData = statusStr ? JSON.parse(statusStr) : {
+            status: "operational",
+            indicator: "none",
+            description: "All systems operational."
+          };
+
+          return new Response(JSON.stringify(statusData), {
+            status: 200,
+            headers: {
+              ...getCorsHeaders(env, request),
+              "Cache-Control": "public, max-age=60", // 1 minute edge cache
+              "Content-Type": "application/json"
+            }
+          });
+        } catch (err: any) {
+          return new Response(JSON.stringify({ error: "Failed to read edge status" }), { status: 500, headers: getCorsHeaders(env, request) });
+        }
       }
     }
 
@@ -851,49 +921,76 @@ async function handlePublicWebIngress(request: Request, env: Env, ctx: any): Pro
   const contentType = request.headers.get("content-type") || "";
 
   try {
-    let encryptedPayloadStr = "";
-    let ivStr = "";
-
     if (contentType.includes("multipart/form-data")) {
       const formData = await request.clone().formData();
-      encryptedPayloadStr = formData.get("encrypted_payload") as string || "";
-      ivStr = formData.get("iv") as string || "";
+      const encryptedPayloadStr = formData.get("encrypted_payload") as string || "";
+      const ivStr = formData.get("iv") as string || "";
 
       const file = formData.get("attachment") as File | null;
       if (file && file.size > 0) {
         pendingAttachmentFile = file;
       }
+
+      if (encryptedPayloadStr && ivStr) {
+        const encoder = new TextEncoder();
+        const hashBuffer = await crypto.subtle.digest("SHA-256", encoder.encode(env.AXIM_ONYX_SECRET));
+        const key = await crypto.subtle.importKey(
+          "raw",
+          hashBuffer,
+          { name: "AES-GCM" },
+          false,
+          ["decrypt"]
+        );
+
+        const ivBuffer = Uint8Array.from(atob(ivStr), c => c.charCodeAt(0));
+        const dataBuffer = Uint8Array.from(atob(encryptedPayloadStr), c => c.charCodeAt(0));
+        const decryptedBuffer = await crypto.subtle.decrypt(
+          { name: "AES-GCM", iv: ivBuffer },
+          key,
+          dataBuffer
+        );
+        const decryptedText = new TextDecoder().decode(decryptedBuffer);
+        decryptedPayload = sanitizePayload(JSON.parse(decryptedText));
+      } else {
+        decryptedPayload = sanitizePayload({
+          subject: formData.get("subject"),
+          description: formData.get("description"),
+          customer_email: formData.get("customer_email"),
+          customer_name: formData.get("customer_name"),
+          workflow_category: formData.get("workflow_category"),
+          source: formData.get("source") || "website_support_form",
+          urgency_flag: formData.get("urgency_flag") || "standard",
+          cf_turnstile_response: formData.get("cf_turnstile_response"),
+        });
+      }
     } else {
       const jsonBody: any = await request.clone().json();
-      encryptedPayloadStr = jsonBody.encrypted_payload || "";
-      ivStr = jsonBody.iv || "";
-    }
+      const encryptedPayloadStr = jsonBody.encrypted_payload || "";
+      const ivStr = jsonBody.iv || "";
 
-    if (encryptedPayloadStr && ivStr) {
-      const encoder = new TextEncoder();
-      const hashBuffer = await crypto.subtle.digest('SHA-256', encoder.encode(env.AXIM_ONYX_SECRET));
+      if (encryptedPayloadStr && ivStr) {
+        const encoder = new TextEncoder();
+        const hashBuffer = await crypto.subtle.digest("SHA-256", encoder.encode(env.AXIM_ONYX_SECRET));
+        const key = await crypto.subtle.importKey(
+          "raw",
+          hashBuffer,
+          { name: "AES-GCM" },
+          false,
+          ["decrypt"]
+        );
 
-      const key = await crypto.subtle.importKey(
-        "raw",
-        hashBuffer,
-        { name: "AES-GCM" },
-        false,
-        ["decrypt"]
-      );
-
-      const ivBuffer = Uint8Array.from(atob(ivStr), c => c.charCodeAt(0));
-      const dataBuffer = Uint8Array.from(atob(encryptedPayloadStr), c => c.charCodeAt(0));
-
-      const decryptedBuffer = await crypto.subtle.decrypt(
-        { name: "AES-GCM", iv: ivBuffer },
-        key,
-        dataBuffer
-      );
-
-      const decryptedText = new TextDecoder().decode(decryptedBuffer);
-      decryptedPayload = sanitizePayload(JSON.parse(decryptedText));
-    } else {
-      throw new Error("Missing cryptographic payload properties.");
+        const ivBuffer = Uint8Array.from(atob(ivStr), c => c.charCodeAt(0));
+        const dataBuffer = Uint8Array.from(atob(encryptedPayloadStr), c => c.charCodeAt(0));
+        const decryptedBuffer = await crypto.subtle.decrypt(
+          { name: "AES-GCM", iv: ivBuffer },
+          key,
+          dataBuffer
+        );
+        const decryptedText = new TextDecoder().decode(decryptedBuffer);
+        decryptedPayload = sanitizePayload(JSON.parse(decryptedText));
+      } else {
+        decryptedPayload = sanitizePayload(jsonBody);
+      }
     }
   } catch (parseError: any) {
     const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
@@ -2608,4 +2705,3 @@ async function handleDataRetentionSweep(env: Env) {
     console.error('[handleDataRetentionSweep] Unhandled exception:', error);
   }
 }
-

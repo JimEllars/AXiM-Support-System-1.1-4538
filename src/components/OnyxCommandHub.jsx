@@ -5,6 +5,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { useTicketStore } from '../store/useTicketStore';
 import { onyxService } from '../services/onyxService';
 import { supabase } from '../lib/supabaseClient';
+import { getEdgeWorkerUrl } from '../lib/edgeWorkerUrl';
 import toast from 'react-hot-toast';
 
 const { FiTerminal, FiSearch, FiZap, FiChevronRight, FiFilter, FiCpu, FiTrash2 } = FiIcons;
@@ -87,7 +88,7 @@ export default function OnyxCommandHub() {
             setIsProcessing(true);
             const start = performance.now();
             try {
-              const workerUrl = import.meta.env.VITE_EDGE_WORKER_URL || 'http://localhost:8787';
+              const workerUrl = getEdgeWorkerUrl();
               await fetch(`${workerUrl}/api/v1/health`);
               const ms = Math.round(performance.now() - start);
               toast.success(`Edge Gateway Healthy (${ms}ms)`, {

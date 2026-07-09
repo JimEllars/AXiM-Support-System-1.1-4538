@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { useTicketStore } from '../../store/useTicketStore';
 import { FiAlertTriangle, FiRotateCw, FiTerminal, FiShield } from 'react-icons/fi';
 import PayloadTraceInspectorModal from '../modals/PayloadTraceInspectorModal';
+import { getEdgeWorkerUrl } from '../../lib/edgeWorkerUrl';
 import toast from 'react-hot-toast';
 import { supabase } from '../../lib/supabaseClient';
 
@@ -17,7 +18,7 @@ export default function DLQMonitorBlock() {
 
     try {
       const eventIds = dlqEvents.map(e => e.id);
-      const workerUrl = import.meta.env.VITE_EDGE_WORKER_URL || 'http://localhost:8787';
+      const workerUrl = getEdgeWorkerUrl();
       const { data: { session } } = await supabase.auth.getSession();
 
       const res = await fetch(`${workerUrl}/api/dlq/bulk-replay`, {
