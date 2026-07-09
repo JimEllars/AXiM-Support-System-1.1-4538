@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { FiZap, FiCheck } from 'react-icons/fi';
 import { supabase } from '../../lib/supabaseClient';
+import { getEdgeWorkerUrl } from '../../lib/edgeWorkerUrl';
 import toast from 'react-hot-toast';
 import { v4 as uuidv4 } from 'uuid';
 
@@ -20,7 +21,7 @@ export default function ActionProposalBlock({ hitlLogId, onComplete }) {
     setIsExecuting(true);
     try {
       const idempotencyKey = uuidv4();
-      const workerUrl = import.meta.env.VITE_EDGE_WORKER_URL || 'http://localhost:8787';
+      const workerUrl = getEdgeWorkerUrl();
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) throw new Error("Active session required for Edge actions.");
 

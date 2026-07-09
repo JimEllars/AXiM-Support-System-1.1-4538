@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { useTicketStore } from '../../store/useTicketStore';
+import { getEdgeWorkerUrl } from '../../lib/edgeWorkerUrl';
 
 export default function CoreHealthIndicator() {
   const { isCoreOnline: isOnline, setCoreOnlineStatus: setIsOnline, realtimeSocketStatus } = useTicketStore();
@@ -10,7 +11,7 @@ export default function CoreHealthIndicator() {
     const checkHealth = async () => {
       try {
         // CRITICAL FIX: Redirect fallback URL away from dead port 54321 to active edge port 8787
-        const workerUrl = import.meta.env.VITE_EDGE_WORKER_URL || import.meta.env.VITE_ONYX_WORKER_URL || 'http://localhost:8787';
+        const workerUrl = getEdgeWorkerUrl();
         const res = await fetch(`${workerUrl}/health`, {
           method: 'GET',
           signal: AbortSignal.timeout(4000),

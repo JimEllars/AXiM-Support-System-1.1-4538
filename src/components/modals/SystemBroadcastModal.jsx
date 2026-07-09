@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { FiX, FiRadio, FiAlertTriangle, FiCheckCircle } from 'react-icons/fi';
 import { supabase } from '../../lib/supabaseClient';
+import { getEdgeWorkerUrl } from '../../lib/edgeWorkerUrl';
 import toast from 'react-hot-toast';
 
 export default function SystemBroadcastModal({ isOpen, onClose }) {
@@ -46,7 +47,7 @@ export default function SystemBroadcastModal({ isOpen, onClose }) {
     setIsSubmitting(true);
 
     try {
-      const workerUrl = import.meta.env.VITE_EDGE_WORKER_URL || 'http://localhost:8787';
+      const workerUrl = getEdgeWorkerUrl();
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) throw new Error("Active session required for Edge actions.");
 

@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Turnstile } from '@marsidev/react-turnstile';
 import { motion, AnimatePresence } from 'framer-motion';
 import { FiUser, FiMail, FiTag, FiFileText, FiPaperclip, FiCheckCircle, FiAlertCircle } from 'react-icons/fi';
+import { getEdgeWorkerUrl } from '../lib/edgeWorkerUrl';
 
 const workflowCategories = [
   { id: 'General Inquiry', label: 'General Inquiry' },
@@ -33,8 +34,6 @@ export default function PublicIntake() {
   const [submitResult, setSubmitResult] = useState(null);
   const [submitSuccess, setSubmitSuccess] = useState(false);
   const [ticketIdReceipt, setTicketIdReceipt] = useState(null);
-
-  const ONYX_WORKER_URL = import.meta.env.VITE_ONYX_WORKER_URL || 'http://localhost:54321/functions/v1/onyx-bridge';
 
   const handleNext = () => {
     if (step === 1 && (!formData.customer_name || !formData.customer_email)) {
@@ -74,23 +73,15 @@ export default function PublicIntake() {
     setSubmitResult(null);
 
     try {
-      // 1. Generate local encryption payload using Web Crypto API
-      const encoder = new TextEncoder();
-      const dataStr = JSON.stringify({
+      const payload = {
         ...formData,
         customer_id: formData.customer_email, // Map email to ID for simplicity
         source: 'website_support_form',
         urgency_flag: 'standard',
         cf_turnstile_response: turnstileToken // CRITICAL FIX: Pass token to edge
-      });
+      };
 
-      // Simple mock encryption for the frontend to satisfy the backend expectation
-      // In production, this would use the env.AXIM_ONYX_SECRET to truly encrypt
-      const iv = crypto.getRandomValues(new Uint8Array(12));
-      const ivBase64 = btoa(String.fromCharCode(...iv));
-      const encryptedBase64 = btoa(dataStr); // Placeholder for actual AES-GCM
-
-      const workerUrl = import.meta.env.VITE_EDGE_WORKER_URL || 'http://localhost:8787';
+      const workerUrl = getEdgeWorkerUrl();
 
       let fetchOptions = {
         method: 'POST',
@@ -101,20 +92,17 @@ export default function PublicIntake() {
 
       if (file && file.size > 0) {
         const formDataPayload = new FormData();
-        formDataPayload.append('encrypted_payload', encryptedBase64);
-        formDataPayload.append('iv', ivBase64);
+        Object.entries(payload).forEach(([key, value]) => {
+          formDataPayload.append(key, value);
+        });
         formDataPayload.append('attachment', file);
         fetchOptions.body = formDataPayload;
       } else {
         fetchOptions.headers['Content-Type'] = 'application/json';
-        fetchOptions.body = JSON.stringify({
-          encrypted_payload: encryptedBase64,
-          iv: ivBase64
-        });
+        fetchOptions.body = JSON.stringify(payload);
       }
 
-      // CRITICAL FIX: Target the correct API route for edge decryption
-      const response = await fetch(`${workerUrl}/api/v1/intake/public`, fetchOptions);
+      const response = await fetch(`${workerUrl}/api/v1/webhooks/public-intake`, fetchOptions);
 
       const result = await response.json();
 

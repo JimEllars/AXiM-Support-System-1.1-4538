@@ -3,6 +3,7 @@ import { FiCpu, FiTerminal, FiPlay, FiPaperclip, FiCheck } from 'react-icons/fi'
 import ReactMarkdown from 'react-markdown';
 import toast from 'react-hot-toast';
 import { supabase } from '../../lib/supabaseClient';
+import { getEdgeWorkerUrl } from '../../lib/edgeWorkerUrl';
 
 export default function OnyxInvestigationPanel({ ticketId, subject, description }) {
   const [streamText, setStreamText] = useState('');
@@ -22,7 +23,7 @@ export default function OnyxInvestigationPanel({ ticketId, subject, description 
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) throw new Error('Active session identification missing');
 
-      const workerUrl = import.meta.env.VITE_EDGE_WORKER_URL || 'http://localhost:8787';
+      const workerUrl = getEdgeWorkerUrl();
 
       const res = await fetch(`${workerUrl}/api/v1/onyx-bridge/stream`, {
         method: 'POST',

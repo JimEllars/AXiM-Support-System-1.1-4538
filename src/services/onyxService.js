@@ -1,9 +1,11 @@
+import { getEdgeWorkerUrl } from '../lib/edgeWorkerUrl';
+
 /**
  * Onyx AI Frontend Service - Enhanced
  * Logic for Edge Triage, Command Hub, and RAG Suggestions
  */
 
-const ONYX_WORKER_URL = import.meta.env.VITE_ONYX_WORKER_URL;
+const ONYX_WORKER_URL = getEdgeWorkerUrl();
 const ONYX_SECRET = import.meta.env.VITE_ONYX_SECURE_KEY;
 
 export const onyxService = {
