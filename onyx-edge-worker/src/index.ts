@@ -2001,7 +2001,7 @@ async function handleExecuteAction(request: Request, env: Env, ctx: any): Promis
     });
   }
 
-  // CRITICAL FIX: Eradicate static secret matching tokens in favor of dynamic session verification
+  // CRITICAL FIX: Eradicate old static shared token mapping in favor of active user scoped sessions
   const authHeader = request.headers.get("Authorization") || "";
   const token = authHeader.replace("Bearer ", "").trim();
   if (!token) return new Response(JSON.stringify({ error: "UNAUTHORIZED_ACTION_EXECUTION" }), { status: 401, headers: getCorsHeaders(env, request) });
@@ -2057,7 +2057,7 @@ async function handleExecuteAction(request: Request, env: Env, ctx: any): Promis
 
     if (!proxyResponse.ok) {
       if (proxyResponse.status === 401 || proxyResponse.status === 403) {
-        throw new Error("Vault Access Denied: Core rejected the credential request.");
+        throw new Error("Vault Access Denied: Core rejected the credential handshake request.");
       }
       throw new Error(`Core API Proxy Failed: ${await proxyResponse.text()}`);
     }
@@ -2300,10 +2300,16 @@ async function handleGenerateSuggestion(request: Request, env: Env, ctx: any): P
   ctx.waitUntil(logToEvents(supabase, logCtx, "performance_metric", "Request start", { headers: request.headers }).catch(() => {}));
   const startTime = Date.now();
 
-  const authHeader = request.headers.get("Authorization");
-  if (authHeader !== `Bearer ${env.AXIM_ONYX_SECRET}`) {
-    return new Response("Unauthorized", { status: 401 });
-  }
+  // CRITICAL FIX: Enforce zero-trust dynamic JWT validation rather than old static secret checks
+  const authHeader = request.headers.get("Authorization") || "";
+  const token = authHeader.replace("Bearer ", "").trim();
+  if (!token) return new Response(JSON.stringify({ error: "UNAUTHORIZED_SUGGESTION" }), { status: 401, headers: getCorsHeaders(env, request) });
+
+  const supabaseAuth = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY, {
+    global: { headers: { Authorization: `Bearer ${token}` } }
+  });
+  const { data: { user }, error: authError } = await supabaseAuth.auth.getUser();
+  if (authError || !user) return new Response(JSON.stringify({ error: "INVALID_SESSION" }), { status: 403, headers: getCorsHeaders(env, request) });
 
   try {
     const { subject, description, context_messages } = (await request.json()) as any;
@@ -2314,14 +2320,14 @@ async function handleGenerateSuggestion(request: Request, env: Env, ctx: any): P
     try {
       const embedRes = await fetch(`${env.CORE_API_URL || "https://api.axim-core.internal"}/functions/v1/generate-embedding`, {
         method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${env.AXIM_SERVICE_KEY}` },
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${env.SUPABASE_SERVICE_ROLE_KEY}` },
         body: JSON.stringify({ input: `${subject} ${description || ""}` }),
       });
       if (embedRes.ok) {
         const embedData: any = await embedRes.json();
         if (embedData.embedding) embedding = embedData.embedding;
       }
-    } catch (err) { console.error("Embedding lookup fallback activated."); }
+    } catch (err) { console.error("Embedding generation fallback engaged."); }
 
     const { data: memoryBanks } = await supabase.rpc("match_memory_banks", {
       query_embedding: embedding,
@@ -2331,12 +2337,11 @@ async function handleGenerateSuggestion(request: Request, env: Env, ctx: any): P
 
     const contextText = memoryBanks?.map((m: any) => `Title: ${m.title}\nContent: ${m.content}`).join("\n\n") || "No context found.";
 
-    const prompt = `You are Onyx, an expert AXiM Support AI. Given the following ticket details and context from our memory banks, write a professional and helpful support response draft for the agent to review.\n\nTicket Subject: ${subject}\nTicket Description: ${description}\n\nRecent Conversation History:\n${historyText || "No previous replies."}\n\nContext from Memory Banks:\n${contextText}\n\nOutput ONLY the suggested response text:`;
+    const prompt = `You are Onyx, an expert AXiM Support AI. Write a professional and helpful support response draft for the agent to review.\n\nTicket Subject: ${subject}\nTicket Description: ${description}\n\nRecent Conversation History:\n${historyText || "No previous replies."}\n\nContext from Memory Banks:\n${contextText}\n\nOutput ONLY the suggested response text:`;
 
     let draft = "";
     let providerUsed = "unknown";
 
-    // Primary AI Route Selection: Deepseek (Cost-Effective Architecture Plan)
     if (env.DEEPSEEK_API_KEY) {
       try {
         const deepseekRes = await fetch("https://api.deepseek.com/v1/chat/completions", {
@@ -2353,14 +2358,12 @@ async function handleGenerateSuggestion(request: Request, env: Env, ctx: any): P
           draft = data.choices[0].message.content;
           providerUsed = "Deepseek-V3";
         }
-      } catch (e) { console.error("Deepseek suggestions path trace offline. Shifting to fallback stream."); }
+      } catch (e) { console.error("Deepseek suggestions stream offline."); }
     }
 
-    // Secondary AI Route Selection: Anthropic Claude 3 Fallback
     if (!draft && env.ANTHROPIC_API_KEY) {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 8000);
-
       try {
         const anthropicRes = await fetch("https://api.anthropic.com/v1/messages", {
           method: "POST",
@@ -2372,21 +2375,17 @@ async function handleGenerateSuggestion(request: Request, env: Env, ctx: any): P
           }),
           signal: controller.signal,
         });
-
         clearTimeout(timeoutId);
-
         if (anthropicRes.ok) {
           const data: any = await anthropicRes.json();
           draft = data.content[0].text;
           providerUsed = "Claude-3-Haiku";
         }
-      } catch (err: any) {
-        clearTimeout(timeoutId);
-      }
+      } catch (err) { clearTimeout(timeoutId); }
     }
 
     if (!draft) {
-      draft = `[AUTO-FALLBACK: ENGINE GENERATION LOSS]\n\nContext guidelines:\n\n${contextText}`;
+      draft = `[AUTO-FALLBACK] Playbook findings context retrieved:\n\n${contextText}`;
       providerUsed = "System-Fallback";
     }
 
@@ -2396,7 +2395,7 @@ async function handleGenerateSuggestion(request: Request, env: Env, ctx: any): P
     });
   } catch (error: any) {
     logErr(supabase, logCtx, error, ctx);
-    return new Response(JSON.stringify({ error: error.message }), { status: 500, headers: { ...getCorsHeaders(env, request) } });
+    return new Response(JSON.stringify({ error: error.message }), { status: 500, headers: getCorsHeaders(env, request) });
   }
 }
 async function handleMessageEgress(request: Request, env: Env, ctx: any): Promise<Response> {
