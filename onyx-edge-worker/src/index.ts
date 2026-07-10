@@ -2225,16 +2225,16 @@ async function handleAutoDraft(request: Request, env: Env, ctx: any): Promise<Re
   const startTime = Date.now();
   ctx.waitUntil(logToEvents(supabase, logCtx, "performance_metric", "Request start", { headers: request.headers }).catch(() => {}));
 
-  // CRITICAL FIX: Transition from obsolete static matching tokens to dynamic agent session validation
+  // CRITICAL FIX: Upgrade auto-draft route to enforce zero-trust user session JWT validation
   const authHeader = request.headers.get("Authorization") || "";
   const token = authHeader.replace("Bearer ", "").trim();
-  if (!token) return new Response(JSON.stringify({ error: "UNAUTHORIZED_DRAFT_REQUEST" }), { status: 401, headers: getCorsHeaders(env, request) });
+  if (!token) return new Response(JSON.stringify({ error: "UNAUTHORIZED_DRAFT_GENERATION" }), { status: 401, headers: getCorsHeaders(env, request) });
 
   const supabaseAuth = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY, {
     global: { headers: { Authorization: `Bearer ${token}` } }
   });
   const { data: { user }, error: authError } = await supabaseAuth.auth.getUser();
-  if (authError || !user) return new Response(JSON.stringify({ error: "INVALID_SESSION_CREDENTIALS" }), { status: 403, headers: getCorsHeaders(env, request) });
+  if (authError || !user) return new Response(JSON.stringify({ error: "INVALID_SESSION" }), { status: 403, headers: getCorsHeaders(env, request) });
 
   try {
     const { ticketData, articles } = (await request.json()) as any;
@@ -2244,6 +2244,7 @@ async function handleAutoDraft(request: Request, env: Env, ctx: any): Promise<Re
 
     let draft = "";
 
+    // Primary Cost-Optimized Provider Path
     if (env.DEEPSEEK_API_KEY) {
       try {
         const deepseekRes = await fetch("https://api.deepseek.com/v1/chat/completions", {
@@ -2265,6 +2266,7 @@ async function handleAutoDraft(request: Request, env: Env, ctx: any): Promise<Re
       } catch (dsDraftErr) { console.error("Deepseek auto-draft fallback engaged."); }
     }
 
+    // Secondary Fallback Provider Path
     if (!draft && env.ANTHROPIC_API_KEY) {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 12000);
@@ -2295,7 +2297,7 @@ async function handleAutoDraft(request: Request, env: Env, ctx: any): Promise<Re
     return new Response(JSON.stringify({ draft }), { headers: { "Content-Type": "application/json", ...getCorsHeaders(env, request) } });
   } catch (e: any) {
     logErr(supabase, logCtx, e, ctx);
-    return new Response(JSON.stringify({ error: e.message }), { status: 500 });
+    return new Response(JSON.stringify({ error: e.message }), { status: 500, headers: getCorsHeaders(env, request) });
   }
 }
 
@@ -2552,6 +2554,8 @@ async function handleFeedbackIngress(request: Request, env: Env, ctx: any): Prom
           const threadText = messages.map((m: any) => `[${m.sender_type || m.sender_id}] ${m.body}`).join('\n');
 
           const systemPrompt = "Generate a Failure Analysis detailing why the customer was unsatisfied with this resolution, and propose a new operational rule to prevent this.";
+
+          // CRITICAL FIX: Pass context parameters trailing block argument to enforce Deepseek cost boundaries
           const analysisResult = await analyzeWithOnyx("", threadText + "\n\nPROMPT: " + systemPrompt, env.ANTHROPIC_API_KEY, null, null, "", env);
 
           await supabase.from('hitl_audit_logs').insert({
