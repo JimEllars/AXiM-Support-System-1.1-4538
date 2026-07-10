@@ -57,7 +57,7 @@ export default function AutoDraftWhisper({ ticketId, onApplyDraft }) {
       <div className="absolute top-0 left-0 w-1 h-full bg-fuchsia-500"></div>
       <div className="flex items-center justify-between mb-3 border-b border-zinc-800/50 pb-2">
         <div className="flex items-center gap-2 text-fuchsia-400 font-black uppercase tracking-widest text-[10px]">
-          <FiZap className="animate-pulse text-sm" /> Onyx Auto-Draft Whisper
+          <FiZap className="animate-pulse" /> Onyx Auto-Draft Whisper
           {provenanceTag !== "unknown" && (
             <span className="ml-2 px-1.5 py-0.5 bg-fuchsia-500/10 border border-fuchsia-500/20 text-fuchsia-400 font-mono text-[8px] rounded uppercase tracking-wider">
               {provenanceTag}

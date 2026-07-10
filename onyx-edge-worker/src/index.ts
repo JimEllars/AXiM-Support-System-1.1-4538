@@ -323,37 +323,7 @@ async function handleSLASweep(env: Env) {
       }
     }
 
-    async function handleStatusMutation(request: Request, env: Env): Promise<Response> {
-      if (!env.STATUS_KV) {
-        return new Response(JSON.stringify({ error: "STATUS_KV binding is not configured." }), {
-          status: 500,
-          headers: { "Content-Type": "application/json", ...getCorsHeaders(env, request) },
-        });
-      }
 
-      const authHeader = request.headers.get("Authorization");
-      if (authHeader !== `Bearer ${env.AXIM_ONYX_SECRET}`) {
-        return new Response(JSON.stringify({ error: "Unauthorized" }), {
-          status: 401,
-          headers: { "Content-Type": "application/json", ...getCorsHeaders(env, request) },
-        });
-      }
-
-      const body: any = await request.json();
-      const statusData = {
-        status: body?.status || "operational",
-        indicator: body?.indicator || "none",
-        description: body?.description || "All systems operational.",
-        updated_at: new Date().toISOString(),
-      };
-
-      await env.STATUS_KV.put("current_status", JSON.stringify(statusData));
-
-      return new Response(JSON.stringify({ success: true, status: statusData }), {
-        status: 200,
-        headers: { "Content-Type": "application/json", ...getCorsHeaders(env, request) },
-      });
-    }
 
     console.log('[handleSLASweep] SLA sweep completed successfully.');
   } catch (error) {
@@ -2323,7 +2293,7 @@ async function handleGenerateSuggestion(request: Request, env: Env, ctx: any): P
     const safeMessages = (context_messages || []).filter((m: any) => m.is_internal_note !== true).slice(-5);
     const historyText = safeMessages.map((m: any) => typeof m === "string" ? m : m.text || m.message_body || "").join("\n");
 
-    let embedding = [];
+    let embedding: any = [];
     try {
       const embedRes = await fetch(`${env.CORE_API_URL || "https://api.axim-core.internal"}/functions/v1/generate-embedding`, {
         method: "POST",
@@ -2344,7 +2314,7 @@ async function handleGenerateSuggestion(request: Request, env: Env, ctx: any): P
 
     const contextText = memoryBanks?.map((m: any) => `Title: ${m.title}\nContent: ${m.content}`).join("\n\n") || "No context found.";
 
-    const prompt = `You are Onyx, an expert AXiM Support AI. Write a professional and helpful support response draft for the agent to review.\n\nTicket Subject: ${subject}\nTicket Description: ${description}\n\nRecent Conversation History:\n${historyText || "No previous replies."}\n\nContext from Memory Banks:\n${contextText}\n\nOutput ONLY the suggested response text:`;
+    const prompt = `You are Onyx, an expert AXiM Support AI. Given the following ticket details and context from our memory banks, write a professional and helpful support response draft for the agent to review.\n\nTicket Subject: ${subject}\nTicket Description: ${description}\n\nRecent Conversation History:\n${historyText || "No previous replies."}\n\nContext from Memory Banks:\n${contextText}\n\nOutput ONLY the suggested response text:`;
 
     let draft = "";
     let providerUsed = "unknown";
