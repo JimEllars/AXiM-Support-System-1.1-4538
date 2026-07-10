@@ -10,7 +10,6 @@ export default function CoreHealthIndicator() {
   useEffect(() => {
     const checkHealth = async () => {
       try {
-        // CRITICAL FIX: Redirect fallback URL away from dead port 54321 to active edge port 8787
         const workerUrl = getEdgeWorkerUrl();
         const res = await fetch(`${workerUrl}/health`, {
           method: 'GET',
@@ -29,9 +28,8 @@ export default function CoreHealthIndicator() {
     };
 
     checkHealth();
-    const healthInterval = setInterval(checkHealth, 30000); // Poll every 30 seconds
+    const healthInterval = setInterval(checkHealth, 30000);
 
-    // THE 5% FEATURE BLOCK: Lightweight telemetry session uptime tracker
     const uptimeInterval = setInterval(() => {
       setUptimeSeconds(prev => prev + 1);
     }, 1000);
@@ -59,7 +57,7 @@ export default function CoreHealthIndicator() {
       {/* Edge Node Pipeline State */}
       <div className="flex items-center gap-2 border-r border-zinc-800 pr-3">
         <div className="relative flex h-2 w-2">
-          <span className={`absolute inline-flex h-full w-full rounded-full opacity-75 ${isOnline ? 'bg-emerald-400' : 'bg-rose-500 animate-ping'}`} />
+          <span className={`absolute inline-flex h-full w-full rounded-full opacity-75 ${isOnline ? 'bg-emerald-400' : 'bg-rose-500 {isOnline ? "" : "animate-ping"}'}`} />
           <span className={`relative inline-flex rounded-full h-2 w-2 ${isOnline ? 'bg-emerald-500' : 'bg-rose-500'}`} />
         </div>
         <span className={isOnline ? 'text-zinc-400 font-bold' : 'text-rose-400 font-black animate-pulse'}>
@@ -74,11 +72,11 @@ export default function CoreHealthIndicator() {
           <span className={`relative inline-flex rounded-full h-2 w-2 ${isWssHealthy ? 'bg-cyan-500' : 'bg-amber-500'}`} />
         </div>
         <span className={isWssHealthy ? 'text-zinc-400 font-bold' : 'text-amber-400 font-black'}>
-          WSS: {isWssHealthy ? 'LIVE' : 'CONN'}
+          WSS: {realtimeSocketStatus || 'CONN'}
         </span>
       </div>
 
-      {/* Polish Metric Clock */}
+      {/* Session Uptime Clock */}
       <div className="text-zinc-500 font-mono text-[9px]">
         UP: <span className="text-zinc-300 font-bold">{formatUptime(uptimeSeconds)}</span>
       </div>
