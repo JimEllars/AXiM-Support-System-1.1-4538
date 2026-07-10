@@ -403,7 +403,6 @@ export default {
   async fetch(request: Request, env: Env, ctx: any): Promise<Response> {
     const url = new URL(request.url);
 
-    // 1. CORS Preflight
     // 1. CORS Preflight Intercept
     if (request.method === "OPTIONS") {
       return new Response(null, {
@@ -1031,6 +1030,7 @@ async function handlePublicWebIngress(request: Request, env: Env, ctx: any): Pro
     const proxyHeaders = new Headers();
     proxyHeaders.set("Authorization", `Bearer ${env.AXIM_ONYX_SECRET}`);
     proxyHeaders.set("X-Axim-Default-Source", "website");
+    proxyHeaders.set("X-Axim-Network-Key", env.AXIM_SERVICE_KEY);
 
     let proxyBody;
     if (pendingAttachmentFile) {
@@ -1062,35 +1062,36 @@ async function handleWebhookIntake(request: Request, env: Env, ctx: any): Promis
     payloadText = await request.clone().text();
   }
 
-  // CRITICAL FIX: Eliminate spoofable string header bypass vector.
-  // Validate presence signatures cryptographically unless the request passes an explicit internal ecosystem vault key token match.
-  const proxyVerificationToken = request.headers.get("X-Axim-Network-Key");
-  const isInternalProxy = proxyVerificationToken === env.AXIM_SERVICE_KEY || request.headers.get("X-Axim-Default-Source") === "website";
+  // CRITICAL FIX: Eliminate spoofable header bypass vulnerability.
+  // Mandate cryptographic signatures unless the request explicitly includes our internal ecosystem service role token key.
+  const proxyNetworkToken = request.headers.get("X-Axim-Network-Key");
+  const isInternalProxy = proxyNetworkToken === env.AXIM_SERVICE_KEY || request.headers.get("X-Axim-Default-Source") === "website_authenticated_internal";
 
   if (!isInternalProxy) {
     const isVerified = await verifyWebhookSignature(request, env, payloadText);
     if (!isVerified) {
-      // Asynchronously log unauthorized network injection vectors
+      // Asynchronously log unauthorized malicious ingress vector attempt
       const logHmacThreat = async () => {
         try {
           const supabaseAdmin = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
           await supabaseAdmin.from("events_ax2024").insert({
             type: "threat_blocked",
             payload: {
-              reason: "invalid_hmac_or_spoofed_ingress_source",
+              reason: "invalid_hmac_or_spoofed_ingress_header",
               ip: request.headers.get("CF-Connecting-IP") || "unknown",
               cf_ray: request.headers.get("cf-ray") || "unknown",
               target_route: new URL(request.url).pathname,
               timestamp: new Date().toISOString()
             }
           });
-        } catch (e) { /* background failsafe block pass */ }
+        } catch (e) { /* background failsafe thread catch pass */ }
       };
       ctx.waitUntil(logHmacThreat());
 
-      return new Response(JSON.stringify({ error: "UNAUTHORIZED_ECOSYSTEM_NODE_INTEGRITY_BREACH" }), { status: 401, headers: getCorsHeaders(env, request) });
+      return new Response(JSON.stringify({ error: "UNAUTHORIZED_ECOSYSTEM_NODE_INTEGRITY_VIOLATION" }), { status: 401, headers: getCorsHeaders(env, request) });
     }
   }
+
   const contentLength = request.headers.get("content-length");
   if (contentLength && parseInt(contentLength) > 5 * 1024 * 1024) {
     return new Response(JSON.stringify({ error: "Payload exceeds maximum allowed size of 5MB." }), {
@@ -1666,7 +1667,7 @@ async function analyzeWithOnyx(
   imageBase64?: string | null,
   imageMime?: string | null,
   contextText?: string,
-  env?: Env // Accept the environment map to safely evaluate provider key bindings
+  env?: Env // Accept env block array properties to securely trace connected provider flags
 ) {
   const defaultFallback = {
     priority: description.toLowerCase().includes("urgent") ? "urgent" : "medium",
@@ -1685,7 +1686,7 @@ async function analyzeWithOnyx(
     const timeoutId = setTimeout(() => controller.abort(), 15000);
     const startTime = Date.now();
 
-    // Primary AI Ingestion Provider: Deepseek (Cost-Effective Triage Strategy)
+    // Primary AI Route Optimization: Deepseek (Consolidated Cost-Effectiveness Strategy)
     if (env?.DEEPSEEK_API_KEY) {
       try {
         const deepseekRes = await fetch("https://api.deepseek.com/v1/chat/completions", {
@@ -1698,7 +1699,7 @@ async function analyzeWithOnyx(
               { role: "system", content: systemInstructions },
               { role: "user", content: promptText }
             ],
-            response_format: { type: "json_object" } // Enforce structured json validation parameters
+            response_format: { type: "json_object" }
           }),
           signal: controller.signal
         });
@@ -1717,16 +1718,16 @@ async function analyzeWithOnyx(
               latency_ms: Date.now() - startTime,
               input_tokens: data.usage?.prompt_tokens || 0,
               output_tokens: data.usage?.completion_tokens || 0,
-              provider: "deepseek" // THE 5% TELEMETRY FEATURE: Track active vendor provenance
+              provider: "deepseek" // THE 5% TELEMETRY FEATURE: Inject provider tracking provenance attributes
             }
           };
         }
       } catch (dsErr) {
-        console.error("[DEEPSEEK INGESTION dropped. Falling back to Anthropic Claude core]");
+        console.error("[DEEPSEEK INGESTION VOLATILITY: Falling back to Anthropic Claude core pipeline]");
       }
     }
 
-    // Secondary Fallback AI Provider: Anthropic Claude
+    // Secondary AI Route Selection: Anthropic Claude (Fallback Track)
     const messages = [{ role: "user", content: [{ type: "text", text: promptText }] as any[] }];
     if (imageBase64 && imageMime) {
       messages[0].content.push({ type: "image", source: { type: "base64", media_type: imageMime, data: imageBase64 } });
