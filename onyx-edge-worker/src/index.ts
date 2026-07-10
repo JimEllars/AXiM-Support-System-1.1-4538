@@ -619,8 +619,9 @@ async function handleTicketIngestion(request: Request, env: Env, ctx: any): Prom
       headers: { "Content-Type": "application/json", ...getCorsHeaders(env, request) },
     });
 
-    ctx.waitUntil((async () => {
+        ctx.waitUntil((async () => {
         try {
+            // CRITICAL FIX: Pass trailing env context parameters to unblock Deepseek cost-routing matrices
             const onyxAnalysis = await analyzeWithOnyx(
               subject,
               description,
@@ -639,17 +640,13 @@ async function handleTicketIngestion(request: Request, env: Env, ctx: any): Prom
               .eq("id", ticket.id);
             if (updateError) throw updateError;
 
-
-            // Phase 37: Duplicate sandbox dispatch removed. First dispatch kept.
-
-
             const { error: aiTelemetryError } = await supabase.from("ticket_ai_telemetry").insert({
               ticket_id: ticket.id,
               analyzed_sentiment: onyxAnalysis.sentiment,
               suggested_category: onyxAnalysis.category,
               auto_response_draft: onyxAnalysis.draft,
               confidence_score: onyxAnalysis.confidence,
-              metadata: onyxAnalysis.metrics // <-- Guard core operational cost vectors
+              metadata: onyxAnalysis.metrics
             });
 
             // Tier 3 Sandbox Egress Dispatch
@@ -1450,7 +1447,6 @@ async function handleWebhookIntake(request: Request, env: Env, ctx: any): Promis
             const combinedQuery = `${normalizedData.subject} ${normalizedData.description || ""}`;
             let contextText = await getCachedRAGContext(combinedQuery, env, supabase, ctx);
 
-            // If memory_banks yielded nothing, fallback to standard fetch limit 3
             if (!contextText) {
                const { data: fallbackResults, error: fallbackError } = await supabase
                 .from("memory_banks")
@@ -1462,13 +1458,15 @@ async function handleWebhookIntake(request: Request, env: Env, ctx: any): Promis
               }
             }
 
+            // CRITICAL FIX: Pass trailing env context parameters to unblock Deepseek cost-routing matrices
             const onyxAnalysis = await analyzeWithOnyx(
               normalizedData.subject,
               normalizedData.description,
               env.ANTHROPIC_API_KEY,
               attachmentBase64,
               attachmentMime,
-              contextText
+              contextText,
+              env
             );
 
             // Tier 3 Autonomous Remediation Check
@@ -2227,8 +2225,16 @@ async function handleAutoDraft(request: Request, env: Env, ctx: any): Promise<Re
   const startTime = Date.now();
   ctx.waitUntil(logToEvents(supabase, logCtx, "performance_metric", "Request start", { headers: request.headers }).catch(() => {}));
 
-  const authHeader = request.headers.get("Authorization");
-  if (authHeader !== `Bearer ${env.AXIM_ONYX_SECRET}`) return new Response("Unauthorized", { status: 401 });
+  // CRITICAL FIX: Transition from obsolete static matching tokens to dynamic agent session validation
+  const authHeader = request.headers.get("Authorization") || "";
+  const token = authHeader.replace("Bearer ", "").trim();
+  if (!token) return new Response(JSON.stringify({ error: "UNAUTHORIZED_DRAFT_REQUEST" }), { status: 401, headers: getCorsHeaders(env, request) });
+
+  const supabaseAuth = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY, {
+    global: { headers: { Authorization: `Bearer ${token}` } }
+  });
+  const { data: { user }, error: authError } = await supabaseAuth.auth.getUser();
+  if (authError || !user) return new Response(JSON.stringify({ error: "INVALID_SESSION_CREDENTIALS" }), { status: 403, headers: getCorsHeaders(env, request) });
 
   try {
     const { ticketData, articles } = (await request.json()) as any;
@@ -2238,7 +2244,6 @@ async function handleAutoDraft(request: Request, env: Env, ctx: any): Promise<Re
 
     let draft = "";
 
-    // Primary Cost-Optimized Provider Path
     if (env.DEEPSEEK_API_KEY) {
       try {
         const deepseekRes = await fetch("https://api.deepseek.com/v1/chat/completions", {
@@ -2260,7 +2265,6 @@ async function handleAutoDraft(request: Request, env: Env, ctx: any): Promise<Re
       } catch (dsDraftErr) { console.error("Deepseek auto-draft fallback engaged."); }
     }
 
-    // Secondary Fallback Provider Path
     if (!draft && env.ANTHROPIC_API_KEY) {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 12000);
