@@ -10,7 +10,7 @@ if (indexTs.includes('api.deepseek.com') && indexTs.includes('model: "deepseek-c
     console.log("-> ERROR: Deepseek fetch missing.");
 }
 console.log("Checking OnyxInvestigationPanel.jsx:");
-if (onyxPanel.includes('reader = res.body.getReader();') && onyxPanel.includes('decoder = new TextDecoder("utf-8");')) {
+if (onyxPanel.includes('res.body.getReader();') && onyxPanel.includes('decoder = new TextDecoder("utf-8");')) {
     console.log("-> Native chunk decoding logic present.");
 } else {
     console.log("-> ERROR: Native chunk decoding missing.");
