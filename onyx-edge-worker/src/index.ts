@@ -550,11 +550,7 @@ async function handleTicketIngestion(request: Request, env: Env, ctx: any): Prom
 
     ctx.waitUntil((async () => {
         try {
-            const onyxAnalysis = await analyzeWithOnyx(
-              subject,
-              description,
-              env.ANTHROPIC_API_KEY,
-            );
+            const onyxAnalysis = await analyzeWithOnyx(subject, description, env.ANTHROPIC_API_KEY, null, null, "", env);
 
             const { error: updateError } = await supabase
               .from("support_tickets")
@@ -688,25 +684,25 @@ async function handleVectorSearch(request: Request, env: Env, ctx: any): Promise
 }
 
 async function handleBatchTriage(request: Request, env: Env, ctx: any): Promise<Response> {
-  const supabase = createClient(
-    env.SUPABASE_URL,
-    env.SUPABASE_SERVICE_ROLE_KEY,
-  );
+  const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
   const logCtx = createLogContext(request);
-  ctx.waitUntil(logToEvents(supabase, logCtx, "performance_metric", "Request start", {
-    headers: request.headers,
-  }).catch(() => {}));
+  ctx.waitUntil(logToEvents(supabase, logCtx, "performance_metric", "Request start", { headers: request.headers }).catch(() => {}));
   const startTime = Date.now();
 
-  const authHeader = request.headers.get("Authorization");
-  if (authHeader !== `Bearer ${env.AXIM_ONYX_SECRET}`) {
-    return new Response("Unauthorized", { status: 401 });
-  }
+  // CRITICAL FIX: Upgrade batch execution endpoints to enforce live user session tokens
+  const authHeader = request.headers.get("Authorization") || "";
+  const token = authHeader.replace("Bearer ", "").trim();
+  if (!token) return new Response(JSON.stringify({ error: "UNAUTHORIZED_BATCH_OPERATION" }), { status: 401, headers: getCorsHeaders(env, request) });
+
+  const supabaseAuth = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY, {
+    global: { headers: { Authorization: `Bearer ${token}` } }
+  });
+  const { data: { user }, error: authError } = await supabaseAuth.auth.getUser();
+  if (authError || !user) return new Response(JSON.stringify({ error: "INVALID_SESSION" }), { status: 403, headers: getCorsHeaders(env, request) });
 
   try {
     const { ticketIds } = (await request.json()) as any;
 
-    // Fetch tickets to analyze
     const { data: tickets, error: fetchError } = await supabase
       .from("support_tickets")
       .select("*")
@@ -718,20 +714,18 @@ async function handleBatchTriage(request: Request, env: Env, ctx: any): Promise<
     const telemetryUpdates = [];
     const messagesToInsert = [];
 
-    // Simulate parallel AI processing for batch
     for (const ticket of tickets) {
       const analysis = await analyzeWithOnyx(
         ticket.subject,
         ticket.description,
         env.ANTHROPIC_API_KEY,
+        null,
+        null,
+        "",
+        env
       );
 
-      updates.push({
-        id: ticket.id,
-        priority: analysis.priority,
-        status: "pending", // Move from open to pending after triage
-      });
-
+      updates.push({ id: ticket.id, priority: analysis.priority, status: "pending" });
       telemetryUpdates.push({
         ticket_id: ticket.id,
         analyzed_sentiment: analysis.sentiment,
@@ -750,7 +744,6 @@ async function handleBatchTriage(request: Request, env: Env, ctx: any): Promise<
       }
     }
 
-    // Bulk update tickets (upsert hack for bulk update in Supabase JS)
     for (const update of updates) {
       const { error: updateError } = await supabase
         .from("support_tickets")
@@ -759,39 +752,20 @@ async function handleBatchTriage(request: Request, env: Env, ctx: any): Promise<
       if (updateError) throw updateError;
     }
 
-    // Upsert telemetry
-    const { error: telemetryError } = await supabase
-      .from("ticket_ai_telemetry")
-      .upsert(telemetryUpdates);
-
+    const { error: telemetryError } = await supabase.from("ticket_ai_telemetry").upsert(telemetryUpdates);
     if (telemetryError) throw telemetryError;
 
     if (messagesToInsert.length > 0) {
-      const { error: messagesError } = await supabase
-        .from("ticket_messages")
-        .insert(messagesToInsert);
+      const { error: messagesError } = await supabase.from("ticket_messages").insert(messagesToInsert);
       if (messagesError) throw messagesError;
     }
 
-    return new Response(
-      JSON.stringify({ success: true, processed: updates.length }),
-      {
-        headers: {
-          "Content-Type": "application/json",
-          ...getCorsHeaders(env, request),
-        },
-      },
-    );
+    return new Response(JSON.stringify({ success: true, processed: updates.length }), {
+      headers: { "Content-Type": "application/json", ...getCorsHeaders(env, request) },
+    });
   } catch (error: any) {
     logErr(supabase, logCtx, error, ctx);
-
-    return new Response(JSON.stringify({ error: error instanceof Error ? error.message : String(error) }), {
-      status: 500,
-      headers: {
-        "Content-Type": "application/json",
-        ...getCorsHeaders(env, request),
-      },
-    });
+    return new Response(JSON.stringify({ error: error.message }), { status: 500, headers: getCorsHeaders(env, request) });
   }
 }
 
@@ -1375,14 +1349,7 @@ async function handleWebhookIntake(request: Request, env: Env, ctx: any): Promis
               }
             }
 
-            const onyxAnalysis = await analyzeWithOnyx(
-              normalizedData.subject,
-              normalizedData.description,
-              env.ANTHROPIC_API_KEY,
-              attachmentBase64,
-              attachmentMime,
-              contextText
-            );
+            const onyxAnalysis = await analyzeWithOnyx(normalizedData.subject, normalizedData.description, env.ANTHROPIC_API_KEY, attachmentBase64, attachmentMime, contextText, env);
 
             // Tier 3 Autonomous Remediation Check
             if (onyxAnalysis.confidence > 95 && (onyxAnalysis.category?.includes("cache") || onyxAnalysis.category?.includes("sync"))) {
@@ -1580,6 +1547,7 @@ async function analyzeWithOnyx(
   imageBase64?: string | null,
   imageMime?: string | null,
   contextText?: string,
+  env?: Env // Accept the environment map to safely evaluate provider key bindings
 ) {
   const defaultFallback = {
     priority: description.toLowerCase().includes("urgent") ? "urgent" : "medium",
@@ -1587,45 +1555,76 @@ async function analyzeWithOnyx(
     category: "technical_support",
     draft: "Hello, Onyx AI has received your request regarding " + subject + "\n\nWe are analyzing the issue.",
     confidence: 50,
-    metrics: { latency_ms: 0, input_tokens: 0, output_tokens: 0 }
+    metrics: { latency_ms: 0, input_tokens: 0, output_tokens: 0, provider: "fallback" }
   };
+
+  const systemInstructions = `You are the AXiM Support Triage AI. ${contextText ? `Here are the relevant AXiM operational guidelines for this issue:
+[Context]
+${contextText}
+[End Context]
+Use these guidelines to determine priority and draft a response.
+` : ""}You MUST return your response STRICTLY as a stringified JSON object matching this exact schema:
+{
+  "priority": "low" | "medium" | "high" | "urgent",
+  "sentiment": "positive" | "neutral" | "negative",
+  "category": "string",
+  "draft": "string",
+  "confidence": number
+}`;
+  const promptText = `Subject: ${subject}
+Description: ${description}`;
 
   try {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 15000);
+    const startTime = Date.now();
 
-    const messages = [
-      {
-        role: "user",
-        content: [
-          { type: "text", text: `Subject: ${subject}\nDescription: ${description}` }
-        ] as any[]
-      }
-    ];
-
-    if (imageBase64 && imageMime) {
-      messages[0].content.push({
-        type: "image",
-        source: {
-          type: "base64",
-          media_type: imageMime,
-          data: imageBase64
-        }
+    // Primary AI Ingestion Provider: Deepseek (Cost-Effective Triage Strategy)
+    if (env?.DEEPSEEK_API_KEY) {
+      const deepseekRes = await fetch("https://api.deepseek.com/v1/chat/completions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${env.DEEPSEEK_API_KEY}` },
+        body: JSON.stringify({
+          model: "deepseek-chat",
+          max_tokens: 1024,
+          messages: [
+            { role: "system", content: systemInstructions },
+            { role: "user", content: promptText }
+          ],
+          response_format: { type: "json_object" } // Enforce structured json validation parameters
+        }),
+        signal: controller.signal
       });
+
+      clearTimeout(timeoutId);
+
+      if (deepseekRes.ok) {
+        const data: any = await deepseekRes.json();
+        const parsed = JSON.parse(data.choices[0].message.content.trim());
+        return {
+          priority: parsed.priority || defaultFallback.priority,
+          sentiment: parsed.sentiment || defaultFallback.sentiment,
+          category: parsed.category || defaultFallback.category,
+          draft: parsed.draft || defaultFallback.draft,
+          confidence: parsed.confidence || defaultFallback.confidence,
+          metrics: { latency_ms: Date.now() - startTime, input_tokens: data.usage?.prompt_tokens || 0, output_tokens: data.usage?.completion_tokens || 0, provider: "deepseek" }
+        };
+      }
     }
 
-    const startTime = Date.now();
-    const response = await fetch("https://api.anthropic.com/v1/messages", {
+    // Secondary Fallback AI Provider: Anthropic Claude
+    const messages = [{ role: "user", content: [{ type: "text", text: promptText }] as any[] }];
+    if (imageBase64 && imageMime) {
+      messages[0].content.push({ type: "image", source: { type: "base64", media_type: imageMime, data: imageBase64 } });
+    }
+
+    const anthropicRes = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
-      headers: {
-        "x-api-key": apiKey,
-        "anthropic-version": "2023-06-01",
-        "content-type": "application/json",
-      },
+      headers: { "x-api-key": apiKey, "anthropic-version": "2023-06-01", "content-type": "application/json" },
       body: JSON.stringify({
         model: "claude-3-haiku-20240307",
         max_tokens: 1024,
-        system: `You are the AXiM Support Triage AI. ${contextText ? `Here are the relevant AXiM operational guidelines for this issue:\n[Context]\n${contextText}\n[End Context]\nUse these guidelines to determine priority and draft a response.\n` : ""}You MUST return your response STRICTLY as a stringified JSON object matching this exact schema:\n{\n  "priority": "low" | "medium" | "high" | "urgent",\n  "sentiment": "positive" | "neutral" | "negative",\n  "category": "string",\n  "draft": "string",\n  "confidence": number\n}`,
+        system: systemInstructions,
         messages: messages
       }),
       signal: controller.signal
@@ -1633,29 +1632,23 @@ async function analyzeWithOnyx(
 
     clearTimeout(timeoutId);
 
-    if (!response.ok) {
-      return defaultFallback;
-    }
+    if (!anthropicRes.ok) return defaultFallback;
 
-    const data: any = await response.json();
+    const data: any = await anthropicRes.json();
     let textRes = data.content[0].text;
-    textRes = textRes.replace(/```json/g, '').replace(/```/g, '').trim();
+    textRes = textRes.replace(/```json/g, "").replace(/```/g, "").trim();
 
     const parsed = JSON.parse(textRes);
-    const latencyMs = Date.now() - startTime;
-    const inputTokens = data.usage?.input_tokens || 0;
-    const outputTokens = data.usage?.output_tokens || 0;
-
     return {
       priority: parsed.priority || defaultFallback.priority,
       sentiment: parsed.sentiment || defaultFallback.sentiment,
       category: parsed.category || defaultFallback.category,
       draft: parsed.draft || defaultFallback.draft,
       confidence: parsed.confidence || defaultFallback.confidence,
-      metrics: { latency_ms: latencyMs, input_tokens: inputTokens, output_tokens: outputTokens }
+      metrics: { latency_ms: Date.now() - startTime, input_tokens: data.usage?.input_tokens || 0, output_tokens: data.usage?.output_tokens || 0, provider: "anthropic" }
     };
   } catch (error) {
-    return { ...defaultFallback, metrics: { latency_ms: 0, input_tokens: 0, output_tokens: 0 } };
+    return { ...defaultFallback, metrics: { latency_ms: 0, input_tokens: 0, output_tokens: 0, provider: "error" } };
   }
 }
 
@@ -2120,9 +2113,31 @@ async function handleAutoDraft(request: Request, env: Env, ctx: any): Promise<Re
   try {
     const { ticketData, articles } = (await request.json()) as any;
     let contextText = articles.map((a: any) => `${a.title}: ${a.content}`).join("\n");
+    const systemPrompt = "You are an expert technical support agent. Draft a professional, concise reply to the customer based ONLY on the provided knowledge base context.";
+    const userPrompt = `Ticket Subject: ${ticketData.subject}\n\nKnowledge Base:\n${contextText}\n\nDraft a concise, helpful reply:`;
 
     let draft = "";
-    if (env.ANTHROPIC_API_KEY) {
+
+    if (env.DEEPSEEK_API_KEY) {
+      const deepseekRes = await fetch("https://api.deepseek.com/v1/chat/completions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${env.DEEPSEEK_API_KEY}` },
+        body: JSON.stringify({
+          model: "deepseek-chat",
+          max_tokens: 500,
+          messages: [
+            { role: "system", content: systemPrompt },
+            { role: "user", content: userPrompt }
+          ]
+        })
+      });
+      if (deepseekRes.ok) {
+        const data: any = await deepseekRes.json();
+        draft = data.choices[0].message.content;
+      }
+    }
+
+    if (!draft && env.ANTHROPIC_API_KEY) {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 12000);
       try {
@@ -2132,8 +2147,8 @@ async function handleAutoDraft(request: Request, env: Env, ctx: any): Promise<Re
           body: JSON.stringify({
             model: "claude-3-haiku-20240307",
             max_tokens: 500,
-            system: "You are an expert technical support agent. Draft a professional reply to the customer based ONLY on the provided knowledge base context.",
-            messages: [{ role: "user", content: `Ticket Subject: ${ticketData.subject}\n\nKnowledge Base:\n${contextText}\n\nDraft a concise, helpful reply:` }]
+            system: systemPrompt,
+            messages: [{ role: "user", content: userPrompt }]
           }),
           signal: controller.signal
         });
@@ -2141,12 +2156,12 @@ async function handleAutoDraft(request: Request, env: Env, ctx: any): Promise<Re
         if (response.ok) {
           const data: any = await response.json();
           draft = data.content[0].text;
-        } else { throw new Error("Anthropic API failed"); }
-      } catch (e) {
-        draft = `Hello ${ticketData?.contacts_ax2024?.name || "there"},\n\nBased on our knowledge base:\n${contextText || "No articles found."}\n\nWe are looking into this.`;
-      }
-    } else {
-      draft = `Hello ${ticketData?.contacts_ax2024?.name || "there"},\n\nBased on our knowledge base:\n${contextText || "No articles found."}\n\nWe are looking into this.`;
+        }
+      } catch (e) {}
+    }
+
+    if (!draft) {
+      draft = `Hello ${ticketData?.contacts_ax2024?.name || "there"},\n\nBased on our knowledge base findings, we are actively looking into this request.`;
     }
 
     return new Response(JSON.stringify({ draft }), { headers: { "Content-Type": "application/json", ...getCorsHeaders(env, request) } });
@@ -2398,7 +2413,7 @@ async function handleFeedbackIngress(request: Request, env: Env, ctx: any): Prom
           const threadText = messages.map((m: any) => `[${m.sender_type || m.sender_id}] ${m.body}`).join('\n');
 
           const systemPrompt = "Generate a Failure Analysis detailing why the customer was unsatisfied with this resolution, and propose a new operational rule to prevent this.";
-          const analysisResult = await analyzeWithOnyx("", threadText + "\n\nPROMPT: " + systemPrompt, env.ANTHROPIC_API_KEY);
+          const analysisResult = await analyzeWithOnyx("", threadText + "\n\nPROMPT: " + systemPrompt, env.ANTHROPIC_API_KEY, null, null, "", env);
 
           await supabase.from('hitl_audit_logs').insert({
             support_ticket_id: ticket_id,
