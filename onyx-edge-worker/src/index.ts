@@ -391,7 +391,71 @@ export default {
 
     // 2. Route Handling
 
-if (url.pathname === "/api/v1/onyx-bridge/draft") {
+
+    // --- LIVE ONYX INVESTIGATION STREAM GATEWAY (Secure SSE Proxy) ---
+    if (url.pathname === "/api/v1/onyx-bridge/stream" && request.method === "POST") {
+      const authHeader = request.headers.get("Authorization") || "";
+      const token = authHeader.replace("Bearer ", "").trim();
+      if (!token) {
+        return new Response(JSON.stringify({ error: "UNAUTHORIZED_STREAM" }), {
+          status: 401, headers: getCorsHeaders(env, request)
+        });
+      }
+
+      // Initialize Zero-Trust dynamic authorization token check
+      const supabaseAuth = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY, {
+        global: { headers: { Authorization: `Bearer ${token}` } }
+      });
+      const { data: { user }, error: authError } = await supabaseAuth.auth.getUser();
+      if (authError || !user) {
+        return new Response(JSON.stringify({ error: "INVALID_AGENT_SESSION" }), {
+          status: 403, headers: getCorsHeaders(env, request)
+        });
+      }
+
+      try {
+        const body: any = await request.json();
+        const systemPrompt = "You are Onyx Mk3, an enterprise triage agent. Perform a rapid investigation of this ticket. Stream your thought sequence step-by-step using monospaced clear bullet points.";
+        const userPrompt = `Ticket Subject: ${body.subject}\nDescription: ${body.description}`;
+
+        if (env.DEEPSEEK_API_KEY) {
+          // Primary Inquest Path: Deepseek Native Stream Proxy
+          const deepseekRes = await fetch("https://api.deepseek.com/v1/chat/completions", {
+            method: "POST",
+            headers: { "Content-Type": "application/json", "Authorization": `Bearer ${env.DEEPSEEK_API_KEY}` },
+            body: JSON.stringify({
+              model: "deepseek-chat",
+              max_tokens: 500,
+              messages: [
+                { role: "system", content: systemPrompt },
+                { role: "user", content: userPrompt }
+              ],
+              stream: true
+            }),
+          });
+
+          if (!deepseekRes.ok) throw new Error("Upstream streaming engine rejected pipe connection frame.");
+
+          return new Response(deepseekRes.body, {
+            status: 200,
+            headers: {
+              "Content-Type": "text/event-stream",
+              "Cache-Control": "no-cache",
+              "Connection": "keep-alive",
+              ...getCorsHeaders(env, request)
+            }
+          });
+        } else {
+          throw new Error("Ecosystem AI Core missing deployment variable allocation references.");
+        }
+      } catch (err: any) {
+        return new Response(JSON.stringify({ error: err.message }), {
+          status: 500, headers: getCorsHeaders(env, request)
+        });
+      }
+    }
+
+    if (url.pathname === "/api/v1/onyx-bridge/draft") {
       return handleAutoDraft(request, env, ctx);
     }
 
@@ -1428,7 +1492,7 @@ async function handleWebhookIntake(request: Request, env: Env, ctx: any): Promis
               }
             }
 
-            // CRITICAL FIX: Pass trailing env context parameters to unblock Deepseek cost-routing matrices
+            // CRITICAL FIX: Explicitly append all missing parameter block references to trigger Deepseek preferences
             const onyxAnalysis = await analyzeWithOnyx(
               normalizedData.subject,
               normalizedData.description,
@@ -2525,8 +2589,8 @@ async function handleFeedbackIngress(request: Request, env: Env, ctx: any): Prom
 
           const systemPrompt = "Generate a Failure Analysis detailing why the customer was unsatisfied with this resolution, and propose a new operational rule to prevent this.";
 
-          // CRITICAL FIX: Pass context parameters trailing block argument to enforce Deepseek cost boundaries
-          const analysisResult = await analyzeWithOnyx("", threadText + "\n\nPROMPT: " + systemPrompt, env.ANTHROPIC_API_KEY, null, null, "", env);
+                  // CRITICAL FIX: Explicitly append trailing env mapping parameters to ensure Deepseek execution paths
+                  const analysisResult = await analyzeWithOnyx("", threadText + "\n\nPROMPT: " + systemPrompt, env.ANTHROPIC_API_KEY, null, null, "", env);
 
           await supabase.from('hitl_audit_logs').insert({
             support_ticket_id: ticket_id,
