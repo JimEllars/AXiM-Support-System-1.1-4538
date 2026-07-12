@@ -434,7 +434,7 @@ export default {
         });
       }
 
-      // Initialize Zero-Trust dynamic user session JWT validation
+      // Initialize Zero-Trust dynamic user session JWT validation via Supabase claims
       const supabaseAuth = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY, {
         global: { headers: { Authorization: `Bearer ${token}` } }
       });
@@ -713,7 +713,7 @@ async function handleVectorSearch(request: Request, env: Env, ctx: any): Promise
   const logCtx = createLogContext(request);
   const startTime = Date.now();
 
-  // CRITICAL FIX: Eradicate static secret exposure across global RAG lookup components
+  // CRITICAL FIX: Migrate vector lookup channels to validate active user session tokens dynamically
   const authHeader = request.headers.get("Authorization") || "";
   const token = authHeader.replace("Bearer ", "").trim();
   if (!token) return new Response(JSON.stringify({ error: "UNAUTHORIZED_RAG_LOOKUP" }), { status: 401, headers: getCorsHeaders(env, request) });
@@ -726,15 +726,12 @@ async function handleVectorSearch(request: Request, env: Env, ctx: any): Promise
 
   try {
     const { query } = (await request.json()) as any;
-
-    // CRITICAL FIX: Standardize Cloudflare KV Key format to match engineering report
     const queryHash = await hashString(query);
     const cacheKey = `rag_v1:${queryHash}`;
 
     if (env.KB_CACHE) {
       const cached = await env.KB_CACHE.get(cacheKey);
       if (cached) {
-        console.log(`[KV HIT] Vector search returned from Cloudflare Edge for: ${query}`);
         return new Response(cached, { headers: { "Content-Type": "application/json", ...getCorsHeaders(env, request) } });
       }
     }
@@ -772,7 +769,6 @@ async function handleVectorSearch(request: Request, env: Env, ctx: any): Promise
 
     const jsonResults = JSON.stringify(results);
 
-    // Write to Cloudflare KV in the background (24 hour TTL)
     if (env.KB_CACHE) {
       ctx.waitUntil(env.KB_CACHE.put(cacheKey, jsonResults, { expirationTtl: 86400 }));
     }
@@ -1484,7 +1480,7 @@ async function handleWebhookIntake(request: Request, env: Env, ctx: any): Promis
               }
             }
 
-            // CRITICAL FIX: Explicitly append all missing parameter block references to trigger Deepseek preferences
+            // CRITICAL FIX: Explicitly forward the env dictionary as the 7th argument to stop Anthropic token bleed
             const onyxAnalysis = await analyzeWithOnyx(
               normalizedData.subject,
               normalizedData.description,
