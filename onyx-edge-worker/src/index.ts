@@ -424,17 +424,26 @@ export default {
       return handleGenerateSuggestion(request, env, ctx);
     }
 
-    // --- LIVE ONYX INVESTIGATION STREAM GATEWAY (Secure SSE Proxy) ---
+    // --- LIVE ONYX INVESTIGATION STREAM GATEWAY (Secure SSE Proxy Channel) ---
     if (url.pathname === "/api/v1/onyx-bridge/stream" && request.method === "POST") {
       const authHeader = request.headers.get("Authorization") || "";
       const token = authHeader.replace("Bearer ", "").trim();
-      if (!token) return new Response(JSON.stringify({ error: "UNAUTHORIZED_STREAM" }), { status: 401, headers: getCorsHeaders(env, request) });
+      if (!token) {
+        return new Response(JSON.stringify({ error: "UNAUTHORIZED_STREAM" }), {
+          status: 401, headers: getCorsHeaders(env, request)
+        });
+      }
 
+      // Initialize Zero-Trust dynamic user session JWT validation
       const supabaseAuth = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY, {
         global: { headers: { Authorization: `Bearer ${token}` } }
       });
       const { data: { user }, error: authError } = await supabaseAuth.auth.getUser();
-      if (authError || !user) return new Response(JSON.stringify({ error: "INVALID_AGENT_SESSION" }), { status: 403, headers: getCorsHeaders(env, request) });
+      if (authError || !user) {
+        return new Response(JSON.stringify({ error: "INVALID_AGENT_SESSION" }), {
+          status: 403, headers: getCorsHeaders(env, request)
+        });
+      }
 
       try {
         const body: any = await request.json();
@@ -456,16 +465,24 @@ export default {
             }),
           });
 
-          if (!deepseekRes.ok) throw new Error("Upstream streaming engine rejected pipe connection frame.");
+          if (!deepseekRes.ok) throw new Error("Upstream stream completion request rejected by provider instance.");
+
           return new Response(deepseekRes.body, {
             status: 200,
-            headers: { "Content-Type": "text/event-stream", "Cache-Control": "no-cache", "Connection": "keep-alive", ...getCorsHeaders(env, request) }
+            headers: {
+              "Content-Type": "text/event-stream",
+              "Cache-Control": "no-cache",
+              "Connection": "keep-alive",
+              ...getCorsHeaders(env, request)
+            }
           });
         } else {
           throw new Error("Ecosystem AI Core missing deployment variable allocation references.");
         }
       } catch (err: any) {
-        return new Response(JSON.stringify({ error: err.message }), { status: 500, headers: getCorsHeaders(env, request) });
+        return new Response(JSON.stringify({ error: err.message }), {
+          status: 500, headers: getCorsHeaders(env, request)
+        });
       }
     }
 
