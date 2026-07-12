@@ -392,26 +392,29 @@ export default {
     // 2. Route Handling
 
 
+    if (url.pathname === "/api/v1/onyx-bridge/draft") {
+      return handleAutoDraft(request, env, ctx);
+    }
+
+    if (url.pathname === "/vector-search") {
+      return handleVectorSearch(request, env, ctx);
+    }
+
+    if (url.pathname === "/api/v1/onyx/generate-suggestion") {
+      return handleGenerateSuggestion(request, env, ctx);
+    }
+
     // --- LIVE ONYX INVESTIGATION STREAM GATEWAY (Secure SSE Proxy) ---
     if (url.pathname === "/api/v1/onyx-bridge/stream" && request.method === "POST") {
       const authHeader = request.headers.get("Authorization") || "";
       const token = authHeader.replace("Bearer ", "").trim();
-      if (!token) {
-        return new Response(JSON.stringify({ error: "UNAUTHORIZED_STREAM" }), {
-          status: 401, headers: getCorsHeaders(env, request)
-        });
-      }
+      if (!token) return new Response(JSON.stringify({ error: "UNAUTHORIZED_STREAM" }), { status: 401, headers: getCorsHeaders(env, request) });
 
-      // Initialize Zero-Trust dynamic authorization token verification
       const supabaseAuth = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY, {
         global: { headers: { Authorization: `Bearer ${token}` } }
       });
       const { data: { user }, error: authError } = await supabaseAuth.auth.getUser();
-      if (authError || !user) {
-        return new Response(JSON.stringify({ error: "INVALID_AGENT_SESSION" }), {
-          status: 403, headers: getCorsHeaders(env, request)
-        });
-      }
+      if (authError || !user) return new Response(JSON.stringify({ error: "INVALID_AGENT_SESSION" }), { status: 403, headers: getCorsHeaders(env, request) });
 
       try {
         const body: any = await request.json();
@@ -419,7 +422,6 @@ export default {
         const userPrompt = `Ticket Subject: ${body.subject}\nDescription: ${body.description}`;
 
         if (env.DEEPSEEK_API_KEY) {
-          // Primary Inquest Path: Deepseek Native Stream Proxy
           const deepseekRes = await fetch("https://api.deepseek.com/v1/chat/completions", {
             method: "POST",
             headers: { "Content-Type": "application/json", "Authorization": `Bearer ${env.DEEPSEEK_API_KEY}` },
@@ -435,36 +437,16 @@ export default {
           });
 
           if (!deepseekRes.ok) throw new Error("Upstream streaming engine rejected pipe connection frame.");
-
           return new Response(deepseekRes.body, {
             status: 200,
-            headers: {
-              "Content-Type": "text/event-stream",
-              "Cache-Control": "no-cache",
-              "Connection": "keep-alive",
-              ...getCorsHeaders(env, request)
-            }
+            headers: { "Content-Type": "text/event-stream", "Cache-Control": "no-cache", "Connection": "keep-alive", ...getCorsHeaders(env, request) }
           });
         } else {
           throw new Error("Ecosystem AI Core missing deployment variable allocation references.");
         }
       } catch (err: any) {
-        return new Response(JSON.stringify({ error: err.message }), {
-          status: 500, headers: getCorsHeaders(env, request)
-        });
+        return new Response(JSON.stringify({ error: err.message }), { status: 500, headers: getCorsHeaders(env, request) });
       }
-    }
-
-    if (url.pathname === "/api/v1/onyx-bridge/draft") {
-      return handleAutoDraft(request, env, ctx);
-    }
-
-    if (url.pathname === "/vector-search") {
-      return handleVectorSearch(request, env, ctx);
-    }
-
-    if (url.pathname === "/api/v1/onyx/generate-suggestion") {
-      return handleGenerateSuggestion(request, env, ctx);
     }
 
     // --- PUBLIC ECOSYSTEM STATUS (Cloudflare KV Backed) ---
@@ -475,22 +457,9 @@ export default {
 
       if (request.method === "GET") {
         try {
-          // Read directly from the edge KV for 0ms latency global reads
           const statusStr = env.STATUS_KV ? await env.STATUS_KV.get("current_status") : null;
-          const statusData = statusStr ? JSON.parse(statusStr) : {
-            status: "operational",
-            indicator: "none",
-            description: "All systems operational."
-          };
-
-          return new Response(JSON.stringify(statusData), {
-            status: 200,
-            headers: {
-              ...getCorsHeaders(env, request),
-              "Cache-Control": "public, max-age=60", // 1 minute edge cache
-              "Content-Type": "application/json"
-            }
-          });
+          const statusData = statusStr ? JSON.parse(statusStr) : { status: "operational", indicator: "none", description: "All systems operational." };
+          return new Response(JSON.stringify(statusData), { status: 200, headers: { ...getCorsHeaders(env, request), "Cache-Control": "public, max-age=60", "Content-Type": "application/json" } });
         } catch (err: any) {
           return new Response(JSON.stringify({ error: "Failed to read edge status" }), { status: 500, headers: getCorsHeaders(env, request) });
         }
@@ -512,38 +481,14 @@ export default {
     if (url.pathname === "/api/v1/webhooks/public-intake") {
       return handlePublicWebIngress(request, env, ctx);
     }
+
     if (url.pathname === "/api/v1/webhooks/egress") {
       return handleMessageEgress(request, env, ctx);
     }
-    // --- CSAT FEEDBACK INGESTION ROUTE ---
+
+    // CRITICAL FIX: Route directly to designated handler to activate continuous learning Failure Analysis
     if (url.pathname === "/api/v1/webhooks/feedback" && request.method === "POST") {
-      // 1. Edge Rate Limit (max 5 submissions per minute per IP to prevent review bombing)
-      const clientIP = request.headers.get("CF-Connecting-IP") || "unknown_ip";
-      const isAllowed = await checkRateLimit(clientIP, 5, env, 60000);
-
-      if (!isAllowed) {
-        return new Response(JSON.stringify({ error: "Rate limit exceeded." }), { status: 429, headers: getCorsHeaders(env, request) });
-      }
-
-      try {
-        const body: any = await request.json();
-        const supabaseClient = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY); // Or env.SUPABASE_SERVICE_ROLE_KEY as specified
-
-        const { error } = await supabaseClient.from("product_feedback").insert({
-          ticket_id: body.ticket_id,
-          rating: body.rating,
-          feedback_text: body.comments || null,
-          customer_id: body.customer_email || "anonymous"
-        });
-
-        if (error) throw error;
-
-        return new Response(JSON.stringify({ success: true, message: "Feedback processed successfully" }), {
-          status: 200, headers: { "Content-Type": "application/json", ...getCorsHeaders(env, request) }
-        });
-      } catch (err: any) {
-        return new Response(JSON.stringify({ error: err.message }), { status: 500, headers: getCorsHeaders(env, request) });
-      }
+      return handleFeedbackIngress(request, env, ctx);
     }
 
 
