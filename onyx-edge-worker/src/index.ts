@@ -402,7 +402,7 @@ export default {
         });
       }
 
-      // Initialize Zero-Trust dynamic authorization token check
+      // Initialize Zero-Trust dynamic authorization token verification
       const supabaseAuth = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY, {
         global: { headers: { Authorization: `Bearer ${token}` } }
       });
@@ -415,7 +415,7 @@ export default {
 
       try {
         const body: any = await request.json();
-        const systemPrompt = "You are Onyx Mk3, an enterprise triage agent. Perform a rapid investigation of this ticket. Stream your thought sequence step-by-step using monospaced clear bullet points.";
+        const systemPrompt = "You are Onyx Live Triage, an enterprise internal AI. Perform a rapid investigation of this ticket. Stream your thought sequence step-by-step using clear monospaced bullet points.";
         const userPrompt = `Ticket Subject: ${body.subject}\nDescription: ${body.description}`;
 
         if (env.DEEPSEEK_API_KEY) {
@@ -727,10 +727,16 @@ async function handleVectorSearch(request: Request, env: Env, ctx: any): Promise
   const logCtx = createLogContext(request);
   const startTime = Date.now();
 
-  const authHeader = request.headers.get("Authorization");
-  if (authHeader !== `Bearer ${env.AXIM_ONYX_SECRET}`) {
-    return new Response("Unauthorized", { status: 401 });
-  }
+  // CRITICAL FIX: Eradicate static secret exposure across global RAG lookup components
+  const authHeader = request.headers.get("Authorization") || "";
+  const token = authHeader.replace("Bearer ", "").trim();
+  if (!token) return new Response(JSON.stringify({ error: "UNAUTHORIZED_RAG_LOOKUP" }), { status: 401, headers: getCorsHeaders(env, request) });
+
+  const supabaseAuth = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY, {
+    global: { headers: { Authorization: `Bearer ${token}` } }
+  });
+  const { data: { user }, error: authError } = await supabaseAuth.auth.getUser();
+  if (authError || !user) return new Response(JSON.stringify({ error: "INVALID_SESSION" }), { status: 403, headers: getCorsHeaders(env, request) });
 
   try {
     const { query } = (await request.json()) as any;
