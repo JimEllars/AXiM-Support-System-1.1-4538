@@ -266,6 +266,17 @@ async function handleStaleTicketSweep(env: Env) {
         is_internal_note: false
       });
     }
+
+    // Inside handleStaleTicketSweep, right before console.log at the bottom of the loop:
+    const { error: cronStaleTelemetryErr } = await supabase.from("events_ax2024").insert({
+      type: "chrono_automation_metric",
+      payload: {
+        routine: "handleStaleTicketSweep",
+        processed_records_count: staleTickets.length,
+        timestamp: new Date().toISOString()
+      }
+    });
+    if (cronStaleTelemetryErr) console.error("Chrono telemetry frame desynchronized:", cronStaleTelemetryErr.message);
     console.log(`[STALE SWEEP] Successfully closed ${staleTickets.length} abandoned tickets.`);
   } catch (err) {
     console.error('[STALE SWEEP] Error:', err);
@@ -323,7 +334,16 @@ async function handleSLASweep(env: Env) {
       }
     }
 
-
+    // Inside handleSLASweep, right after the ticket escalation updates loop completes:
+    const { error: cronSlaTelemetryErr } = await supabase.from("events_ax2024").insert({
+      type: "chrono_automation_metric",
+      payload: {
+        routine: "handleSLASweep",
+        processed_records_count: breachedTickets.length,
+        timestamp: new Date().toISOString()
+      }
+    });
+    if (cronSlaTelemetryErr) console.error("Chrono telemetry frame desynchronized:", cronSlaTelemetryErr.message);
 
     console.log('[handleSLASweep] SLA sweep completed successfully.');
   } catch (error) {
@@ -579,6 +599,15 @@ async function handleTicketIngestion(request: Request, env: Env, ctx: any): Prom
     const ticketData: any = await request.json();
     const { subject, description, customer_id } = ticketData;
 
+    // CRITICAL FIX: Resolve contact organization parameters to protect the multi-tenant isolation layout boundary
+    const { data: customerData, error: customerError } = await supabase
+      .from("contacts_ax2024")
+      .select("organization_id")
+      .eq("id", customer_id)
+      .maybeSingle();
+
+    if (customerError) throw customerError;
+    const resolvedOrgId = customerData?.organization_id || null;
 
     const { data: ticket, error: ticketError } = await supabase
       .from("support_tickets")
@@ -586,6 +615,7 @@ async function handleTicketIngestion(request: Request, env: Env, ctx: any): Prom
         subject,
         description,
         customer_id,
+        organization_id: resolvedOrgId, // Bind explicitly to satisfy multi-tenant RLS claim parameters
         priority: "medium", // Default
         status: "open", // Default
       })
@@ -598,9 +628,8 @@ async function handleTicketIngestion(request: Request, env: Env, ctx: any): Prom
       headers: { "Content-Type": "application/json", ...getCorsHeaders(env, request) },
     });
 
-        ctx.waitUntil((async () => {
+    ctx.waitUntil((async () => {
         try {
-            // CRITICAL FIX: Pass trailing env context parameters to unblock Deepseek cost-routing matrices
             const onyxAnalysis = await analyzeWithOnyx(
               subject,
               description,
@@ -647,11 +676,6 @@ async function handleTicketIngestion(request: Request, env: Env, ctx: any): Prom
                 }),
               }).catch(err => console.error("Sandbox dispatch failed:", err));
             }
-
-
-
-
-
         } catch(err) {
             logErr(supabase, logCtx, err, ctx);
         } finally {
@@ -2125,7 +2149,7 @@ async function handleTicketResolved(request: Request, env: Env, ctx: any): Promi
           if (env.DEEPSEEK_API_KEY) {
             // Primary AI Provider: Deepseek (Cost Optimized)
             const prompt = `You are Onyx Mk3. Generate a Root Cause Analysis for this resolved ticket.\nSubject: ${record.subject}\nThread:\n${threadText}\nOutput strictly in Markdown with ## Problem, ## Root Cause, and ## Resolution. DO NOT include conversational filler.`;
-            const deepseekRes = await fetch("https://api.deepseek.com/chat/completions", {
+            const deepseekRes = await fetch("https://api.deepseek.com/v1/chat/completions", {
               method: "POST",
               headers: { "Content-Type": "application/json", "Authorization": `Bearer ${env.DEEPSEEK_API_KEY}` },
               body: JSON.stringify({
@@ -2137,7 +2161,7 @@ async function handleTicketResolved(request: Request, env: Env, ctx: any): Promi
             if (deepseekRes.ok) {
               const data = await deepseekRes.json() as any;
               rcaMarkdown = data.choices[0].message.content;
-            } else { throw new Error("Deepseek API failed"); }
+            } else { throw new Error("Deepseek API endpoint handshaking dropped."); }
 
           } else if (env.ANTHROPIC_API_KEY) {
             // Secondary AI Provider: Anthropic (Fallback)
