@@ -307,7 +307,7 @@ async function handleSLASweep(env: Env) {
     console.log(`[handleSLASweep] Found ${breachedTickets.length} breached tickets. Escalating...`);
 
     for (const ticket of breachedTickets) {
-      // Escalate priority
+      // Escalate priority row fields
       const { error: updateError } = await supabase
         .from('support_tickets')
         .update({ priority: 'urgent' })
@@ -318,15 +318,14 @@ async function handleSLASweep(env: Env) {
         continue;
       }
 
-      // Inject system message
+      // CRITICAL FIX: Synchronize parameters to match explicit relational schema columns and prevent insertion dropouts
       const { error: messageError } = await supabase
         .from('ticket_messages')
         .insert({
           ticket_id: ticket.id,
           sender_id: 'system',
-          sender_type: 'system',
-          content: 'SYSTEM ALERT: SLA Breached. Ticket automatically escalated to URGENT priority.',
-          is_internal: true
+          message_body: 'SYSTEM ALERT: SLA Breached. Ticket automatically escalated to URGENT priority.',
+          is_internal_note: true
         });
 
       if (messageError) {
@@ -334,7 +333,6 @@ async function handleSLASweep(env: Env) {
       }
     }
 
-    // Inside handleSLASweep, right after the ticket escalation updates loop completes:
     const { error: cronSlaTelemetryErr } = await supabase.from("events_ax2024").insert({
       type: "chrono_automation_metric",
       payload: {
@@ -2247,7 +2245,7 @@ async function handleAutoDraft(request: Request, env: Env, ctx: any): Promise<Re
   const startTime = Date.now();
   ctx.waitUntil(logToEvents(supabase, logCtx, "performance_metric", "Request start", { headers: request.headers }).catch(() => {}));
 
-  // CRITICAL FIX: Upgrade auto-draft route to enforce zero-trust user session JWT validation
+  // CRITICAL FIX: Transition endpoint from obsolete static secrets to active user session JWT validation
   const authHeader = request.headers.get("Authorization") || "";
   const token = authHeader.replace("Bearer ", "").trim();
   if (!token) return new Response(JSON.stringify({ error: "UNAUTHORIZED_DRAFT_GENERATION" }), { status: 401, headers: getCorsHeaders(env, request) });
@@ -2266,7 +2264,7 @@ async function handleAutoDraft(request: Request, env: Env, ctx: any): Promise<Re
 
     let draft = "";
 
-    // Primary Cost-Optimized Provider Path
+    // Unify Auto-Draft Generation Core to favor Deepseek-First
     if (env.DEEPSEEK_API_KEY) {
       try {
         const deepseekRes = await fetch("https://api.deepseek.com/v1/chat/completions", {
@@ -2285,10 +2283,9 @@ async function handleAutoDraft(request: Request, env: Env, ctx: any): Promise<Re
           const data: any = await deepseekRes.json();
           draft = data.choices[0].message.content;
         }
-      } catch (dsDraftErr) { console.error("Deepseek auto-draft fallback engaged."); }
+      } catch (dsDraftErr) { console.error("Deepseek auto-draft fallback path active."); }
     }
 
-    // Secondary Fallback Provider Path
     if (!draft && env.ANTHROPIC_API_KEY) {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 12000);
