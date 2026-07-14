@@ -350,7 +350,7 @@ async function handleSLASweep(env: Env) {
   }
 }
 
-async function handleStatusMutation(request: Request, env: Env): Promise<Response> {
+async function handleStatusMutation(request: Request, env: Env, ctx: any): Promise<Response> {
   if (!env.STATUS_KV) {
     return new Response(JSON.stringify({ error: "STATUS_KV binding is not configured." }), {
       status: 500,
@@ -358,28 +358,35 @@ async function handleStatusMutation(request: Request, env: Env): Promise<Respons
     });
   }
 
-  const authHeader = request.headers.get("Authorization");
-  if (authHeader !== `Bearer ${env.AXIM_ONYX_SECRET}`) {
-    return new Response(JSON.stringify({ error: "Unauthorized" }), {
-      status: 401,
+  // CRITICAL FIX: Upgrade administrative status mutation channels to require dynamic user session JWT validation
+  const authHeader = request.headers.get("Authorization") || "";
+  const token = authHeader.replace("Bearer ", "").trim();
+  if (!token) return new Response(JSON.stringify({ error: "UNAUTHORIZED_STATUS_MUTATION" }), { status: 401, headers: getCorsHeaders(env, request) });
+
+  const supabaseAuth = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY, {
+    global: { headers: { Authorization: `Bearer ${token}` } }
+  });
+  const { data: { user }, error: authError } = await supabaseAuth.auth.getUser();
+  if (authError || !user) return new Response(JSON.stringify({ error: "INVALID_SESSION" }), { status: 403, headers: getCorsHeaders(env, request) });
+
+  try {
+    const body: any = await request.json();
+    const statusData = {
+      status: body?.status || "operational",
+      indicator: body?.indicator || "none",
+      description: body?.description || "All systems operational.",
+      updated_at: new Date().toISOString(),
+    };
+
+    await env.STATUS_KV.put("current_status", JSON.stringify(statusData));
+
+    return new Response(JSON.stringify({ success: true, status: statusData }), {
+      status: 200,
       headers: { "Content-Type": "application/json", ...getCorsHeaders(env, request) },
     });
+  } catch (err: any) {
+    return new Response(JSON.stringify({ error: err.message }), { status: 500, headers: getCorsHeaders(env, request) });
   }
-
-  const body: any = await request.json();
-  const statusData = {
-    status: body?.status || "operational",
-    indicator: body?.indicator || "none",
-    description: body?.description || "All systems operational.",
-    updated_at: new Date().toISOString(),
-  };
-
-  await env.STATUS_KV.put("current_status", JSON.stringify(statusData));
-
-  return new Response(JSON.stringify({ success: true, status: statusData }), {
-    status: 200,
-    headers: { "Content-Type": "application/json", ...getCorsHeaders(env, request) },
-  });
 }
 
 export default {
@@ -488,7 +495,7 @@ export default {
     // --- PUBLIC ECOSYSTEM STATUS (Cloudflare KV Backed) ---
     if (url.pathname === "/api/v1/status") {
       if (request.method === "POST") {
-        return handleStatusMutation(request, env);
+        return handleStatusMutation(request, env, ctx);
       }
 
       if (request.method === "GET") {
@@ -542,11 +549,20 @@ if (url.pathname === "/webhooks/intake") {
     }
 
     if (url.pathname === "/api/v1/trigger-daily-digest") {
-        const authHeader = request.headers.get("Authorization");
-        if (authHeader !== `Bearer ${env.AXIM_ONYX_SECRET}`) return new Response("Unauthorized", { status: 401 });
+        const authHeader = request.headers.get("Authorization") || "";
+        const token = authHeader.replace("Bearer ", "").trim();
+        if (!token) return new Response(JSON.stringify({ error: "UNAUTHORIZED_DIGEST_TRIGGER" }), { status: 401, headers: getCorsHeaders(env, request) });
+
+        const supabaseAuth = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY, {
+          global: { headers: { Authorization: `Bearer ${token}` } }
+        });
+        const { data: { user }, error: authError } = await supabaseAuth.auth.getUser();
+        if (authError || !user) return new Response(JSON.stringify({ error: "INVALID_SESSION" }), { status: 403, headers: getCorsHeaders(env, request) });
 
         ctx.waitUntil(generateAndSendDailyDigest(env));
-        return new Response(JSON.stringify({ success: true, message: "Daily digest triggered manually." }), { status: 200, headers: { "Content-Type": "application/json" } });
+        return new Response(JSON.stringify({ success: true, message: "Daily operations digest manually initialized." }), {
+          status: 200, headers: { "Content-Type": "application/json", ...getCorsHeaders(env, request) }
+        });
     }
 
     if (url.pathname === "/api/dlq/bulk-replay" && request.method === "POST") {
@@ -596,26 +612,26 @@ if (url.pathname === "/webhooks/intake") {
 // --- Route Handlers ---
 
 async function handleTicketIngestion(request: Request, env: Env, ctx: any): Promise<Response> {
-  const supabase = createClient(
-    env.SUPABASE_URL,
-    env.SUPABASE_SERVICE_ROLE_KEY,
-  );
+  const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
   const logCtx = createLogContext(request);
-  ctx.waitUntil(logToEvents(supabase, logCtx, "performance_metric", "Request start", {
-    headers: request.headers,
-  }).catch(() => {}));
+  ctx.waitUntil(logToEvents(supabase, logCtx, "performance_metric", "Request start", { headers: request.headers }).catch(() => {}));
   const startTime = Date.now();
 
-  const authHeader = request.headers.get("Authorization");
-  if (authHeader !== `Bearer ${env.AXIM_ONYX_SECRET}`) {
-    return new Response("Unauthorized", { status: 401 });
-  }
+  // CRITICAL FIX: Eradicate static secret exposure on primary intake avenues
+  const authHeader = request.headers.get("Authorization") || "";
+  const token = authHeader.replace("Bearer ", "").trim();
+  if (!token) return new Response(JSON.stringify({ error: "UNAUTHORIZED_INGESTION" }), { status: 401, headers: getCorsHeaders(env, request) });
+
+  const supabaseAuth = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY, {
+    global: { headers: { Authorization: `Bearer ${token}` } }
+  });
+  const { data: { user }, error: authError } = await supabaseAuth.auth.getUser();
+  if (authError || !user) return new Response(JSON.stringify({ error: "INVALID_SESSION" }), { status: 403, headers: getCorsHeaders(env, request) });
 
   try {
     const ticketData: any = await request.json();
     const { subject, description, customer_id } = ticketData;
 
-    // CRITICAL FIX: Resolve contact organization parameters to protect the multi-tenant isolation layout boundary
     const { data: customerData, error: customerError } = await supabase
       .from("contacts_ax2024")
       .select("organization_id")
@@ -631,9 +647,9 @@ async function handleTicketIngestion(request: Request, env: Env, ctx: any): Prom
         subject,
         description,
         customer_id,
-        organization_id: resolvedOrgId, // Bind explicitly to satisfy multi-tenant RLS claim parameters
-        priority: "medium", // Default
-        status: "open", // Default
+        organization_id: resolvedOrgId,
+        priority: "medium",
+        status: "open",
       })
       .select()
       .single();
@@ -658,13 +674,11 @@ async function handleTicketIngestion(request: Request, env: Env, ctx: any): Prom
 
             const { error: updateError } = await supabase
               .from("support_tickets")
-              .update({
-                priority: onyxAnalysis.priority,
-              })
+              .update({ priority: onyxAnalysis.priority })
               .eq("id", ticket.id);
             if (updateError) throw updateError;
 
-            const { error: aiTelemetryError } = await supabase.from("ticket_ai_telemetry").insert({
+            await supabase.from("ticket_ai_telemetry").insert({
               ticket_id: ticket.id,
               analyzed_sentiment: onyxAnalysis.sentiment,
               suggested_category: onyxAnalysis.category,
@@ -673,24 +687,13 @@ async function handleTicketIngestion(request: Request, env: Env, ctx: any): Prom
               metadata: onyxAnalysis.metrics
             });
 
-            // Tier 3 Sandbox Egress Dispatch
             if (onyxAnalysis.confidence < 85) {
-              console.log(`[ESCALATION] Confidence ${onyxAnalysis.confidence} < 85. Dispatching to Sandbox.`);
               const sandboxUrl = `${env.CORE_API_URL || "https://api.axim-core.internal"}/functions/v1/sandbox-dispatch`;
-
-              fetch(sandboxUrl, {
+              await fetch(sandboxUrl, {
                 method: "POST",
-                headers: {
-                  "Content-Type": "application/json",
-                  Authorization: `Bearer ${env.SUPABASE_SERVICE_ROLE_KEY}`,
-                },
-                body: JSON.stringify({
-                  ticket_id: ticket.id,
-                  subject: subject,
-                  description: description,
-                  customer_email: ticketData.customer_email || "unknown@example.com",
-                }),
-              }).catch(err => console.error("Sandbox dispatch failed:", err));
+                headers: { "Content-Type": "application/json", Authorization: `Bearer ${env.SUPABASE_SERVICE_ROLE_KEY}` },
+                body: JSON.stringify({ ticket_id: ticket.id, subject, description, customer_email: ticketData.customer_email || "unknown@example.com" })
+              });
             }
         } catch(err) {
             logErr(supabase, logCtx, err, ctx);
@@ -700,7 +703,6 @@ async function handleTicketIngestion(request: Request, env: Env, ctx: any): Prom
     })());
 
     return response;
-
   } catch (error: any) {
     logErr(supabase, logCtx, error, ctx);
     return new Response(JSON.stringify({ error: error.message }), { status: 500, headers: getCorsHeaders(env, request) });
@@ -2117,9 +2119,10 @@ async function handleTicketResolved(request: Request, env: Env, ctx: any): Promi
   const startTime = Date.now();
   ctx.waitUntil(logToEvents(supabase, logCtx, "performance_metric", "Webhook Request start", { headers: request.headers }).catch(() => {}));
 
-  const url = new URL(request.url);
-  if (url.searchParams.get("secret") !== env.AXIM_ONYX_SECRET) {
-    return new Response("Unauthorized", { status: 401 });
+  // CRITICAL FIX: Eliminate URL query param leaks. Authenticate database triggers via secure request headers.
+  const networkWebhookToken = request.headers.get("X-Axim-Network-Key");
+  if (networkWebhookToken !== env.AXIM_SERVICE_KEY) {
+    return new Response(JSON.stringify({ error: "UNAUTHORIZED_DATABASE_TRIGGER" }), { status: 401, headers: { 'Content-Type': 'application/json' } });
   }
 
   try {
@@ -2130,7 +2133,6 @@ async function handleTicketResolved(request: Request, env: Env, ctx: any): Promi
       return new Response("Ignored", { status: 200 });
     }
 
-    // 1. Webhook Egress Dispatcher (Tenant Notifications)
     const dispatchWebhook = async () => {
       try {
         const tenantId = record.organization_id || record.customer_id;
@@ -2150,7 +2152,6 @@ async function handleTicketResolved(request: Request, env: Env, ctx: any): Promi
     };
     ctx.waitUntil(dispatchWebhook());
 
-    // 2. RCA Generation (Only if Urgent and not already generated)
     if (record.priority === "urgent" && !record.rca_generated) {
       const processRCA = async () => {
         try {
@@ -2160,7 +2161,6 @@ async function handleTicketResolved(request: Request, env: Env, ctx: any): Promi
           let rcaMarkdown = "";
 
           if (env.DEEPSEEK_API_KEY) {
-            // Primary AI Provider: Deepseek (Cost Optimized)
             const prompt = `You are Onyx Mk3. Generate a Root Cause Analysis for this resolved ticket.\nSubject: ${record.subject}\nThread:\n${threadText}\nOutput strictly in Markdown with ## Problem, ## Root Cause, and ## Resolution. DO NOT include conversational filler.`;
             const deepseekRes = await fetch("https://api.deepseek.com/v1/chat/completions", {
               method: "POST",
@@ -2174,10 +2174,9 @@ async function handleTicketResolved(request: Request, env: Env, ctx: any): Promi
             if (deepseekRes.ok) {
               const data = await deepseekRes.json() as any;
               rcaMarkdown = data.choices[0].message.content;
-            } else { throw new Error("Deepseek API endpoint handshaking dropped."); }
+            } else { throw new Error("Deepseek API failed"); }
 
           } else if (env.ANTHROPIC_API_KEY) {
-            // Secondary AI Provider: Anthropic (Fallback)
             const prompt = `You are Onyx Mk3. Generate a Root Cause Analysis for this resolved ticket.\nSubject: ${record.subject}\nThread:\n${threadText}\nOutput strictly in Markdown with ## Problem, ## Root Cause, and ## Resolution.`;
             const anthropicRes = await fetch("https://api.anthropic.com/v1/messages", {
               method: "POST",
@@ -2192,7 +2191,6 @@ async function handleTicketResolved(request: Request, env: Env, ctx: any): Promi
             rcaMarkdown = `## Problem\n${record.subject}\n## Root Cause\nLocal dev mode. No AI keys provided. No RCA generated.\n## Resolution\nN/A`;
           }
 
-          // Index to Vectors
           let embeddingForMemory = null;
           try {
              const embedRes = await fetch(`${env.CORE_API_URL || "https://api.axim-core.internal"}/functions/v1/generate-embedding`, {
@@ -2214,8 +2212,6 @@ async function handleTicketResolved(request: Request, env: Env, ctx: any): Promi
           });
         } catch (e: any) {
           logErr(supabase, logCtx, e, ctx);
-
-          // CRITICAL FIX: Inform the agent that background AI generation failed
           await supabase.from("ticket_messages").insert({
             ticket_id: record.id,
             sender_id: "onyx_system",
@@ -2225,16 +2221,11 @@ async function handleTicketResolved(request: Request, env: Env, ctx: any): Promi
           });
         }
       };
-
-      // DECOUPLE: Push heavy RCA processing to the background
       ctx.waitUntil(processRCA());
     }
 
     logEnd(supabase, logCtx, startTime, ctx);
-
-    // CRITICAL FIX: Instantly return 200 OK so Supabase webhook doesn't timeout
     return new Response(JSON.stringify({ success: true, status: "background_processing_initiated" }), { headers: { "Content-Type": "application/json" } });
-
   } catch (error: any) {
     logErr(supabase, logCtx, error, ctx);
     return new Response(JSON.stringify({ error: error.message }), { status: 500, headers: { "Content-Type": "application/json" } });
@@ -2426,9 +2417,10 @@ async function handleGenerateSuggestion(request: Request, env: Env, ctx: any): P
   }
 }
 async function handleMessageEgress(request: Request, env: Env, ctx: any): Promise<Response> {
-  const url = new URL(request.url);
-  if (url.searchParams.get("secret") !== env.AXIM_ONYX_SECRET) {
-    return new Response(JSON.stringify({ error: "Unauthorized" }), { status: 401, headers: { 'Content-Type': 'application/json' } });
+  // CRITICAL FIX: Eliminate URL query param leaks. Authenticate database triggers via secure request headers.
+  const networkWebhookToken = request.headers.get("X-Axim-Network-Key");
+  if (networkWebhookToken !== env.AXIM_SERVICE_KEY) {
+    return new Response(JSON.stringify({ error: "UNAUTHORIZED_EGRESS_TRIGGER" }), { status: 401, headers: { 'Content-Type': 'application/json' } });
   }
 
   try {
@@ -2443,12 +2435,9 @@ async function handleMessageEgress(request: Request, env: Env, ctx: any): Promis
       return new Response(JSON.stringify({ success: true, ignored: true }), { status: 200, headers: { 'Content-Type': 'application/json' } });
     }
 
-    const supabase = createClient(
-      env.SUPABASE_URL,
-      env.SUPABASE_SERVICE_ROLE_KEY,
-    );
+    const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
 
-        const emailDispatch = async () => {
+    const emailDispatch = async () => {
       try {
         const { data: ticket, error: ticketError } = await supabase
           .from("support_tickets")
@@ -2475,10 +2464,7 @@ async function handleMessageEgress(request: Request, env: Env, ctx: any): Promis
         let finalBody = record.message_body || "";
 
         if (ticket.status === 'closed') {
-          finalBody += `
-
----
-This case has been marked as closed. How did we do? Please let us know by visiting: https://axim.us.com/feedback?ticket_id=${record.ticket_id}`;
+          finalBody += `\n\n---\nThis case has been marked as closed. How did we do? Please let us know by visiting: https://axim.us.com/feedback?ticket_id=${record.ticket_id}`;
         }
 
         const emailPayload = {
@@ -2488,45 +2474,41 @@ This case has been marked as closed. How did we do? Please let us know by visiti
           text: finalBody,
         };
 
-      // Fire and forget external API, with graceful degradation logging
-      const resendRes = await fetch("https://api.resend.com/emails", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${env.RESEND_API_KEY}`,
-        },
-        body: JSON.stringify(emailPayload),
-      });
+        const resendRes = await fetch("https://api.resend.com/emails", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${env.RESEND_API_KEY}`,
+          },
+          body: JSON.stringify(emailPayload),
+        });
 
-      if (!resendRes.ok) {
-         const errText = await resendRes.text();
-         console.error("Email dispatch failed:", errText);
-         await supabase.from("events_ax2024").insert({
-            type: "error",
-            payload: { function: "emailDispatch", ticket_id: record.ticket_id, error: errText, timestamp: new Date().toISOString() }
-         });
-      } else {
-         // Log successful egress for WebSocket UI observability
-         await supabase.from("events_ax2024").insert({
-            type: "email_dispatch_success",
-            payload: { ticket_id: record.ticket_id, recipient: contact.email, timestamp: new Date().toISOString() }
-         });
+        if (!resendRes.ok) {
+           const errText = await resendRes.text();
+           console.error("Email dispatch failed:", errText);
+           await supabase.from("events_ax2024").insert({
+              type: "error",
+              payload: { function: "emailDispatch", ticket_id: record.ticket_id, error: errText, timestamp: new Date().toISOString() }
+           });
+        } else {
+           await supabase.from("events_ax2024").insert({
+              type: "email_dispatch_success",
+              payload: { ticket_id: record.ticket_id, recipient: contact.email, timestamp: new Date().toISOString() }
+           });
 
-         // CRITICAL FIX: Inject a permanent visual receipt into the message timeline
-         await supabase.from("ticket_messages").insert({
-            ticket_id: record.ticket_id,
-            sender_id: "system",
-            message_body: `**[SYSTEM EGRESS CONFIRMED]**\n\nReply securely routed to external MTA gateway for: \`${contact.email}\`.`,
-            is_internal_note: true
-         });
-      }
+           await supabase.from("ticket_messages").insert({
+              ticket_id: record.ticket_id,
+              sender_id: "system",
+              message_body: `**[SYSTEM EGRESS CONFIRMED]**\n\nReply securely routed to external MTA gateway for: \`${contact.email}\`._`,
+              is_internal_note: true
+           });
+        }
       } catch (err) {
         console.error("Error in email dispatch background task", err);
       }
     };
 
     ctx.waitUntil(emailDispatch());
-
     return new Response(JSON.stringify({ success: true }), { status: 200, headers: { 'Content-Type': 'application/json' } });
 
   } catch (error: any) {
