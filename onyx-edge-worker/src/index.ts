@@ -289,50 +289,51 @@ async function handleSLASweep(env: Env) {
     const now = new Date().toISOString();
 
     const { data: breachedTickets, error: fetchError } = await supabase
-      .from('support_tickets')
-      .select('id')
-      .in('status', ['open', 'pending'])
-      .lt('sla_breach_at', now);
+      .from("support_tickets")
+      .select("id")
+      .in("status", ["open", "pending"])
+      .lt("sla_breach_at", now);
 
     if (fetchError) {
-      console.error('[handleSLASweep] Error fetching breached tickets:', fetchError);
+      console.error("[handleSLASweep] Error fetching breached tickets:", fetchError);
       return;
     }
 
     if (!breachedTickets || breachedTickets.length === 0) {
-      console.log('[handleSLASweep] No breached tickets found.');
+      console.log("[handleSLASweep] No breached tickets found.");
       return;
     }
 
     console.log(`[handleSLASweep] Found ${breachedTickets.length} breached tickets. Escalating...`);
 
     for (const ticket of breachedTickets) {
-      // Escalate priority row fields
+      // Escalate priority
       const { error: updateError } = await supabase
-        .from('support_tickets')
-        .update({ priority: 'urgent' })
-        .eq('id', ticket.id);
+        .from("support_tickets")
+        .update({ priority: "urgent" })
+        .eq("id", ticket.id);
 
       if (updateError) {
         console.error(`[handleSLASweep] Error updating ticket ${ticket.id}:`, updateError);
         continue;
       }
 
-      // CRITICAL FIX: Synchronize parameters to match explicit relational schema columns and prevent insertion dropouts
+      // CRITICAL FIX: Synchronize timeline properties to map against valid relational table parameters
       const { error: messageError } = await supabase
-        .from('ticket_messages')
+        .from("ticket_messages")
         .insert({
           ticket_id: ticket.id,
-          sender_id: 'system',
-          message_body: 'SYSTEM ALERT: SLA Breached. Ticket automatically escalated to URGENT priority.',
+          sender_id: "system",
+          message_body: "SYSTEM ALERT: SLA Breached. Ticket automatically escalated to URGENT priority.",
           is_internal_note: true
         });
 
       if (messageError) {
-        console.error(`[handleSLASweep] Error inserting message for ticket ${ticket.id}:`, messageError);
+        console.error(`[handleSLASweweep] Error inserting message for ticket ${ticket.id}:`, messageError);
       }
     }
 
+    // Record system chronology telemetry data parameters
     const { error: cronSlaTelemetryErr } = await supabase.from("events_ax2024").insert({
       type: "chrono_automation_metric",
       payload: {
@@ -343,9 +344,9 @@ async function handleSLASweep(env: Env) {
     });
     if (cronSlaTelemetryErr) console.error("Chrono telemetry frame desynchronized:", cronSlaTelemetryErr.message);
 
-    console.log('[handleSLASweep] SLA sweep completed successfully.');
+    console.log("[handleSLASweep] SLA sweep completed successfully.");
   } catch (error) {
-    console.error('[handleSLASweep] Unhandled exception in SLA sweep:', error);
+    console.error("[handleSLASweep] Unhandled exception in SLA sweep:", error);
   }
 }
 
@@ -785,7 +786,7 @@ async function handleBatchTriage(request: Request, env: Env, ctx: any): Promise<
   ctx.waitUntil(logToEvents(supabase, logCtx, "performance_metric", "Request start", { headers: request.headers }).catch(() => {}));
   const startTime = Date.now();
 
-  // CRITICAL FIX: Eradicate static secret exposure for batch administration tools
+  // Validate agent dynamic session JWT parameters
   const authHeader = request.headers.get("Authorization") || "";
   const token = authHeader.replace("Bearer ", "").trim();
   if (!token) return new Response(JSON.stringify({ error: "UNAUTHORIZED_BATCH_OPERATION" }), { status: 401, headers: getCorsHeaders(env, request) });
@@ -841,6 +842,7 @@ async function handleBatchTriage(request: Request, env: Env, ctx: any): Promise<
     }
 
     for (const update of updates) {
+      // CRITICAL FIX: Overwrite the malformed object filter parameter with standard Supabase JS key-value pairs
       const { error: updateError } = await supabase
         .from("support_tickets")
         .update({ priority: update.priority, status: update.status })
