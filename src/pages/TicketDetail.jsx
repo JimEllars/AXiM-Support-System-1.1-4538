@@ -6,6 +6,7 @@ import toast from 'react-hot-toast';
 import MessageThread from '../components/tickets/MessageThread';
 import AutoDraftWhisper from '../components/tickets/AutoDraftWhisper';
 import Customer360 from '../components/tickets/Customer360';
+import KBSidebar from '../components/tickets/KBSidebar';
 import OnyxInvestigationPanel from '../components/tickets/OnyxInvestigationPanel';
 import { FiArrowLeft, FiSend, FiLock, FiUnlock, FiCheckCircle, FiPaperclip, FiFileText } from 'react-icons/fi';
 
@@ -348,6 +349,7 @@ export default function TicketDetail() {
         <div className="space-y-6">
           <OnyxInvestigationPanel ticketId={ticket.id} subject={ticket.subject} description={ticket.description} />
           <Customer360 customerId={ticket.customer_id} />
+          <KBSidebar ticketId={ticket.id} />
         </div>
       </div>
     </div>
