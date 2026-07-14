@@ -2247,7 +2247,7 @@ async function handleAutoDraft(request: Request, env: Env, ctx: any): Promise<Re
   const startTime = Date.now();
   ctx.waitUntil(logToEvents(supabase, logCtx, "performance_metric", "Request start", { headers: request.headers }).catch(() => {}));
 
-  // CRITICAL FIX: Transition endpoint from obsolete static secrets to active user session JWT validation
+  // CRITICAL FIX: Upgrade auto-draft route to enforce zero-trust dynamic session verification
   const authHeader = request.headers.get("Authorization") || "";
   const token = authHeader.replace("Bearer ", "").trim();
   if (!token) return new Response(JSON.stringify({ error: "UNAUTHORIZED_DRAFT_GENERATION" }), { status: 401, headers: getCorsHeaders(env, request) });
@@ -2266,7 +2266,6 @@ async function handleAutoDraft(request: Request, env: Env, ctx: any): Promise<Re
 
     let draft = "";
 
-    // Unify Auto-Draft Generation Core to favor Deepseek-First
     if (env.DEEPSEEK_API_KEY) {
       try {
         const deepseekRes = await fetch("https://api.deepseek.com/v1/chat/completions", {
@@ -2285,7 +2284,7 @@ async function handleAutoDraft(request: Request, env: Env, ctx: any): Promise<Re
           const data: any = await deepseekRes.json();
           draft = data.choices[0].message.content;
         }
-      } catch (dsDraftErr) { console.error("Deepseek auto-draft fallback path active."); }
+      } catch (dsDraftErr) { console.error("Deepseek auto-draft fallback engaged."); }
     }
 
     if (!draft && env.ANTHROPIC_API_KEY) {
