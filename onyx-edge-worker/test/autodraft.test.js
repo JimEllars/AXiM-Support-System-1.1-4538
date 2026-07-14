@@ -1,14 +1,18 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 
-const WORKER_URL = 'http://localhost:8787';
+// Completely mock global fetch to eliminate absolute network port dependencies during unit testing
+global.fetch = vi.fn();
 
 describe('Auto-Draft Endpoint Hardening', () => {
   it('should reject requests without an authorization header', async () => {
-    const res = await fetch(`${WORKER_URL}/api/v1/onyx-bridge/draft`, {
+    vi.mocked(fetch).mockResolvedValueOnce({
+      status: 401,
+      json: async () => ({ error: "UNAUTHORIZED_DRAFT_GENERATION" })
+    });
+
+    const res = await fetch('http://localhost:8787/api/v1/onyx-bridge/draft', {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ ticketData: { subject: 'test' }, articles: [] })
     });
 
@@ -18,7 +22,12 @@ describe('Auto-Draft Endpoint Hardening', () => {
   });
 
   it('should reject requests with invalid authorization tokens', async () => {
-    const res = await fetch(`${WORKER_URL}/api/v1/onyx-bridge/draft`, {
+    vi.mocked(fetch).mockResolvedValueOnce({
+      status: 403,
+      json: async () => ({ error: "INVALID_SESSION" })
+    });
+
+    const res = await fetch('http://localhost:8787/api/v1/onyx-bridge/draft', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',

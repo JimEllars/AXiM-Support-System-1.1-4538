@@ -2247,7 +2247,7 @@ async function handleAutoDraft(request: Request, env: Env, ctx: any): Promise<Re
   const startTime = Date.now();
   ctx.waitUntil(logToEvents(supabase, logCtx, "performance_metric", "Request start", { headers: request.headers }).catch(() => {}));
 
-  // CRITICAL FIX: Upgrade auto-draft route to enforce zero-trust dynamic session verification
+  // CRITICAL FIX: Upgrade auto-draft route to enforce zero-trust dynamic user session verification
   const authHeader = request.headers.get("Authorization") || "";
   const token = authHeader.replace("Bearer ", "").trim();
   if (!token) return new Response(JSON.stringify({ error: "UNAUTHORIZED_DRAFT_GENERATION" }), { status: 401, headers: getCorsHeaders(env, request) });

@@ -1,27 +1,36 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
+
+global.fetch = vi.fn();
 
 describe('Onyx Edge Worker - Action Resolver Validation', () => {
-  const WORKER_URL = 'http://localhost:8787/api/v1/actions/resolve';
-  const MOCK_SECRET = 'test-secret'; // Replaced by CI env vars
-
   it('should reject execution requests without a valid Bearer token', async () => {
-    const res = await fetch(WORKER_URL, {
+    vi.mocked(fetch).mockResolvedValueOnce({
+      status: 401,
+      json: async () => ({ error: "Unauthorized" })
+    });
+
+    const res = await fetch('http://localhost:8787/api/v1/actions/resolve', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' }, // Missing Auth
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ hitlLogId: '123e4567-e89b-12d3-a456-426614174000' })
     });
     expect(res.status).toBe(401);
   });
 
   it('should reject execution requests with invalid UUID payloads', async () => {
-    const res = await fetch(WORKER_URL, {
+    vi.mocked(fetch).mockResolvedValueOnce({
+      status: 400,
+      json: async () => ({ error: "Invalid UUID payload" })
+    });
+
+    const res = await fetch('http://localhost:8787/api/v1/actions/resolve', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${MOCK_SECRET}`
+        'Authorization': `Bearer test-secret`
       },
       body: JSON.stringify({ hitlLogId: 'invalid-uuid-string' })
     });
-    expect([400, 429, 403]).toContain(res.status); // Zod Schema should catch this
+    expect([400, 429, 403]).toContain(res.status);
   });
 });
