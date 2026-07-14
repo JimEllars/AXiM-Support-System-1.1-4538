@@ -57,7 +57,8 @@ export default function CoreHealthIndicator() {
       {/* Edge Node Pipeline State */}
       <div className="flex items-center gap-2 border-r border-zinc-800 pr-3">
         <div className="relative flex h-2 w-2">
-          <span className={`absolute inline-flex h-full w-full rounded-full opacity-75 ${isOnline ? 'bg-emerald-400' : 'bg-rose-500 {isOnline ? "" : "animate-ping"}'}`} />
+          {/* CRITICAL FIX: Safely pull expression parameters out of plain single quoted blocks to guarantee animation evaluation */}
+          <span className={`absolute inline-flex h-full w-full rounded-full opacity-75 ${isOnline ? 'bg-emerald-400' : 'bg-rose-500 animate-ping'}`} />
           <span className={`relative inline-flex rounded-full h-2 w-2 ${isOnline ? 'bg-emerald-500' : 'bg-rose-500'}`} />
         </div>
         <span className={isOnline ? 'text-zinc-400 font-bold' : 'text-rose-400 font-black animate-pulse'}>
