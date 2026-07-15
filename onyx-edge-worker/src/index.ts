@@ -1960,6 +1960,68 @@ const ONYX_TOOLS = [
   },
 ];
 
+// --- HUMAN-IN-THE-LOOP (HITL) DUAL-TIER OPERATIONAL GOVERNANCE HOOK ---
+async function dispatchHITLProposalAlert(
+  ticketId: string,
+  toolType: string,
+  payloadSummary: any,
+  env: Env,
+  supabase: any
+): Promise<void> {
+  if (!env.RESEND_API_KEY) {
+    console.warn("[HITL GOVERNANCE SKIPPED: Resend API variable reference unassigned]");
+    return;
+  }
+
+  const primaryRecipient = "james.ellars@axim.us.com";
+  const escalationFallback = "jrellars@gmail.com";
+  const payloadString = typeof payloadSummary === "string" ? payloadSummary : JSON.stringify(payloadSummary, null, 2);
+
+  const emailPayload = {
+    from: env.RESEND_FROM_EMAIL || "governance@axim.us.com",
+    to: primaryRecipient,
+    subject: `[HITL AUDIT REQUIRED] Gated Action Pending for Ticket #${ticketId.slice(0, 8)}`,
+    html: `
+      <div style="font-family: monospace; background-color: #020205; color: #f4f4f5; padding: 32px; border: 1px solid #27272a; border-radius: 16px; max-width: 600px; margin: 0 auto;">
+        <h2 style="color: #f59e0b; margin-top: 0; font-size: 18px; tracking: -0.02em;">⚠️ PRIVILEGED ACTION GATED</h2>
+        <p style="color: #71717a; font-size: 10px; text-transform: uppercase; letter-spacing: 0.15em; margin-top: -4px; margin-bottom: 24px;">AXiM Core Governance Engine Protocol Active</p>
+        <hr style="border: 0; border-top: 1px solid #27272a; margin-bottom: 20px;" />
+        <p style="font-size: 12px; margin-bottom: 8px;"><strong>Support Ticket ID:</strong> <code style="color: #e4e4e7;">${ticketId}</code></p>
+        <p style="font-size: 12px; margin-bottom: 8px;"><strong>Gated Remedy Path:</strong> <span style="background-color: #451a03; padding: 4px 8px; border-radius: 6px; color: #f59e0b; font-weight: bold;">${toolType}</span></p>
+        <p style="font-size: 12px; margin-bottom: 6px;"><strong>Proposed Tool Parameters String Array:</strong></p>
+        <pre style="background-color: #09090b; padding: 16px; border-radius: 8px; border: 1px solid #27272a; color: #10b981; font-size: 11px; overflow-x: auto; margin-top: 0;">${payloadString}</pre>
+        <hr style="border: 0; border-top: 1px solid #27272a; margin-top: 24px; margin-bottom: 20px;" />
+        <p style="font-size: 11px; color: #71717a; line-height: 1.6; margin-bottom: 0;">
+          <strong>Escalation Directive Notice:</strong> If this privileged action does not receive programmatic authorization within standard SLA tracking parameters, alerts automatically escalate to backup destination vault carrier: <code style="color: #a1a1aa;">${escalationFallback}</code>.
+        </p>
+      </div>
+    `
+  };
+
+  try {
+    const response = await fetch("https://api.resend.com/emails", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${env.RESEND_API_KEY}`
+      },
+      body: JSON.stringify(emailPayload)
+    });
+
+    if (response.ok) {
+      await supabase.from("events_ax2024").insert({
+        type: "hitl_notification_metric",
+        payload: { ticket_id: ticketId, routine: "dispatchHITLProposalAlert", status: "success", primary_dispatched: primaryRecipient }
+      });
+    } else {
+      const errorMsg = await response.text();
+      console.error(`Upstream Resend cluster rejected HITL notification proxy context: ${errorMsg}`);
+    }
+  } catch (err: any) {
+    console.error("Critical connection failure attempting to transmit governance macro alerts:", err.message);
+  }
+}
+
 async function handleToolCommand(request: Request, env: Env, ctx: any): Promise<Response> {
   const supabase = createClient(
     env.SUPABASE_URL,
@@ -2074,6 +2136,15 @@ async function handleToolCommand(request: Request, env: Env, ctx: any): Promise<
         });
 
       if (msgError) throw msgError;
+
+      // CRITICAL FIX: Non-blocking background worker handshake to broadcast real-time HITL governance carrier emails
+      ctx.waitUntil(dispatchHITLProposalAlert(
+        ticketId,
+        toolUsePayload.name,
+        toolUsePayload.input,
+        env,
+        supabase
+      ));
 
       logEnd(supabase, logCtx, startTime, ctx);
       return new Response(
