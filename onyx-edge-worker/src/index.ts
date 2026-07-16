@@ -1982,17 +1982,17 @@ async function dispatchHITLProposalAlert(
     to: primaryRecipient,
     subject: `[HITL AUDIT REQUIRED] Gated Action Pending for Ticket #${ticketId.slice(0, 8)}`,
     html: `
-      <div style="font-family: monospace; background-color: #020205; color: #f4f4f5; padding: 32px; border: 1px solid #27272a; border-radius: 16px; max-width: 600px; margin: 0 auto;">
-        <h2 style="color: #f59e0b; margin-top: 0; font-size: 18px; tracking: -0.02em;">⚠️ PRIVILEGED ACTION GATED</h2>
-        <p style="color: #71717a; font-size: 10px; text-transform: uppercase; letter-spacing: 0.15em; margin-top: -4px; margin-bottom: 24px;">AXiM Core Governance Engine Protocol Active</p>
+      <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; background-color: #09090b; color: #f4f4f5; padding: 32px; border: 1px solid #27272a; border-radius: 16px;">
+        <h2 style="color: #e11d48; margin-top: 0; font-size: 18px; font-weight: 800; letter-spacing: -0.025em;">⚠️ PRIVILEGED ACTION GATED</h2>
+        <p style="color: #71717a; font-size: 10px; font-family: monospace; text-transform: uppercase; letter-spacing: 0.15em; margin-top: -4px; margin-bottom: 24px;">AXiM Core Governance Engine Protocol Active</p>
         <hr style="border: 0; border-top: 1px solid #27272a; margin-bottom: 20px;" />
-        <p style="font-size: 12px; margin-bottom: 8px;"><strong>Support Ticket ID:</strong> <code style="color: #e4e4e7;">${ticketId}</code></p>
-        <p style="font-size: 12px; margin-bottom: 8px;"><strong>Gated Remedy Path:</strong> <span style="background-color: #451a03; padding: 4px 8px; border-radius: 6px; color: #f59e0b; font-weight: bold;">${toolType}</span></p>
-        <p style="font-size: 12px; margin-bottom: 6px;"><strong>Proposed Tool Parameters String Array:</strong></p>
-        <pre style="background-color: #09090b; padding: 16px; border-radius: 8px; border: 1px solid #27272a; color: #10b981; font-size: 11px; overflow-x: auto; margin-top: 0;">${payloadString}</pre>
-        <hr style="border: 0; border-top: 1px solid #27272a; margin-top: 24px; margin-bottom: 20px;" />
+        <p style="font-size: 13px; margin-bottom: 8px;"><strong>Support Ticket ID:</strong> <code style="font-family: monospace; color: #e4e4e7; background-color: #18181b; padding: 2px 6px; border-radius: 4px;">${ticketId}</code></p>
+        <p style="font-size: 13px; margin-bottom: 8px;"><strong>Gated Remedy Path:</strong> <span style="background-color: #4c0519; padding: 4px 8px; border-radius: 6px; color: #fda4af; font-family: monospace; font-weight: bold; font-size: 11px;">${toolType}</span></p>
+        <p style="font-size: 13px; margin-bottom: 6px;"><strong>Proposed Tool Parameters Array:</strong></p>
+        <pre style="background-color: #020205; padding: 16px; border-radius: 8px; border: 1px solid #27272a; color: #34d399; font-family: monospace; font-size: 11px; overflow-x: auto; margin-top: 0; margin-bottom: 24px;">${payloadString}</pre>
+        <hr style="border: 0; border-top: 1px solid #27272a; margin-bottom: 20px;" />
         <p style="font-size: 11px; color: #71717a; line-height: 1.6; margin-bottom: 0;">
-          <strong>Escalation Directive Notice:</strong> If this privileged action does not receive programmatic authorization within standard SLA tracking parameters, alerts automatically escalate to backup destination vault carrier: <code style="color: #a1a1aa;">${escalationFallback}</code>.
+          <strong>Escalation Directive Notice:</strong> If this privileged action does not receive programmatic authorization within standard SLA tracking parameters, alerts automatically escalate to backup destination vault carrier: <code style="color: #a1a1aa; font-family: monospace;">${escalationFallback}</code>.
         </p>
       </div>
     `
@@ -2021,6 +2021,7 @@ async function dispatchHITLProposalAlert(
     console.error("Critical connection failure attempting to transmit governance macro alerts:", err.message);
   }
 }
+
 
 async function handleToolCommand(request: Request, env: Env, ctx: any): Promise<Response> {
   const supabase = createClient(
