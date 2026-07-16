@@ -1,87 +1,115 @@
-import React, { useState, useEffect } from 'react';
-import { FiZap, FiCheck } from 'react-icons/fi';
+import React, { useState } from 'react';
+import { FiShield, FiAlertTriangle, FiCheckCircle, FiPlay, FiLoader, FiXCircle } from 'react-icons/fi';
+import toast from 'react-hot-toast';
 import { supabase } from '../../lib/supabaseClient';
 import { getEdgeWorkerUrl } from '../../lib/edgeWorkerUrl';
-import toast from 'react-hot-toast';
-import { v4 as uuidv4 } from 'uuid';
 
-export default function ActionProposalBlock({ hitlLogId, onComplete }) {
-  const [isExecuting, setIsExecuting] = useState(false);
-  const [logDetails, setLogDetails] = useState(null);
+export default function ActionProposalBlock({ proposalData, ticketId, onActionExecuted }) {
+  const [executionState, setExecutionState] = useState('idle'); // 'idle' | 'executing' | 'success' | 'rejected' | 'failed'
+  const [errorMessage, setErrorMessage] = useState('');
 
-  useEffect(() => {
-    const fetchLog = async () => {
-      const { data } = await supabase.from('hitl_audit_logs').select('*').eq('id', hitlLogId).single();
-      if (data) setLogDetails(data);
-    };
-    if (hitlLogId) fetchLog();
-  }, [hitlLogId]);
+  const processRemedyDisposition = async (targetDisposition) => {
+    if (executionState === 'executing' || executionState === 'success' || executionState === 'rejected') return;
+    setExecutionState('executing');
+    setErrorMessage('');
 
-  const handleExecute = async () => {
-    setIsExecuting(true);
     try {
-      const idempotencyKey = uuidv4();
-      const workerUrl = getEdgeWorkerUrl();
       const { data: { session } } = await supabase.auth.getSession();
-      if (!session) throw new Error("Active session required for Edge actions.");
+      const token = session?.access_token;
+      if (!token) throw new Error('Active technician session security token invalid or missing');
+
+      const workerUrl = getEdgeWorkerUrl();
 
       const res = await fetch(`${workerUrl}/api/v1/actions/resolve`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${session.access_token}`,
-          'X-Idempotency-Key': idempotencyKey
+          'Authorization': `Bearer ${token}`,
+          'X-Idempotency-Key': `hitl_exec_${proposalData.id}`
         },
-        body: JSON.stringify({ hitlLogId })
+        body: JSON.stringify({
+          hitlLogId: proposalData.id,
+          disposition: targetDisposition // "approved" or "rejected"
+        })
       });
 
-      if (!res.ok) {
-        const errText = await res.text();
-        throw new Error(`Execution rejected: ${errText}`);
+      const outcome = await res.json();
+      if (!res.ok) throw new Error(outcome.error || 'Upstream vault network handshake declined.');
+
+      if (targetDisposition === 'rejected') {
+        setExecutionState('rejected');
+        toast.error('Proposed remedy successfully dismissed and archived.', {
+          style: { background: '#09090b', color: '#f43f5e', border: '1px solid rgba(244,63,94,0.3)' }
+        });
+      } else {
+        setExecutionState('success');
+        toast.success(`Action successfully executed.\nTrace ID: ${outcome.cf_ray || 'edge_cache'}`, {
+          style: { background: '#09090b', color: '#10b981', border: '1px solid rgba(16,185,129,0.3)' }
+        });
       }
 
-      const responseData = await res.json();
-      const executionTrace = responseData.cf_ray || "unknown";
-
-      // CRITICAL FIX: Mutate state variables locally to instantly collapse controls on completion
-      setLogDetails(prev => ({ ...prev, status: 'executed' }));
-
-      toast.success(`Action executed securely.\nTrace: ${executionTrace}`, {
-         style: { background: '#09090b', color: '#10b981', border: '1px solid rgba(16,185,129,0.3)', whiteSpace: 'pre-wrap' }
-      });
-
-      if (onComplete) {
-        onComplete();
-      }
-    } catch (e) {
-      toast.error(e.message);
-    } finally {
-      setIsExecuting(false);
+      if (onActionExecuted) onActionExecuted(proposalData.id);
+    } catch (err) {
+      setExecutionState('failed');
+      setErrorMessage(err.message);
+      toast.error(`Execution failed: ${err.message}`);
     }
   };
 
-  if (!logDetails) return <div className="animate-pulse h-10 bg-emerald-950/20 rounded-xl" />;
-
-  const isExecuted = logDetails.status === 'executed';
+  if (executionState === 'rejected') return null;
 
   return (
-    <div className={`my-2 border rounded-2xl p-4 transition-colors ${isExecuted ? 'bg-zinc-900/50 border-zinc-800' : 'bg-emerald-950/20 border-emerald-500/30 shadow-[0_0_15px_rgba(16,185,129,0.05)]'}`}>
-      <div className={`flex items-center gap-2 text-xs font-black uppercase tracking-widest mb-3 ${isExecuted ? 'text-zinc-500' : 'text-emerald-400'}`}>
-        <FiZap className={!isExecuted ? 'animate-pulse' : ''} /> Action Proposal: {logDetails.tool_type}
+    <div className={`border rounded-2xl p-5 mb-4 relative overflow-hidden transition-all duration-300 ${
+      executionState === 'success' ? 'bg-emerald-950/10 border-emerald-500/30' :
+      executionState === 'failed' ? 'bg-rose-950/10 border-rose-500/30' : 'bg-zinc-950/60 border-zinc-800'
+    }`}>
+      <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4">
+        <div className="flex gap-3">
+          <div className={`w-8 h-8 rounded-xl flex items-center justify-center border flex-shrink-0 ${
+            executionState === 'success' ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400' :
+            executionState === 'failed' ? 'bg-rose-500/10 border-rose-500/20 text-rose-400' : 'bg-amber-500/10 border-amber-500/20 text-amber-400'
+          }`}>
+            {executionState === 'success' ? <FiCheckCircle /> : <FiShield />}
+          </div>
+          <div>
+            <h4 className="text-[11px] font-black uppercase tracking-widest text-zinc-400">Proposed Structural Remedy</h4>
+            <p className="text-xs font-mono font-bold text-white mt-1">{proposalData.tool_type || 'Custom Core Operation'}</p>
+            <p className="text-[11px] text-zinc-400 mt-1.5 leading-relaxed">{proposalData.action_required || 'Review data parameters before manual clearance.'}</p>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-2 self-end sm:self-auto">
+          {/* THE 5% UI FEATURE: Gated Dismissal Control Button */}
+          {executionState === 'idle' && (
+            <button
+              onClick={() => processRemedyDisposition('rejected')}
+              className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest bg-zinc-900 hover:bg-zinc-800 text-rose-400 border border-zinc-800 transition-all duration-200"
+            >
+              <FiXCircle /> Dismiss
+            </button>
+          )}
+
+          <button
+            onClick={() => processRemedyDisposition('approved')}
+            disabled={executionState === 'executing' || executionState === 'success'}
+            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest border transition-all ${
+              executionState === 'success' ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20 cursor-not-allowed' :
+              executionState === 'executing' ? 'bg-zinc-900 text-zinc-500 border-zinc-800 cursor-wait' :
+              'bg-amber-500 hover:bg-amber-400 text-black border-amber-400/20 font-black shadow-[0_0_20px_rgba(245,158,11,0.15)]'
+            }`}
+          >
+            {executionState === 'executing' ? <FiLoader className="animate-spin" /> : executionState === 'success' ? <FiCheckCircle /> : <FiPlay />}
+            {executionState === 'executing' ? 'Authorizing...' : executionState === 'success' ? 'Completed' : 'Approve & Dispatch'}
+          </button>
+        </div>
       </div>
-      <pre className="bg-black/50 p-3 rounded-xl border border-zinc-800/50 text-[10px] text-zinc-400 font-mono overflow-x-auto mb-4 whitespace-pre-wrap break-words">
-        {JSON.stringify(logDetails.payload, null, 2)}
-      </pre>
-      <div className="flex items-center gap-3">
-        <button
-          onClick={handleExecute}
-          disabled={isExecuting || isExecuted}
-          className={`flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-bold uppercase transition-colors disabled:opacity-50 ${isExecuted ? 'bg-zinc-800 text-zinc-500 cursor-not-allowed' : 'bg-emerald-500/20 hover:bg-emerald-500/40 text-emerald-300'}`}
-        >
-          {isExecuting ? <div className="w-3 h-3 border-2 border-emerald-300/30 border-t-emerald-300 rounded-full animate-spin" /> : <FiCheck />}
-          {isExecuted ? 'Action Executed' : 'Authorize & Execute'}
-        </button>
-      </div>
+
+      {executionState === 'failed' && (
+        <div className="mt-3 flex items-center gap-2 bg-rose-500/10 border border-rose-500/20 rounded-xl p-3 text-rose-300 font-mono text-[10px]">
+          <FiAlertTriangle className="flex-shrink-0 text-sm" />
+          <span><strong>HANDSHAKE FAULT:</strong> {errorMessage}</span>
+        </div>
+      )}
     </div>
   );
 }

@@ -42,6 +42,7 @@ function hexStringToUint8Array(hexString: string): Uint8Array {
 
 const ToolCommandSchema = z.object({
   hitlLogId: z.string().uuid(),
+  disposition: z.enum(["approved", "rejected"]).optional()
 });
 
 // Rate limiting map
@@ -2212,7 +2213,6 @@ async function handleExecuteAction(request: Request, env: Env, ctx: any): Promis
     });
   }
 
-  // CRITICAL FIX: Eradicate old static shared token mapping in favor of active user scoped sessions
   const authHeader = request.headers.get("Authorization") || "";
   const token = authHeader.replace("Bearer ", "").trim();
   if (!token) return new Response(JSON.stringify({ error: "UNAUTHORIZED_ACTION_EXECUTION" }), { status: 401, headers: getCorsHeaders(env, request) });
@@ -2237,7 +2237,7 @@ async function handleExecuteAction(request: Request, env: Env, ctx: any): Promis
       throw zodError;
     }
 
-    const { hitlLogId } = payload;
+    const { hitlLogId, disposition = "approved" } = payload;
 
     const { data: hitlLog, error: fetchError } = await supabase
       .from("hitl_audit_logs")
@@ -2247,13 +2247,38 @@ async function handleExecuteAction(request: Request, env: Env, ctx: any): Promis
 
     if (fetchError) throw fetchError;
 
-    if (hitlLog.status === "executed") {
+    if (hitlLog.status === "executed" || hitlLog.status === "rejected") {
       logEnd(supabase, logCtx, startTime, ctx);
-      return new Response(JSON.stringify({ success: true, executed: true, message: "Action already executed." }), {
+      return new Response(JSON.stringify({ success: true, executed: false, message: `Action already marked with status: ${hitlLog.status}` }), {
         status: 200, headers: { "Content-Type": "application/json", ...getCorsHeaders(env, request) }
       });
     }
 
+    // HANDLE REMEDY DISMISSAL/REJECTION PATHWAY
+    if (disposition === "rejected") {
+      await supabase.from("hitl_audit_logs").update({ status: "rejected" }).eq("id", hitlLogId);
+
+      if (hitlLog.support_ticket_id) {
+        await supabase.from("ticket_messages").insert({
+          ticket_id: hitlLog.support_ticket_id,
+          sender_id: "onyx_system",
+          message_body: `**[⚠️ SYSTEM REMEDY REJECTED BY ADMINISTRATOR]**\n\nProposed tool action \`${hitlLog.tool_type}\` was marked as invalid/rejected by an internal support engineer. Parameters archived cleanly.`,
+          is_internal_note: true
+        });
+
+        await supabase.from("events_ax2024").insert({
+          type: "hitl_rejection_metric",
+          payload: { ticket_id: hitlLog.support_ticket_id, action: hitlLog.tool_type, hitl_log_id: hitlLogId, status: "dismissed", operator_id: user.id }
+        });
+      }
+
+      logEnd(supabase, logCtx, startTime, ctx);
+      return new Response(JSON.stringify({ success: true, executed: false, status: "rejected" }), {
+        status: 200, headers: { "Content-Type": "application/json", ...getCorsHeaders(env, request) }
+      });
+    }
+
+    // HANDLE REMEDY APPROVAL PATHWAY (Vault API Handshake Proxy)
     const coreProxyUrl = env.CORE_API_URL ? `${env.CORE_API_URL}/functions/v1/api-proxy` : "https://api.axim-core.internal/v1/proxy";
 
     const proxyResponse = await fetch(coreProxyUrl, {
@@ -2301,6 +2326,8 @@ async function handleExecuteAction(request: Request, env: Env, ctx: any): Promis
     });
   }
 }
+
+
 async function handleTicketResolved(request: Request, env: Env, ctx: any): Promise<Response> {
   const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
   const logCtx = createLogContext(request);
