@@ -168,6 +168,7 @@ async function logToEvents(
 }
 
 export interface Env {
+  AXIM_TELEMETRY_SECRET: string;
   TURNSTILE_SECRET_KEY: string;
   ADMIN_EMAIL?: string;
   ALLOWED_ORIGINS?: string;
@@ -474,6 +475,50 @@ export default {
 
     // 2. Route Handling
 
+
+
+    // --- CENTRAL TELEMETRY INGRESS VALVE (Headless HMAC Protected Node) ---
+    if (url.pathname === "/api/v1/telemetry/event" && request.method === "POST") {
+      const inboundSignature = request.headers.get("X-Axim-Signature") || "";
+
+      if (!inboundSignature || !env.AXIM_TELEMETRY_SECRET) {
+        return new Response(JSON.stringify({ error: "UNAUTHORIZED_TELEMETRY_INGRESS" }), {
+          status: 401, headers: { "Content-Type": "application/json", ...getCorsHeaders(env, request) }
+        });
+      }
+
+      const bodyText = await request.text();
+
+      // Enforce edge-native Web Crypto SHA-256 HMAC signature validation checks
+      try {
+        const encoder = new TextEncoder();
+        const cryptoKey = await crypto.subtle.importKey(
+          "raw",
+          encoder.encode(env.AXIM_TELEMETRY_SECRET),
+          { name: "HMAC", hash: "SHA-256" },
+          false,
+          ["verify"]
+        );
+
+        // Convert the incoming hex signature into an ArrayBuffer for validation
+        const sigBuffer = new Uint8Array(inboundSignature.match(/[\da-f]{2}/gi)!.map(h => parseInt(h, 16)));
+        const isValid = await crypto.subtle.verify("HMAC", cryptoKey, sigBuffer, encoder.encode(bodyText));
+
+        if (!isValid) {
+          return new Response(JSON.stringify({ error: "CRYPTOGRAPHIC_SIGNATURE_MISMATCH" }), {
+            status: 403, headers: { "Content-Type": "application/json", ...getCorsHeaders(env, request) }
+          });
+        }
+      } catch (cryptoError) {
+        return new Response(JSON.stringify({ error: "SIGNATURE_VERIFICATION_FAULT" }), {
+          status: 400, headers: { "Content-Type": "application/json", ...getCorsHeaders(env, request) }
+        });
+      }
+
+      // Re-hydrate the verified string body to JSON for processing hooks
+      const anomalyPayload = JSON.parse(bodyText);
+      return await handleTelemetryIngress(anomalyPayload, env, ctx, request);
+    }
 
     if (url.pathname === "/api/v1/onyx-bridge/draft") {
       return handleAutoDraft(request, env, ctx);
@@ -2986,5 +3031,92 @@ async function handleDataRetentionSweep(env: Env) {
     }
   } catch (error) {
     console.error('[handleDataRetentionSweep] Unhandled exception:', error);
+  }
+}
+
+
+async function handleTelemetryIngress(payload: any, env: Env, ctx: any, request: Request): Promise<Response> {
+  const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
+  const logCtx = createLogContext(request);
+
+  const targetApplicationCode = payload.source_app || "UNKNOWN_MICRO_APP";
+  const incidentErrorCode = payload.error_code || "GENERIC_ANOMALY";
+  const incidentDescription = payload.details || "No structural trace logs provided.";
+
+  // Construct a deterministic signature hash to group high-frequency alert floods
+  const debouncingCacheKey = `telemetry_cooldown:${targetApplicationCode}:${incidentErrorCode}`;
+
+  if (!env.STATUS_KV) {
+    return new Response(JSON.stringify({ error: "STATUS_KV namespace reference binding missing." }), {
+      status: 500, headers: { "Content-Type": "application/json" }
+    });
+  }
+
+  try {
+    // Look up high-frequency anomaly bursts cached inside Cloudflare edge rows
+    const activeIncidentTrackerId = await env.STATUS_KV.get(debouncingCacheKey);
+
+    if (activeIncidentTrackerId) {
+      // TELEMETRY DEBOUNCING ACTIVE: Deduplicate high-frequency floods under a single parent ticket note
+      ctx.waitUntil((async () => {
+        const timestampMarker = new Date().toISOString();
+        await supabase.from("ticket_messages").insert({
+          ticket_id: activeIncidentTrackerId,
+          sender_id: "onyx_system",
+          message_body: `**[HIGH-FREQUENCY TELEMETRY ANOMALY BUNDLED]**\n\nDuplicate signal burst suppressed at edge node: \`${logCtx.edge_colo}\`.\nTimestamp: \`${timestampMarker}\`.\nTrace Block Details: ${incidentDescription}`,
+          is_internal_note: true
+        });
+      })());
+
+      return new Response(JSON.stringify({ success: true, debounced: true, ticket_id: activeIncidentTrackerId }), {
+        status: 200, headers: { "Content-Type": "application/json", ...getCorsHeaders(env, request) }
+      });
+    }
+
+    // NEW UNIQUE ANOMALY IDENTIFIED: Spawning enterprise target ticket rows
+    const { data: newTicket, error: ticketError } = await supabase
+      .from("support_tickets")
+      .insert({
+        subject: `[ANOMALY] ${targetApplicationCode} caught systemic fault: ${incidentErrorCode}`,
+        description: incidentDescription,
+        priority: payload.severity === "critical" ? "urgent" : "medium",
+        status: "open",
+        assigned_department: "Technical Operations"
+      })
+      .select()
+      .single();
+
+    if (ticketError) throw ticketError;
+
+    // Save the new incident mapping tracker to Cloudflare KV with a rolling 5-minute (300s) suppression expiration TTL window
+    ctx.waitUntil(env.STATUS_KV.put(debouncingCacheKey, newTicket.id, { expirationTtl: 300 }));
+
+    // Async background triage calculation thread invocation pass
+    ctx.waitUntil((async () => {
+      const onyxAnalysis = await analyzeWithOnyx(newTicket.subject, incidentDescription, env.ANTHROPIC_API_KEY, null, null, "", env);
+
+      const synchronizedMetrics = {
+        ...(onyxAnalysis.metrics || {}),
+        edge_colo: logCtx.edge_colo,
+        ingest_method: "universal_telemetry_valve"
+      };
+
+      await supabase.from("ticket_ai_telemetry").insert({
+        ticket_id: newTicket.id,
+        analyzed_sentiment: onyxAnalysis.sentiment,
+        suggested_category: onyxAnalysis.category,
+        auto_response_draft: onyxAnalysis.draft,
+        confidence_score: onyxAnalysis.confidence,
+        metadata: synchronizedMetrics
+      });
+    })());
+
+    return new Response(JSON.stringify({ success: true, debounced: false, ticket_id: newTicket.id }), {
+      status: 201, headers: { "Content-Type": "application/json", ...getCorsHeaders(env, request) }
+    });
+  } catch (error: any) {
+    return new Response(JSON.stringify({ error: error.message }), {
+      status: 500, headers: { "Content-Type": "application/json", ...getCorsHeaders(env, request) }
+    });
   }
 }
