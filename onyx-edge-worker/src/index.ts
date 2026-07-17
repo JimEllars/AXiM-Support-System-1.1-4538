@@ -115,19 +115,24 @@ function validateAttachment(file: {
   return { valid: true };
 }
 
-interface LogContext {
-  requestId: string;
-  endpoint: string;
+function createLogContext(request: Request): {
+  id: string;
   method: string;
-  timestamp: string;
-}
+  url: string;
+  ua: string;
+  edge_colo: string; // CRITICAL FIX: Extract Cloudflare point-of-presence datacenter traces
+} {
+  const url = new URL(request.url);
+  // Unpack Cloudflare metadata parameters securely from incoming Request objects
+  const cfMetadata = (request as any).cf;
+  const targetColoLocation = cfMetadata?.colo || "UNKNOWN_NODE";
 
-function createLogContext(request: Request): LogContext {
   return {
-    requestId: crypto.randomUUID(),
-    endpoint: new URL(request.url).pathname,
+    id: crypto.randomUUID(),
     method: request.method,
-    timestamp: new Date().toISOString(),
+    url: url.pathname,
+    ua: request.headers.get("user-agent") || "unknown",
+    edge_colo: targetColoLocation
   };
 }
 
@@ -147,7 +152,7 @@ function logErr(supabase: any, logCtx: any, err: any, ctx: any) {
 
 async function logToEvents(
   supabase: any,
-  context: LogContext,
+  context: any,
   type: string,
   message: string,
   metadata?: any,

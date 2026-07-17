@@ -1,144 +1,124 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { FiCpu, FiPlay, FiRefreshCw, FiCheckCircle, FiActivity, FiServer } from 'react-icons/fi';
+import React, { useState, useEffect } from 'react';
+import { FiCpu, FiClock, FiActivity, FiLayers, FiHelpCircle, FiGlobe } from 'react-icons/fi';
 import { supabase } from '../../lib/supabaseClient';
-import { getEdgeWorkerUrl } from '../../lib/edgeWorkerUrl';
 
-export default function OnyxInvestigationPanel({ ticket }) {
-  const [loading, setLoading] = useState(false);
-  const [streamedAnalysis, setStreamedAnalysis] = useState("");
-  const [metrics, setMetrics] = useState({ latency: 0, provider: "Deepseek-V3" });
-  const abortControllerRef = useRef(null);
+export default function OnyxInvestigationPanel({ ticketId }) {
+  const [telemetry, setTelemetry] = useState(null);
+  const [isLoading, setIsLoading] = useState(true);
 
-  // CRITICAL FIX: Enforce component unmount and view state reset containment loops
   useEffect(() => {
-    setStreamedAnalysis("");
-    setLoading(false);
-    setMetrics({ latency: 0, provider: "Deepseek-V3" });
+    const fetchAITelemetryMatrix = async () => {
+      setIsLoading(true);
+      try {
+        const { data, error } = await supabase
+          .from('ticket_ai_telemetry')
+          .select('*')
+          .eq('ticket_id', ticketId)
+          .maybeSingle();
 
-    if (abortControllerRef.current) {
-      abortControllerRef.current.abort();
-    }
-    return () => {
-      if (abortControllerRef.current) abortControllerRef.current.abort();
+        if (!error && data) {
+          setTelemetry(data);
+        }
+      } catch (err) {
+        console.error('System failed to extract edge telemetry metrics:', err);
+      } finally {
+        setIsLoading(false);
+      }
     };
-  }, [ticket?.id]);
 
-  const triggerLiveInquestStream = async () => {
-    if (loading) return;
-    setLoading(true);
-    setStreamedAnalysis("");
-    const startTime = performance.now();
+    if (ticketId) fetchAITelemetryMatrix();
+  }, [ticketId]);
 
-    try {
-      const workerUrl = getEdgeWorkerUrl();
-      const { data: { session } } = await supabase.auth.getSession();
-      const token = session?.access_token || "";
+  if (isLoading) {
+    return (
+      <div className="bg-zinc-950/40 border border-zinc-900 rounded-3xl p-6 animate-pulse space-y-4">
+        <div className="h-4 bg-zinc-900 rounded w-1/3" />
+        <div className="grid grid-cols-2 gap-4">
+          <div className="h-12 bg-zinc-900/60 rounded-2xl" />
+          <div className="h-12 bg-zinc-900/60 rounded-2xl" />
+        </div>
+      </div>
+    );
+  }
 
-      abortControllerRef.current = new AbortController();
+  if (!telemetry) {
+    return (
+      <div className="bg-zinc-950/40 border border-zinc-900 rounded-3xl p-6 text-center text-zinc-500 font-mono text-xs">
+        <FiHelpCircle className="mx-auto mb-2 text-lg text-zinc-700" />
+        No telemetry footprints recorded for this operational tracking frame.
+      </div>
+    );
+  }
 
-      const response = await fetch(`${workerUrl}/api/v1/onyx-bridge/stream`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
-        },
-        body: JSON.stringify({
-          subject: ticket.subject,
-          description: ticket.description
-        }),
-        signal: abortControllerRef.current.signal
-      });
+  const providerProvenance = telemetry.metadata?.provider_provenance || "Unknown Cluster";
+  const latencyDuration = telemetry.metadata?.generation_latency_ms || null;
 
-      if (!response.ok) throw new Error("Upstream real-time stream channel connection rejected.");
-
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = "";
-
-      while (true) {
-        const { value, done } = await reader.read();
-        if (done) break;
-
-        const chunk = decoder.decode(value, { stream: true });
-        buffer += chunk;
-
-        // Render step typewriter updates cleanly into state view container
-        setStreamedAnalysis(buffer);
-
-        // Dynamically compute runtime stream latency markers
-        setMetrics(prev => ({
-          ...prev,
-          latency: Math.round(performance.now() - startTime)
-        }));
-      }
-
-    } catch (err) {
-      if (err.name !== 'AbortError') {
-        setStreamedAnalysis(prev => prev + `\n\n[INQUEST FAULT]: ${err.message}`);
-      }
-    } finally {
-      setLoading(false);
-    }
-  };
+  // THE 5% NOTIFICATION ELEMENT: Safely extract and fallback the processed edge locator node parameter
+  const cloudflareEdgeColo = telemetry.metadata?.edge_colo || "IAD_POP";
 
   return (
-    <div className="bg-zinc-950 border border-zinc-900 rounded-2xl p-6 mb-6">
-      {/* Header Container Area Layout */}
-      <div className="flex items-center justify-between border-b border-zinc-900 pb-4 mb-4">
-        <div className="flex items-center gap-3">
-          <div className="w-9 h-9 rounded-xl bg-zinc-900 border border-zinc-800 flex items-center justify-center text-zinc-400">
-            <FiCpu className={loading ? "animate-spin text-fuchsia-400" : ""} />
-          </div>
-          <div>
-            <h3 className="text-xs font-black uppercase tracking-widest text-zinc-300">Onyx Diagnostic Triage Inquest</h3>
-            <p className="text-[10px] text-zinc-500 font-mono mt-0.5">Ecosystem Vault Isolation Mode</p>
-          </div>
+    <div className="bg-zinc-950/60 border border-zinc-800/80 rounded-3xl p-6 shadow-2xl relative overflow-hidden backdrop-blur-md">
+      <div className="flex items-center justify-between mb-6 border-b border-zinc-900 pb-4">
+        <div className="flex items-center gap-2.5">
+          <div className="w-2 h-2 rounded-full bg-emerald-500 animate-ping" />
+          <h3 className="text-xs font-black uppercase tracking-widest text-zinc-400">Onyx Diagnostics Node</h3>
         </div>
 
-        <button
-          onClick={triggerLiveInquestStream}
-          disabled={loading || !ticket}
-          className={`flex items-center gap-2 px-4 py-2 text-[10px] font-black uppercase tracking-widest border rounded-xl transition-all ${
-            loading
-              ? 'bg-zinc-900 border-zinc-800 text-zinc-500 cursor-wait'
-              : 'bg-zinc-900 hover:bg-zinc-800 border-zinc-800 text-zinc-200 shadow-lg'
-          }`}
-        >
-          {loading ? <FiRefreshCw className="animate-spin" /> : <FiPlay />}
-          {loading ? "Streaming Analytica..." : "Run Inquest"}
-        </button>
+        {/* Render Cloudflare Edge Colo trace indicator box */}
+        <span className="text-[10px] font-mono text-fuchsia-400 bg-fuchsia-500/5 px-2 py-0.5 rounded-md border border-fuchsia-500/20 flex items-center gap-1">
+          <FiGlobe className="text-[9px]" /> Node: {cloudflareEdgeColo}
+        </span>
       </div>
 
-      {/* Code Text Window Block Area Layout */}
-      {streamedAnalysis ? (
-        <div className="bg-zinc-950 border border-zinc-900 font-mono rounded-xl p-4 text-xs leading-relaxed text-zinc-300 whitespace-pre-wrap max-h-64 overflow-y-auto shadow-inner relative">
-          {streamedAnalysis}
-        </div>
-      ) : (
-        <div className="border border-dashed border-zinc-800 rounded-xl p-8 text-center text-[11px] text-zinc-500 font-mono">
-          Ready to initialize decentralized V8 isolate ingestion sequence threads.
-        </div>
-      )}
-
-      {/* Hardened Telemetry Dashboard Strip (95% Project Metric Execution Block) */}
-      {streamedAnalysis && (
-        <div className="mt-4 pt-3 border-t border-zinc-900 flex flex-wrap items-center justify-between gap-4 font-mono text-[9px]">
-          <div className="flex items-center gap-4">
-            <div className="flex items-center gap-1.5 text-zinc-500">
-              <FiServer className="text-xs text-zinc-400" />
-              ENGINE: <span className="text-zinc-300 font-bold uppercase">{metrics.provider}</span>
-            </div>
-            <div className="flex items-center gap-1.5 text-zinc-500">
-              <FiActivity className="text-xs text-zinc-400" />
-              LATENCY: <span className="text-fuchsia-400 font-bold">{metrics.latency}ms</span>
-            </div>
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+        <div className="bg-black/30 border border-zinc-900 rounded-2xl p-4 hover:border-zinc-800 transition-colors">
+          <div className="flex items-center gap-2 text-zinc-500 text-xs font-mono mb-1">
+            <FiCpu className="text-zinc-400" /> Infrastructure
           </div>
-
-          <div className="flex items-center gap-1.5 text-emerald-400 font-bold uppercase tracking-wider bg-emerald-500/5 px-2 py-0.5 border border-emerald-500/10 rounded">
-            <FiCheckCircle className="text-xs" /> Telemetry Synced
-          </div>
+          <p className="text-xs font-bold text-white tracking-tight truncate">
+            {providerProvenance}
+          </p>
         </div>
-      )}
+
+        <div className="bg-black/30 border border-zinc-900 rounded-2xl p-4 hover:border-zinc-800 transition-colors">
+          <div className="flex items-center gap-2 text-zinc-500 text-xs font-mono mb-1">
+            <FiClock className="text-zinc-400" /> Core Latency
+          </div>
+          <p className="text-xs font-mono font-black text-emerald-400">
+            {latencyDuration ? `${latencyDuration}ms` : 'In-Flight/Cached'}
+          </p>
+        </div>
+
+        <div className="bg-black/30 border border-zinc-900 rounded-2xl p-4 hover:border-zinc-800 transition-colors">
+          <div className="flex items-center gap-2 text-zinc-500 text-xs font-mono mb-1">
+            <FiActivity className="text-zinc-400" /> Customer Tone
+          </div>
+          <p className={`text-xs font-black uppercase tracking-wider ${
+            telemetry.analyzed_sentiment === 'negative' ? 'text-rose-400' :
+            telemetry.analyzed_sentiment === 'positive' ? 'text-emerald-400' : 'text-zinc-400'
+          }`}>
+            {telemetry.analyzed_sentiment || 'Neutral'}
+          </p>
+        </div>
+
+        <div className="bg-black/30 border border-zinc-900 rounded-2xl p-4 hover:border-zinc-800 transition-colors">
+          <div className="flex items-center gap-2 text-zinc-500 text-xs font-mono mb-1">
+            <FiLayers className="text-zinc-400" /> Core Confidence
+          </div>
+          <p className="text-xs font-mono font-black text-white">
+            {telemetry.confidence_score}%
+          </p>
+        </div>
+      </div>
+
+      <div className="relative rounded-2xl border border-zinc-900 bg-black/20 p-4">
+        <label className="absolute -top-2 left-4 px-2 bg-zinc-950 text-[9px] font-black uppercase tracking-widest text-zinc-500">
+          Autonomous Response Blueprint
+        </label>
+        <p className="text-xs text-zinc-300 leading-relaxed font-sans pt-1 whitespace-pre-wrap">
+          {telemetry.auto_response_draft || "No response generation cached for this log reference context."}
+        </p>
+      </div>
     </div>
   );
 }
