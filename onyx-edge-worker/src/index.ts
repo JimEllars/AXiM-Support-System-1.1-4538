@@ -611,6 +611,38 @@ export default {
       }
     }
 
+
+    if (url.pathname === "/api/v1/tickets/callback" && request.method === "POST") {
+      const networkSignature = request.headers.get("X-Axim-Network-Key") || "";
+      if (networkSignature !== env.AXIM_SERVICE_KEY) {
+        return new Response(JSON.stringify({ error: "UNAUTHORIZED_INTERLOCK_CALLBACK" }), {
+          status: 401, headers: getCorsHeaders(env, request)
+        });
+      }
+
+      try {
+        const payload: any = await request.json();
+        const { ticketId, patchDetails, commitSha } = payload;
+
+        const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
+
+        // Inject incoming code patches natively into the JSONB metadata column range
+        await supabase.from("ticket_messages").insert({
+          ticket_id: ticketId,
+          sender_id: "the_coding_lab_agent",
+          message_body: `**[🛠️ CODE-LEVEL PATCH RECORD ATTACHED BY EXTERNAL APPS]**\n\nAutonomous workspace branch created for commit: \`${commitSha}\`. Review patch workspace proposals immediately.`,
+          metadata: { patch_delta: patchDetails, source_interlock: "the_coding_lab" }
+        });
+
+        return new Response(JSON.stringify({ success: true, processed: true }), {
+          status: 200, headers: { "Content-Type": "application/json", ...getCorsHeaders(env, request) }
+        });
+      } catch (err: any) {
+        return new Response(JSON.stringify({ error: err.message }), {
+          status: 500, headers: getCorsHeaders(env, request)
+        });
+      }
+    }
     if (url.pathname === "/batch-triage") {
       return handleBatchTriage(request, env, ctx);
     }
@@ -2359,6 +2391,24 @@ async function handleExecuteAction(request: Request, env: Env, ctx: any): Promis
         type: "action_executed",
         payload: { ticket_id: hitlLog.support_ticket_id, action: hitlLog.tool_type, hitl_log_id: hitlLogId, status: "success" },
       });
+
+      // TRIGGER INTER-SYSTEM DISPATCH FAN-OUT
+      // Check for any ecosystem webhooks bound to this organization node
+      const { data: boundEgressTargets } = await supabase
+        .from("tenant_webhooks")
+        .select("url")
+        .eq("tenant_id", hitlLog.organization_id || "system");
+
+      if (boundEgressTargets && boundEgressTargets.length > 0) {
+        for (const target of boundEgressTargets) {
+          ctx.waitUntil(dispatchSecureEgressWebhook(
+            target.url,
+            { event: "ticket_automation_diverted", ticket_id: hitlLog.support_ticket_id, tool: hitlLog.tool_type, status: "executed" },
+            env,
+            supabase
+          ));
+        }
+      }
     }
 
     await supabase.from("hitl_audit_logs").update({ status: "executed" }).eq("id", hitlLogId);
@@ -3118,5 +3168,66 @@ async function handleTelemetryIngress(payload: any, env: Env, ctx: any, request:
     return new Response(JSON.stringify({ error: error.message }), {
       status: 500, headers: { "Content-Type": "application/json", ...getCorsHeaders(env, request) }
     });
+  }
+}
+
+// --- CRYPTOGRAPHIC OUTBOUND EGRESS FAN-OUT ROUTINE ---
+async function dispatchSecureEgressWebhook(
+  targetUrl: string,
+  payload: any,
+  env: Env,
+  supabase: any
+): Promise<void> {
+  if (!targetUrl) return;
+
+  const bodyString = JSON.stringify(payload);
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    "X-Axim-Origin": "AX_SUPPORT_CORE",
+    "X-Axim-Timestamp": new Date().toISOString()
+  };
+
+  // Generate an edge-native SHA-256 HMAC transport signature if secret keys are available
+  if (env.AXIM_SERVICE_KEY) {
+    try {
+      const encoder = new TextEncoder();
+      const cryptoKey = await crypto.subtle.importKey(
+        "raw",
+        encoder.encode(env.AXIM_SERVICE_KEY),
+        { name: "HMAC", hash: "SHA-256" },
+        false,
+        ["sign"]
+      );
+
+      const sigBuffer = await crypto.subtle.sign("HMAC", cryptoKey, encoder.encode(bodyString));
+      const hexSignature = Array.from(new Uint8Array(sigBuffer))
+        .map(b => b.toString(16).padStart(2, "0"))
+        .join("");
+
+      headers["X-Axim-Webhook-Signature"] = hexSignature;
+    } catch (sigError) {
+      console.error("[EGRESS SIGNING FAULT] Failed to compute HMAC header:", sigError);
+    }
+  }
+
+  try {
+    const res = await fetch(targetUrl, {
+      method: "POST",
+      headers,
+      body: bodyString
+    });
+
+    // Record transport metrics history inside the events tracking schema
+    await supabase.from("events_ax2024").insert({
+      type: "egress_webhook_dispatched",
+      payload: {
+        destination: targetUrl,
+        status_code: res.status,
+        success: res.ok,
+        timestamp: new Date().toISOString()
+      }
+    });
+  } catch (fetchErr: any) {
+    console.error(`[MTA FAN-OUT DROP] Egress transport dropped to destination ${targetUrl}:`, fetchErr.message);
   }
 }
