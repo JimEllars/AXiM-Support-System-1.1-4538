@@ -517,6 +517,18 @@ export default {
           }
         });
 
+        // 3. Log explicit event telemetry trace
+        await supabase.from("events_ax2024").insert({
+          type: "gitops_patch_received",
+          payload: {
+            ticket_id: ticketId,
+            source: "the_coding_lab",
+            commit_sha: commitSha || null,
+            pr_url: prUrl || null,
+            timestamp: new Date().toISOString()
+          }
+        });
+
         return new Response(JSON.stringify({ success: true, ticket_id: ticketId, status: "Review-Patch-Pending" }), {
           status: 200, headers: { "Content-Type": "application/json", ...getCorsHeaders(env, request) }
         });
