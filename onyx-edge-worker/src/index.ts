@@ -3254,7 +3254,7 @@ async function dispatchSecureEgressWebhook(
     "X-Axim-Timestamp": new Date().toISOString()
   };
 
-  // Generate edge-native SHA-256 HMAC transport signature if service secret key is available
+  // Generate edge-native SHA-256 HMAC transport signature if service key is configured
   if (env.AXIM_SERVICE_KEY) {
     try {
       const encoder = new TextEncoder();
