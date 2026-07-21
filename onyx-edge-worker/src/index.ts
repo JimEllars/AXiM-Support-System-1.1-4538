@@ -475,6 +475,35 @@ export default {
 
     // 2. Route Handling
 
+    // --- EDGE HEALTH & SYSTEM TELEMETRY ENDPOINT ---
+    if (url.pathname === "/api/v1/health" && request.method === "GET") {
+      const pingStart = performance.now();
+      const logCtx = createLogContext(request);
+
+      let dbStatus = "connected";
+      try {
+        const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
+        const { error } = await supabase.from("support_tickets").select("id", { count: "exact", head: true });
+        if (error) dbStatus = "degraded";
+      } catch {
+        dbStatus = "disconnected";
+      }
+
+      const pingLatencyMs = Math.round(performance.now() - pingStart);
+
+      return new Response(JSON.stringify({
+        status: dbStatus === "connected" ? "healthy" : "degraded",
+        edge_colo: logCtx.edge_colo,
+        db_status: dbStatus,
+        latency_ms: pingLatencyMs,
+        timestamp: new Date().toISOString()
+      }), {
+        status: dbStatus === "connected" ? 200 : 503,
+        headers: { "Content-Type": "application/json", ...getCorsHeaders(env, request) }
+      });
+    }
+
+
 
 
     // --- SECURE DLQ RETRY RECOVERY ROUTE ---

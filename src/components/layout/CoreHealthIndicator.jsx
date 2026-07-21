@@ -11,7 +11,7 @@ export default function CoreHealthIndicator() {
     const checkHealth = async () => {
       try {
         const workerUrl = getEdgeWorkerUrl();
-        const res = await fetch(`${workerUrl}/health`, {
+        const res = await fetch(`${workerUrl}/api/v1/health`, {
           method: 'GET',
           signal: AbortSignal.timeout(4000),
         });
