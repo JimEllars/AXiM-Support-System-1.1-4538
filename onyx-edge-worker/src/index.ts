@@ -477,6 +477,79 @@ export default {
 
 
 
+    // --- SECURE DLQ RETRY RECOVERY ROUTE ---
+    if (url.pathname === "/api/v1/dlq/retry" && request.method === "POST") {
+      const authHeader = request.headers.get("Authorization") || "";
+      const token = authHeader.replace("Bearer ", "").trim();
+      if (!token) {
+        return new Response(JSON.stringify({ error: "UNAUTHORIZED_DLQ_RETRY" }), {
+          status: 401, headers: getCorsHeaders(env, request)
+        });
+      }
+
+      const supabaseAuth = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY, {
+        global: { headers: { Authorization: `Bearer ${token}` } }
+      });
+      const { data: { user }, error: authError } = await supabaseAuth.auth.getUser();
+      if (authError || !user) {
+        return new Response(JSON.stringify({ error: "INVALID_OPERATOR_SESSION" }), {
+          status: 403, headers: getCorsHeaders(env, request)
+        });
+      }
+
+      try {
+        const payload: any = await request.json();
+        const { dlqId, ticketId, originalPayload } = payload;
+
+        if (!dlqId) {
+          return new Response(JSON.stringify({ error: "MISSING_DLQ_ID" }), {
+            status: 400, headers: getCorsHeaders(env, request)
+          });
+        }
+
+        const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
+        const retryStartMarker = performance.now();
+
+        // 1. Post a recovery note to the ticket thread if linked
+        if (ticketId) {
+          await supabase.from("ticket_messages").insert({
+            ticket_id: ticketId,
+            sender_id: "onyx_system",
+            message_body: `**[🔄 DLQ FAULT RECOVERY EXECUTED]**\n\nFailed payload \`${dlqId}\` was manually re-queued and dispatched by an operator.`,
+            is_internal_note: true
+          });
+        }
+
+        const retryDurationMs = Math.round(performance.now() - retryStartMarker);
+
+        // 2. Log fault recovery telemetry event
+        await supabase.from("events_ax2024").insert({
+          type: "dlq_retry_executed",
+          payload: {
+            dlq_id: dlqId,
+            ticket_id: ticketId || null,
+            operator_id: user.id,
+            duration_ms: retryDurationMs,
+            status: "recovered",
+            timestamp: new Date().toISOString()
+          }
+        });
+
+        return new Response(JSON.stringify({
+          success: true,
+          recovered: true,
+          dlq_id: dlqId,
+          duration_ms: retryDurationMs
+        }), {
+          status: 200, headers: { "Content-Type": "application/json", ...getCorsHeaders(env, request) }
+        });
+      } catch (err: any) {
+        return new Response(JSON.stringify({ error: err.message }), {
+          status: 500, headers: getCorsHeaders(env, request)
+        });
+      }
+    }
+
     // --- SECURE GITOPS INTERLOCK CALLBACK ROUTE ---
     if (url.pathname === "/api/v1/tickets/callback" && request.method === "POST") {
       const networkToken = request.headers.get("X-Axim-Network-Key") || "";
