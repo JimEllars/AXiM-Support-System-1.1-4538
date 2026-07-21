@@ -1,136 +1,126 @@
-import React from 'react';
-import { formatDistanceToNow } from 'date-fns';
-import SafeIcon from '../../common/SafeIcon';
-import * as FiIcons from 'react-icons/fi';
-import ActionProposalBlock from './ActionProposalBlock';
-import ReactMarkdown from 'react-markdown';
+import React, { useState, useEffect, useRef } from 'react';
+import { FiCode, FiExternalLink, FiChevronDown, FiChevronRight, FiGitCommit, FiUser, FiCpu, FiArrowDown } from 'react-icons/fi';
 
-const { FiUser, FiCpu, FiLock, FiTerminal } = FiIcons;
-
-import { supabase } from '../../lib/supabaseClient';
-import { useState, useEffect, useRef } from 'react';
-
-export default function MessageThread({ ticketId, messages: overrideMessages, currentTicketStatus }) {
-  const [messages, setMessages] = useState([]);
-  const bottomRef = useRef(null);
+export default function MessageThread({ messages = [] }) {
+  const [expandedDiffs, setExpandedDiffs] = useState({});
+  const [hasNewMessage, setHasAppliedNewMessage] = useState(false);
+  const prevMessagesLength = useRef(messages.length);
+  const threadBottomRef = useRef(null);
 
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages]);
+    if (messages.length > prevMessagesLength.current) {
+      setHasAppliedNewMessage(true);
+    }
+    prevMessagesLength.current = messages.length;
+  }, [messages.length]);
 
-  useEffect(() => {
-    if (!ticketId) return;
+  const scrollToBottom = () => {
+    threadBottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+    setHasAppliedNewMessage(false);
+  };
 
-    const fetchMessages = async () => {
-      const { data, error } = await supabase
-        .from('ticket_messages')
-        .select('* ')
-        .eq('ticket_id', ticketId)
-        .order('created_at', { ascending: true });
-      if (data) setMessages(data);
-    };
-
-    fetchMessages();
-
-    const messageChannel = supabase.channel(`messages:${ticketId}`)
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'ticket_messages', filter: `ticket_id=eq.${ticketId}` }, (payload) => {
-        setMessages(prev => {
-           if (prev.some(m => m.id === payload.new.id)) return prev;
-           return [...prev, payload.new];
-        });
-      })
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(messageChannel);
-    };
-  }, [ticketId]);
-
-
-  if (!messages || messages.length === 0) {
-    return (
-      <div className="flex-1 flex items-center justify-center text-zinc-500 font-mono text-xs border-2 border-dashed border-zinc-800/50 rounded-2xl m-6">
-        No messages in this thread.
-      </div>
-    );
-  }
+  const toggleDiff = (msgId) => {
+    setExpandedDiffs(prev => ({ ...prev, [msgId]: !prev[msgId] }));
+  };
 
   return (
-    <div className="flex-1 overflow-y-auto p-6 space-y-6 scroll-smooth">
+    <div className="relative space-y-4 my-4">
+      {/* Floating Real-Time Stream Notification Banner */}
+      {hasNewMessage && (
+        <button
+          onClick={scrollToBottom}
+          className="sticky top-2 z-20 mx-auto flex items-center gap-2 px-4 py-2 rounded-full text-xs font-mono font-bold bg-emerald-500 text-black shadow-lg shadow-emerald-500/20 border border-emerald-400 animate-bounce transition-all hover:bg-emerald-400"
+        >
+          <FiArrowDown className="text-sm"/> New Message Streamed
+        </button>
+      )}
+
       {messages.map((msg) => {
-        const isCustomer = msg.sender_id === 'customer';
-        const isInternal = msg.is_internal_note;
+        const isGitOpsPatch = msg.metadata?.source_interlock === 'the_coding_lab' || msg.metadata?.patch_delta;
+        const isSystem = msg.sender_id === 'onyx_system' || msg.sender_id === 'system' || isGitOpsPatch;
 
         return (
-          <div key={msg.id} className={`flex flex-col ${isCustomer ? 'items-start' : 'items-end'} mb-6`}>
-            <div className={`max-w-[85%] rounded-2xl p-4 ${
-              isCustomer
-                ? 'bg-zinc-800/80 border border-zinc-700 text-zinc-200 shadow-md'
-                : isInternal
-                  ? 'bg-[repeating-linear-gradient(45deg,transparent,transparent_10px,rgba(245,158,11,0.02)_10px,rgba(245,158,11,0.02)_20px)] bg-amber-950/10 border-amber-500/30 text-amber-100/90 shadow-[0_0_15px_rgba(245,158,11,0.05)]'
-                  : 'bg-cyan-950/30 border border-cyan-500/20 text-cyan-100'
-            }`}>
-              <div className="flex items-center gap-2 mb-2">
-                <span className={`text-[10px] font-black tracking-widest uppercase ${isCustomer ? 'text-zinc-400' : isInternal ? 'text-amber-500' : 'text-cyan-500'}`}>
-                  {isCustomer ? 'Public Intake / Customer' : isInternal ? 'System Telemetry' : 'Support Team'}
-                </span>
-                <span className="text-[9px] text-zinc-500 font-mono">
-                  {new Date(msg.created_at).toLocaleString()}
-                </span>
-              </div>
-              <div className="prose prose-invert max-w-none text-sm whitespace-pre-wrap">
-                <ReactMarkdown>{msg.message_body}</ReactMarkdown>
-              </div>
-
-              {/* CRITICAL INTEGRATION: Surface Action Proposals */}
-              {msg.metadata?.hitl_log_id && (
-                <div className="mt-4 border-t border-black/20 pt-4">
-                  <ActionProposalBlock
-                    hitlLogId={msg.metadata.hitl_log_id}
-                  />
+          <div
+            key={msg.id || Math.random()}
+            className={`p-4 rounded-2xl border transition-all ${
+              isGitOpsPatch
+                ? 'bg-purple-950/20 border-purple-500/30 shadow-[0_0_15px_rgba(168,85,247,0.05)]'
+                : isSystem
+                  ? 'bg-zinc-900/50 border-zinc-800'
+                  : 'bg-black/40 border-zinc-800/60'
+            }`}
+          >
+            {/* Header / Sender */}
+            <div className="flex items-center justify-between mb-2">
+              <div className="flex items-center gap-2">
+                <div className={`w-6 h-6 rounded-lg flex items-center justify-center text-xs ${
+                  isGitOpsPatch ? 'bg-purple-500/20 text-purple-400 border border-purple-500/30' :
+                  isSystem ? 'bg-emerald-500/20 text-emerald-400' : 'bg-zinc-800 text-zinc-300'
+                }`}>
+                  {isGitOpsPatch ? <FiCode/> : isSystem ? <FiCpu/> : <FiUser/>}
                 </div>
-              )}
+                <span className="text-xs font-mono font-bold text-zinc-300">
+                  {isGitOpsPatch ? 'The Coding Lab Interlock' : msg.sender_id}
+                </span>
+                {msg.is_internal_note && (
+                  <span className="text-[9px] font-mono bg-amber-500/10 text-amber-400 px-1.5 py-0.5 rounded border border-amber-500/20 uppercase">
+                    Internal Note
+                  </span>
+                )}
+              </div>
+              <span className="text-[10px] font-mono text-zinc-500">
+                {msg.created_at ? new Date(msg.created_at).toLocaleTimeString() : ''}
+              </span>
+            </div>
 
-              {/* GITOPS METADATA VISUALIZATION BLOCK */}
-              {msg.metadata?.source_interlock === "the_coding_lab" && msg.metadata?.patch_delta && (
-                <div className="mt-4 border-t border-cyan-500/20 pt-4">
-                  <div className="bg-black/40 rounded-xl p-4 border border-cyan-500/10 shadow-inner">
-                    <div className="flex items-center justify-between mb-3">
-                      <div className="flex items-center gap-2">
-                        <SafeIcon icon={FiTerminal} className="w-4 h-4 text-cyan-400" />
-                        <span className="text-xs font-mono font-semibold text-cyan-400 uppercase tracking-widest">GitOps Code Patch Delta</span>
-                      </div>
-                      {msg.metadata?.pr_url && (
-                        <a
-                          href={msg.metadata.pr_url}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="text-[10px] font-mono px-3 py-1 bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-300 rounded-full border border-cyan-500/20 transition-colors"
-                        >
-                          View Pull Request &rarr;
-                        </a>
-                      )}
-                    </div>
-                    <div className="max-h-[300px] overflow-y-auto rounded-lg bg-[#0d1117] border border-zinc-800 p-3 custom-scrollbar">
-                      <pre className="text-[11px] font-mono leading-relaxed text-zinc-300 whitespace-pre">
-                        <code>{msg.metadata.patch_delta}</code>
+            {/* Message Body */}
+            <p className="text-xs text-zinc-300 whitespace-pre-wrap leading-relaxed font-sans">
+              {msg.message_body}
+            </p>
+
+            {/* GitOps Interactive Patch Card */}
+            {isGitOpsPatch && (
+              <div className="mt-3 p-3 bg-black/60 border border-purple-500/20 rounded-xl space-y-2">
+                <div className="flex flex-wrap items-center justify-between gap-2 text-xs font-mono">
+                  <div className="flex items-center gap-2 text-purple-300">
+                    <FiGitCommit className="text-purple-400"/>
+                    <span>SHA: {msg.metadata?.commit_sha?.slice(0, 7) || 'HEAD'}</span>
+                  </div>
+                  {msg.metadata?.pr_url && (
+                    <a
+                      href={msg.metadata.pr_url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex items-center gap-1 text-[11px] text-purple-400 hover:text-purple-300 underline font-bold"
+                    >
+                      View Pull Request <FiExternalLink/>
+                    </a>
+                  )}
+                </div>
+
+                {msg.metadata?.patch_delta && (
+                  <div className="pt-2 border-t border-purple-500/10">
+                    <button
+                      onClick={() => toggleDiff(msg.id)}
+                      className="flex items-center gap-1.5 text-[11px] font-mono text-zinc-400 hover:text-zinc-200 transition-colors"
+                    >
+                      {expandedDiffs[msg.id] ? <FiChevronDown/> : <FiChevronRight/>}
+                      <span>{expandedDiffs[msg.id] ? 'Hide Code Diff' : 'Inspect Code Diff'}</span>
+                    </button>
+
+                    {expandedDiffs[msg.id] && (
+                      <pre className="mt-2 p-3 bg-zinc-950 border border-zinc-800 rounded-lg text-[10px] font-mono text-emerald-400 overflow-x-auto whitespace-pre break-words max-h-60">
+                        {msg.metadata.patch_delta}
                       </pre>
-                    </div>
-                    {msg.metadata?.commit_sha && (
-                      <div className="mt-3 text-[10px] text-zinc-500 font-mono text-right flex items-center justify-end gap-2">
-                        <span className="w-1.5 h-1.5 rounded-full bg-green-500/50 animate-pulse"></span>
-                        Branch Compiled: {msg.metadata.commit_sha}
-                      </div>
                     )}
                   </div>
-                </div>
-              )}
-            </div>
+                )}
+              </div>
+            )}
           </div>
         );
       })}
-
-      <div ref={bottomRef} className="h-1" />
+      <div ref={threadBottomRef} />
     </div>
   );
 }
