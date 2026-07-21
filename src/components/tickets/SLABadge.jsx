@@ -17,6 +17,15 @@ const SLABadge = ({ breachAt, status }) => {
   if (!breachAt) return null;
   if (status === 'resolved' || status === 'closed') return null;
 
+  if (status === 'Review-Patch-Pending') {
+    return (
+      <div className="px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest flex items-center gap-1.5 bg-cyan-500/20 text-cyan-400 border border-cyan-500/50 shadow-[0_0_10px_rgba(6,182,212,0.2)] animate-pulse">
+        <SafeIcon icon={FiIcons.FiGitPullRequest || FiClock} className="text-xs" />
+        PATCH REVIEW PENDING
+      </div>
+    );
+  }
+
   const diffMs = new Date(breachAt) - now;
 
   let label = '';

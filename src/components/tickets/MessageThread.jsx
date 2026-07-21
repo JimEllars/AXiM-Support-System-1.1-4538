@@ -90,6 +90,41 @@ export default function MessageThread({ ticketId, messages: overrideMessages, cu
                   />
                 </div>
               )}
+
+              {/* GITOPS METADATA VISUALIZATION BLOCK */}
+              {msg.metadata?.source_interlock === "the_coding_lab" && msg.metadata?.patch_delta && (
+                <div className="mt-4 border-t border-cyan-500/20 pt-4">
+                  <div className="bg-black/40 rounded-xl p-4 border border-cyan-500/10 shadow-inner">
+                    <div className="flex items-center justify-between mb-3">
+                      <div className="flex items-center gap-2">
+                        <SafeIcon icon={FiTerminal} className="w-4 h-4 text-cyan-400" />
+                        <span className="text-xs font-mono font-semibold text-cyan-400 uppercase tracking-widest">GitOps Code Patch Delta</span>
+                      </div>
+                      {msg.metadata?.pr_url && (
+                        <a
+                          href={msg.metadata.pr_url}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="text-[10px] font-mono px-3 py-1 bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-300 rounded-full border border-cyan-500/20 transition-colors"
+                        >
+                          View Pull Request &rarr;
+                        </a>
+                      )}
+                    </div>
+                    <div className="max-h-[300px] overflow-y-auto rounded-lg bg-[#0d1117] border border-zinc-800 p-3 custom-scrollbar">
+                      <pre className="text-[11px] font-mono leading-relaxed text-zinc-300 whitespace-pre">
+                        <code>{msg.metadata.patch_delta}</code>
+                      </pre>
+                    </div>
+                    {msg.metadata?.commit_sha && (
+                      <div className="mt-3 text-[10px] text-zinc-500 font-mono text-right flex items-center justify-end gap-2">
+                        <span className="w-1.5 h-1.5 rounded-full bg-green-500/50 animate-pulse"></span>
+                        Branch Compiled: {msg.metadata.commit_sha}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         );
