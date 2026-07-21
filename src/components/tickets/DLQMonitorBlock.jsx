@@ -7,7 +7,7 @@ import toast from 'react-hot-toast';
 import { supabase } from '../../lib/supabaseClient';
 
 export default function DLQMonitorBlock() {
-  const { dlqEvents, threatEvents, clearDLQEvents } = useTicketStore();
+  const { dlqEvents, threatEvents, clearDLQEvents, tickets } = useTicketStore();
   const [isReplaying, setIsReplaying] = useState(false);
   const [inspectPayload, setInspectPayload] = useState(null);
   const [viewMode, setViewMode] = useState('dlq'); // 'dlq' | 'threats'
@@ -17,25 +17,39 @@ export default function DLQMonitorBlock() {
     setIsReplaying(true);
 
     try {
-      const eventIds = dlqEvents.map(e => e.id);
       const workerUrl = getEdgeWorkerUrl();
       const { data: { session } } = await supabase.auth.getSession();
 
-      const res = await fetch(`${workerUrl}/api/dlq/bulk-replay`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${session?.access_token}` },
-        body: JSON.stringify({ eventIds, operatorId: 'admin_dashboard' })
-      });
+      if (!session?.access_token) throw new Error("No active operator session.");
 
-      if (!res.ok) throw new Error("Gateway rejected DLQ replay.");
+      let successCount = 0;
+
+      for (const evt of dlqEvents) {
+         try {
+           const res = await fetch(`${workerUrl}/api/v1/dlq/retry`, {
+             method: 'POST',
+             headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${session.access_token}` },
+             body: JSON.stringify({
+                dlqId: evt.id,
+                ticketId: evt.payload?.ticket_id || null,
+                originalPayload: evt.payload
+             })
+           });
+           if (res.ok) successCount++;
+         } catch (e) {
+           console.error("Failed to replay payload", evt.id, e);
+         }
+      }
+
+      if (successCount === 0) throw new Error("Gateway rejected all DLQ replays.");
 
       clearDLQEvents();
-      toast.success(`Queued ${eventIds.length} payloads.`, {
+      toast.success(`Recovered ${successCount}/${dlqEvents.length} payloads.`, {
         icon: <FiRotateCw className="text-cyan-400" />,
         style: { background: '#09090b', color: '#22d3ee', border: '1px solid rgba(34,211,238,0.3)' }
       });
     } catch (err) {
-      toast.error('DLQ Bulk Replay Failed.');
+      toast.error(err.message || 'DLQ Bulk Replay Failed.');
     } finally {
       setIsReplaying(false);
     }
