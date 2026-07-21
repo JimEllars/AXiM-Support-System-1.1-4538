@@ -2,10 +2,123 @@ import { create } from 'zustand';
 import { supabase } from '../lib/supabaseClient';
 
 export const useTicketStore = create((set, get) => ({
+  // --- REQUIRED BY NEW CODE ---
   tickets: [],
-  currentTicket: null,
+  activeTicket: null,
+  activeThreadMessages: [],
   isLoading: false,
   error: null,
+  realtimeStatus: 'DISCONNECTED', // 'SUBSCRIBED' | 'CONNECTING' | 'DISCONNECTED' | 'ERROR'
+
+  // Fetch initial ticket list
+  fetchTickets: async () => {
+    set({ isLoading: true, error: null });
+    try {
+      const { data, error } = await supabase
+        .from('support_tickets')
+        .select('*')
+        .order('created_at', { ascending: false });
+
+      if (error) throw error;
+      set({ tickets: data || [], isLoading: false });
+    } catch (err) {
+      set({ error: err.message, isLoading: false });
+    }
+  },
+
+  // Select active ticket and fetch thread messages
+  selectTicket: async (ticketId) => {
+    set({ isLoading: true, error: null });
+    try {
+      const { data: ticket, error: ticketErr } = await supabase
+        .from('support_tickets')
+        .select('*')
+        .eq('id', ticketId)
+        .single();
+
+      if (ticketErr) throw ticketErr;
+
+      const { data: messages, error: msgErr } = await supabase
+        .from('ticket_messages')
+        .select('*')
+        .eq('ticket_id', ticketId)
+        .order('created_at', { ascending: true });
+
+      if (msgErr) throw msgErr;
+
+      set({ activeTicket: ticket, activeThreadMessages: messages || [], isLoading: false });
+    } catch (err) {
+      set({ error: err.message, isLoading: false });
+    }
+  },
+
+  // Initialize Realtime Replication Subscriptions
+  subscribeToRealtime: () => {
+    set({ realtimeStatus: 'CONNECTING' });
+
+    const ticketChannel = supabase
+      .channel('public:support_tickets')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'support_tickets' },
+        (payload) => {
+          const { eventType, new: newRecord, old: oldRecord } = payload;
+          const { tickets, activeTicket } = get();
+
+          if (eventType === 'INSERT') {
+            set({ tickets: [newRecord, ...tickets] });
+          } else if (eventType === 'UPDATE') {
+            const updatedTickets = tickets.map((t) => (t.id === newRecord.id ? newRecord : t));
+            set({ tickets: updatedTickets });
+            if (activeTicket?.id === newRecord.id) {
+              set({ activeTicket: newRecord });
+            }
+          } else if (eventType === 'DELETE') {
+            set({ tickets: tickets.filter((t) => t.id !== oldRecord.id) });
+            if (activeTicket?.id === oldRecord.id) {
+              set({ activeTicket: null, activeThreadMessages: [] });
+            }
+          }
+        }
+      )
+      .subscribe((status) => {
+        if (status === 'SUBSCRIBED') {
+          set({ realtimeStatus: 'SUBSCRIBED', realtimeSocketStatus: 'SUBSCRIBED' });
+        }
+        if (status === 'CHANNEL_ERROR') {
+          set({ realtimeStatus: 'ERROR', realtimeSocketStatus: 'ERROR' });
+        }
+      });
+
+    const messageChannel = supabase
+      .channel('public:ticket_messages')
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'ticket_messages' },
+        (payload) => {
+          const { new: newMsg } = payload;
+          const { activeTicket, activeThreadMessages } = get();
+
+          if (activeTicket && newMsg.ticket_id === activeTicket.id) {
+            // Deduplicate incoming realtime messages
+            if (!activeThreadMessages.some((m) => m.id === newMsg.id)) {
+              set({ activeThreadMessages: [...activeThreadMessages, newMsg] });
+            }
+          }
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(ticketChannel);
+      supabase.removeChannel(messageChannel);
+      set({ realtimeStatus: 'DISCONNECTED', realtimeSocketStatus: 'DISCONNECTED' });
+    };
+  },
+
+
+  // --- EXISTING CODE TO NOT BREAK THE BUILD ---
+  currentTicket: null,
   filters: { status: 'all', priority: 'all', search: '' },
   isCoreOnline: true,
   realtimeSocketStatus: 'INITIALIZING', // CRITICAL FIX: Track live multiplayer socket states
@@ -59,17 +172,6 @@ export const useTicketStore = create((set, get) => ({
     }
   },
 
-  fetchTickets: async () => {
-    set({ isLoading: true });
-    const { data, error } = await supabase
-      .from('support_tickets')
-      .select('*')
-      .order('updated_at', { ascending: false });
-
-    if (error) set({ error: error.message, isLoading: false });
-    else set({ tickets: data, isLoading: false });
-  },
-
   fetchLiveDLQData: async () => {
     const { data, error } = await supabase
       .from('events_ax2024')
@@ -98,46 +200,7 @@ export const useTicketStore = create((set, get) => ({
     return () => supabase.removeChannel(channel);
   },
 
-  // CRITICAL FIX: Consolidated high-performance ticket subscription loop with health hooks
-  subscribeToTicketQueue: () => {
-    const channel = supabase
-      .channel('global-ticket-feed')
-      .on('postgres_changes', {
-        event: '*',
-        schema: 'public',
-        table: 'support_tickets'
-      }, (payload) => {
-        set((state) => {
-          let updatedTickets = [...state.tickets];
-
-          if (payload.eventType === 'INSERT') {
-            if (!updatedTickets.find(t => t.id === payload.new.id)) {
-              updatedTickets = [payload.new, ...updatedTickets];
-            }
-          } else if (payload.eventType === 'UPDATE') {
-            updatedTickets = updatedTickets.map(t =>
-              t.id === payload.new.id ? { ...t, ...payload.new } : t
-            );
-          } else if (payload.eventType === 'DELETE') {
-            updatedTickets = updatedTickets.filter(t => t.id !== payload.old.id);
-          }
-
-          // Dynamically synchronize current ticket state to prevent deep context drift
-          const currentTicketUpdate = state.currentTicket?.id === payload.new?.id ? payload.new : state.currentTicket;
-
-          return {
-            tickets: updatedTickets,
-            currentTicket: currentTicketUpdate
-          };
-        });
-      })
-      .subscribe((status) => {
-        // Expose live socket status matrices to the core health panel
-        set({ realtimeSocketStatus: status });
-      });
-
-    return () => supabase.removeChannel(channel);
-  },
+  subscribeToTicketQueue: () => get().subscribeToRealtime(),
 
   triggerDeepTraceInspection: (traceId) => set({
     activeInspectionTraceId: traceId,
@@ -147,7 +210,7 @@ export const useTicketStore = create((set, get) => ({
   setCoreOnlineStatus: (status) => set({ isCoreOnline: status }),
 
   // added by Jules to not break existing frontend code
-  subscribeToTickets: () => get().subscribeToTicketQueue(),
+  subscribeToTickets: () => get().subscribeToRealtime(),
   searchQuery: '',
   setSearchQuery: (query) => set({ searchQuery: query }),
   selectedTicketIds: [],

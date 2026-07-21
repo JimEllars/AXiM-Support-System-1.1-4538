@@ -4,17 +4,23 @@ import { useTicketStore } from '../../store/useTicketStore';
 import { getEdgeWorkerUrl } from '../../lib/edgeWorkerUrl';
 
 export default function CoreHealthIndicator() {
-  const { isCoreOnline: isOnline, setCoreOnlineStatus: setIsOnline, realtimeSocketStatus } = useTicketStore();
+  const realtimeStatus = useTicketStore(state => state.realtimeStatus);
+  const [isOnline, setIsOnline] = useState(true);
   const [uptimeSeconds, setUptimeSeconds] = useState(0);
+  const [latencyMs, setLatencyMs] = useState(0);
 
   useEffect(() => {
     const checkHealth = async () => {
+      const start = performance.now();
       try {
         const workerUrl = getEdgeWorkerUrl();
         const res = await fetch(`${workerUrl}/api/v1/health`, {
           method: 'GET',
           signal: AbortSignal.timeout(4000),
         });
+
+        const end = performance.now();
+        setLatencyMs(Math.round(end - start));
 
         if (res.ok) {
           const data = await res.json();
@@ -38,7 +44,7 @@ export default function CoreHealthIndicator() {
       clearInterval(healthInterval);
       clearInterval(uptimeInterval);
     };
-  }, [setIsOnline]);
+  }, []);
 
   const formatUptime = (totalSeconds) => {
     const mins = Math.floor(totalSeconds / 60);
@@ -46,34 +52,48 @@ export default function CoreHealthIndicator() {
     return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
   };
 
-  const isWssHealthy = realtimeSocketStatus === 'SUBSCRIBED';
+  const isWssHealthy = realtimeStatus === 'SUBSCRIBED';
+  const isHighLatency = latencyMs > 1500;
 
   return (
     <motion.div
       initial={{ opacity: 0, y: -10 }}
       animate={{ opacity: 1, y: 0 }}
-      className="fixed top-6 right-8 flex items-center gap-4 px-4 py-2 bg-zinc-950/80 border border-zinc-800 backdrop-blur-md rounded-xl shadow-2xl z-50 font-mono text-[10px]"
+      className={`fixed top-6 right-8 flex items-center gap-4 px-4 py-2 border backdrop-blur-md rounded-xl shadow-2xl z-50 font-mono text-[10px] ${
+        isHighLatency ? 'bg-amber-950/80 border-amber-800/50' : 'bg-zinc-950/80 border-zinc-800'
+      }`}
     >
       {/* Edge Node Pipeline State */}
-      <div className="flex items-center gap-2 border-r border-zinc-800 pr-3">
+      <div className={`flex items-center gap-2 border-r pr-3 ${isHighLatency ? 'border-amber-800/50' : 'border-zinc-800'}`}>
         <div className="relative flex h-2 w-2">
-          {/* CRITICAL FIX: Extract tracking logic parameter out of literal single quotes to restore the pulse animation effect */}
-          <span className={`absolute inline-flex h-full w-full rounded-full opacity-75 ${isOnline ? 'bg-emerald-400' : 'bg-rose-500 animate-ping'}`} />
-          <span className={`relative inline-flex rounded-full h-2 w-2 ${isOnline ? 'bg-emerald-500' : 'bg-rose-500'}`} />
+          <span className={`absolute inline-flex h-full w-full rounded-full opacity-75 ${
+            !isOnline ? 'bg-rose-500 animate-ping' :
+            isHighLatency ? 'bg-amber-500 animate-ping' :
+            'bg-emerald-400'
+          }`} />
+          <span className={`relative inline-flex rounded-full h-2 w-2 ${
+            !isOnline ? 'bg-rose-500' :
+            isHighLatency ? 'bg-amber-500' :
+            'bg-emerald-500'
+          }`} />
         </div>
-        <span className={isOnline ? 'text-zinc-400 font-bold' : 'text-rose-400 font-black animate-pulse'}>
-          {isOnline ? 'EDGE: OK' : 'EDGE: LOSS'}
+        <span className={
+          !isOnline ? 'text-rose-400 font-black animate-pulse' :
+          isHighLatency ? 'text-amber-400 font-bold' :
+          'text-zinc-400 font-bold'
+        }>
+          {!isOnline ? 'EDGE: LOSS' : isHighLatency ? `EDGE: ${latencyMs}ms` : 'EDGE: OK'}
         </span>
       </div>
 
       {/* Multiplayer Realtime WebSocket State */}
-      <div className="flex items-center gap-2 border-r border-zinc-800 pr-3">
+      <div className={`flex items-center gap-2 border-r pr-3 ${isHighLatency ? 'border-amber-800/50' : 'border-zinc-800'}`}>
         <div className="relative flex h-2 w-2">
           <span className={`absolute inline-flex h-full w-full rounded-full opacity-75 ${isWssHealthy ? 'bg-cyan-400' : 'bg-amber-500 animate-ping'}`} />
           <span className={`relative inline-flex rounded-full h-2 w-2 ${isWssHealthy ? 'bg-cyan-500' : 'bg-amber-500'}`} />
         </div>
         <span className={isWssHealthy ? 'text-zinc-400 font-bold' : 'text-amber-400 font-black'}>
-          WSS: {realtimeSocketStatus || 'CONN'}
+          WSS: {realtimeStatus || 'CONN'}
         </span>
       </div>
 
