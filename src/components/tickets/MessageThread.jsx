@@ -1,40 +1,24 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { FiCode, FiExternalLink, FiChevronDown, FiChevronRight, FiGitCommit, FiUser, FiCpu, FiArrowDown } from 'react-icons/fi';
+import { FiCode, FiExternalLink, FiChevronDown, FiChevronRight, FiGitCommit, FiUser, FiCpu } from 'react-icons/fi';
 
 export default function MessageThread({ messages = [] }) {
   const [expandedDiffs, setExpandedDiffs] = useState({});
-  const [hasNewMessage, setHasAppliedNewMessage] = useState(false);
-  const prevMessagesLength = useRef(messages.length);
-  const threadBottomRef = useRef(null);
-
-  useEffect(() => {
-    if (messages.length > prevMessagesLength.current) {
-      setHasAppliedNewMessage(true);
-    }
-    prevMessagesLength.current = messages.length;
-  }, [messages.length]);
+  const messagesEndRef = useRef(null);
 
   const scrollToBottom = () => {
-    threadBottomRef.current?.scrollIntoView({ behavior: 'smooth' });
-    setHasAppliedNewMessage(false);
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   };
+
+  useEffect(() => {
+    scrollToBottom();
+  }, [messages.length]);
 
   const toggleDiff = (msgId) => {
     setExpandedDiffs(prev => ({ ...prev, [msgId]: !prev[msgId] }));
   };
 
   return (
-    <div className="relative space-y-4 my-4">
-      {/* Floating Real-Time Stream Notification Banner */}
-      {hasNewMessage && (
-        <button
-          onClick={scrollToBottom}
-          className="sticky top-2 z-20 mx-auto flex items-center gap-2 px-4 py-2 rounded-full text-xs font-mono font-bold bg-emerald-500 text-black shadow-lg shadow-emerald-500/20 border border-emerald-400 animate-bounce transition-all hover:bg-emerald-400"
-        >
-          <FiArrowDown className="text-sm"/> New Message Streamed
-        </button>
-      )}
-
+    <div className="space-y-4 my-4">
       {messages.map((msg) => {
         const isGitOpsPatch = msg.metadata?.source_interlock === 'the_coding_lab' || msg.metadata?.patch_delta;
         const isSystem = msg.sender_id === 'onyx_system' || msg.sender_id === 'system' || isGitOpsPatch;
@@ -101,6 +85,7 @@ export default function MessageThread({ messages = [] }) {
                 {msg.metadata?.patch_delta && (
                   <div className="pt-2 border-t border-purple-500/10">
                     <button
+                      type="button"
                       onClick={() => toggleDiff(msg.id)}
                       className="flex items-center gap-1.5 text-[11px] font-mono text-zinc-400 hover:text-zinc-200 transition-colors"
                     >
@@ -120,7 +105,9 @@ export default function MessageThread({ messages = [] }) {
           </div>
         );
       })}
-      <div ref={threadBottomRef} />
+
+      {/* Auto-Scroll Anchor Element */}
+      <div ref={messagesEndRef} />
     </div>
   );
 }
