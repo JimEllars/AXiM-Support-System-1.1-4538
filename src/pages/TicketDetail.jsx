@@ -1,355 +1,143 @@
-import React, { useState, useEffect } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
-import { supabase } from '../lib/supabaseClient';
+import React, { useState, useEffect, useRef } from 'react';
 import { useTicketStore } from '../store/useTicketStore';
-import toast from 'react-hot-toast';
 import MessageThread from '../components/tickets/MessageThread';
+import OnyxInvestigationPanel from '../components/tickets/OnyxInvestigationPanel';
+import ActionProposalBlock from '../components/tickets/ActionProposalBlock';
 import AutoDraftWhisper from '../components/tickets/AutoDraftWhisper';
 import Customer360 from '../components/tickets/Customer360';
 import KBSidebar from '../components/tickets/KBSidebar';
-import OnyxInvestigationPanel from '../components/tickets/OnyxInvestigationPanel';
-import { FiArrowLeft, FiSend, FiLock, FiUnlock, FiCheckCircle, FiPaperclip, FiFileText } from 'react-icons/fi';
+import SLABadge from '../components/tickets/SLABadge';
+import DLQMonitorBlock from '../components/tickets/DLQMonitorBlock';
+import { FiSend, FiPaperclip, FiCornerDownLeft, FiRefreshCw } from 'react-icons/fi';
+import toast from 'react-hot-toast';
+import { supabase } from '../lib/supabaseClient';
 
-export default function TicketDetail() {
-  const { fetchTickets, currentTicketMessages, subscribeToMessages, currentTicketAttachments, fetchTicketAttachments, clearCurrentTicketData, activeAgents, updateTypingStatus, joinTicketPresence, leaveTicketPresence } = useTicketStore();
-  const { id } = useParams();
-  const navigate = useNavigate();
-  const [ticket, setTicket] = useState(null);
-  const [attachments, setAttachments] = useState([]);
+export default function TicketDetail({ ticketId }) {
+  const { activeTicket, activeThreadMessages, selectTicket, isLoading } = useTicketStore();
   const [replyText, setReplyText] = useState('');
-  const [isInternal, setIsInternal] = useState(false);
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [aiDraftUsed, setAiDraftUsed] = useState(false);
-    const typingTimeoutRef = React.useRef(null);
-  const [currentUser, setCurrentUser] = useState(null);
-
-    useEffect(() => {
-    supabase.auth.getUser().then(({ data }) => {
-      setCurrentUser(data?.user);
-      if (data?.user) {
-        if (joinTicketPresence) {
-          joinTicketPresence(id, {
-            agentId: data.user.id,
-            name: data.user.email?.split('@')[0] || 'Agent',
-            role: 'Support Engineer',
-            color: 'bg-cyan-500'
-          });
-        }
-      }
-    });
-
-  return () => {
-      if (leaveTicketPresence) leaveTicketPresence();
-      if (clearCurrentTicketData) clearCurrentTicketData();
-    };
-  }, [id, joinTicketPresence, leaveTicketPresence, clearCurrentTicketData]);
-
-  const handleTyping = (e) => {
-    setReplyText(e.target.value);
-
-    if (!currentUser) return;
-
-    const agentPayload = {
-      agentId: currentUser.id,
-      name: currentUser.email?.split('@')[0] || 'Agent',
-      role: 'Support Engineer',
-      color: 'bg-cyan-500'
-    };
-
-    updateTypingStatus(true, agentPayload);
-
-    if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
-    typingTimeoutRef.current = setTimeout(() => {
-      updateTypingStatus(false, agentPayload);
-    }, 2000);
-  };
+  const [isSending, setIsSending] = useState(false);
+  const composerRef = useRef(null);
 
   useEffect(() => {
-    const fetchTicketData = async () => {
-      const { data, error } = await supabase
-        .from('support_tickets')
-        .select('*, contacts_ax2024(*)')
-        .eq('id', id)
-        .single();
+    if (ticketId) {
+      selectTicket(ticketId);
+    }
+  }, [ticketId, selectTicket]);
 
-      if (data) setTicket(data);
-      if (error) {
-        toast.error('Failed to load ticket.');
-        navigate('/dashboard');
-      }
-
-      const { data: attData } = await supabase
-        .from("support_attachments")
-        .select("*")
-        .eq("ticket_id", id);
-      if (attData) setAttachments(attData);
-    };
-
-    if (!id) return;
-
-    // Fetch initial ticket data...
-    fetchTicketData();
-
-    // CRITICAL FIX: Mount real-time message stream to prevent triage collisions
-    const unsubscribeMessages = subscribeToMessages(id);
-
-    return () => {
-      if (unsubscribeMessages) unsubscribeMessages();
-      leaveTicketPresence();
-    };
-  }, [id, subscribeToMessages, leaveTicketPresence]);
-
-
-  const handleClaim = async () => {
-    try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) throw new Error("Authentication required");
-
-      await supabase.from('support_tickets').update({ assignee_id: user.id }).eq('id', id);
-      setTicket(prev => ({ ...prev, assignee_id: user.id }));
-      fetchTickets(); // Sync global
-      toast.success('Ticket claimed successfully.', { style: { background: '#09090b', color: '#10b981', border: '1px solid rgba(16,185,129,0.3)' } });
-    } catch (err) {
-      toast.error('Failed to claim ticket.');
+  const handleApplyDraft = (draftText) => {
+    setReplyText(draftText);
+    if (composerRef.current) {
+      composerRef.current.focus();
     }
   };
 
-  const handleSendReply = async () => {
-    if (!replyText.trim()) return;
-    setIsSubmitting(true);
+  const handleSendMessage = async (e) => {
+    e.preventDefault();
+    if (!replyText.trim() || isSending) return;
+
+    setIsSending(true);
     try {
       const { data: { user } } = await supabase.auth.getUser();
-      const messageMetadata = {
-        is_rca: false,
-        ai_draft_adopted: aiDraftUsed, // Record telemetry
-        cf_ray_context: ticket.metadata?.cf_ray || null
-      };
-
       const { error } = await supabase.from('ticket_messages').insert({
-        ticket_id: id,
-        sender_id: user?.id || currentUser?.id || 'agent',
-        sender_type: 'agent',
-        message_body: replyText,
-        is_internal_note: isInternal,
-        metadata: messageMetadata
+        ticket_id: activeTicket.id,
+        sender_id: user?.email || 'operator',
+        message_body: replyText.trim(),
+        is_internal_note: false
       });
+
       if (error) throw error;
 
-      // Auto-transition status to pending if agent replies publicly
-      if (!isInternal && ticket.status === 'open') {
-         await supabase.from('support_tickets').update({ status: 'pending' }).eq('id', id);
-         setTicket(prev => ({ ...prev, status: 'pending' })); // Update local
-         fetchTickets(); // CRITICAL FIX: Update global dashboard cache
-      }
-
       setReplyText('');
-      setAiDraftUsed(false); // Reset for the next message
-      toast.success(isInternal ? 'Internal note added.' : 'Reply sent to customer.');
-    } catch (err) {
-      toast.error('Failed to send message: ' + err.message);
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
-
-  const handleBroadcastOutage = async () => {
-    if (!window.confirm("Broadcast this issue to the public AXiM Health Status page?")) return;
-    try {
-      await supabase.from("events_ax2024").insert({
-        type: "status_broadcast",
-        payload: { ticket_id: id, subject: ticket.subject, status: 'investigating', timestamp: new Date().toISOString() }
+      toast.success('Response dispatched successfully!', {
+        style: { background: '#09090b', color: '#10b981', border: '1px solid rgba(16,185,129,0.3)' }
       });
-      toast.success('Public Status Page Updated', { icon: '📢', style: { background: '#09090b', color: '#f59e0b', border: '1px solid rgba(245,158,11,0.3)' } });
     } catch (err) {
-      toast.error('Failed to broadcast status.');
+      toast.error(`Failed to send message: ${err.message}`);
+    } finally {
+      setIsSending(false);
     }
   };
 
-  const handleResolve = async () => {
-    if (!window.confirm("Mark this ticket as Resolved?")) return;
-    try {
-      await supabase.from('support_tickets').update({ status: 'resolved' }).eq('id', id);
-      toast.success('Ticket Resolved. Egress dispatcher queued to notify customer with CSAT survey.', {
-           icon: '📬',
-           style: { background: '#09090b', color: '#10b981', border: '1px solid rgba(16,185,129,0.3)', whiteSpace: 'pre-wrap' }
-        });
-      navigate('/dashboard');
-    } catch (err) {
-      toast.error('Failed to resolve.');
-    }
-  };
+  if (isLoading || !activeTicket) {
+    return (
+      <div className="h-full flex items-center justify-center p-8 bg-zinc-950/40 rounded-3xl border border-zinc-800/80">
+        <FiRefreshCw className="animate-spin text-zinc-500 text-xl"/>
+      </div>
+    );
+  }
 
-  // Lock historical edits
-  const isTicketClosed = ticket?.status === 'resolved' || ticket?.status === 'closed';
-
-  // CRITICAL FIX: Active Collision Prevention Lock
-  const isAnotherAgentTyping = activeAgents.some(a => a.isTyping && a.agentId !== currentUser?.id);
-  const isComposerDisabled = isTicketClosed || isAnotherAgentTyping || isSubmitting;
-
-    if (!ticket) return <div className="min-h-screen bg-black flex items-center justify-center"><div className="animate-spin w-8 h-8 border-2 border-cyan-500 border-t-transparent rounded-full" /></div>;
+  // Extract draft if available in telemetry/messages
+  const sampleDraft = activeTicket.metadata?.auto_response_draft || null;
 
   return (
-    <div className="min-h-screen bg-black p-8 text-white pb-32">
-      <button onClick={() => navigate('/dashboard')} className="flex items-center gap-2 text-zinc-500 hover:text-cyan-400 transition-colors mb-8 font-mono text-xs uppercase font-bold tracking-widest">
-        <FiArrowLeft /> Back to Dashboard
-      </button>
-
-      <div className="grid grid-cols-1 xl:grid-cols-3 gap-8 max-w-[1600px] mx-auto">
-        <div className="xl:col-span-2 space-y-6">
-          {/* Header */}
-          <div className="glass-panel bg-zinc-950/80 border-zinc-800 rounded-3xl p-8">
-            <div className="flex justify-between items-start mb-4">
-              <h1 className="text-3xl font-black tracking-tight">{ticket.subject}</h1>
-              <div className="flex gap-2 items-center">
-                {ticket.priority === 'urgent' && ticket.status !== 'resolved' && (
-                  <button onClick={handleBroadcastOutage} className="px-3 py-1 rounded text-[10px] uppercase font-black tracking-widest bg-amber-500/20 text-amber-400 border border-amber-500/30 hover:bg-amber-500/30 transition-colors">
-                    📢 Broadcast Status
-                  </button>
-                )}
-                {ticket.priority !== 'urgent' && (
-                  <button className="px-3 py-1 rounded text-[10px] uppercase font-black tracking-widest bg-rose-500/20 text-rose-400 border border-rose-500/30 hover:bg-rose-500/30 transition-colors">
-                    Escalate
-                  </button>
-                )}
-                <span className={`px-3 py-1 rounded text-[10px] uppercase font-black tracking-widest ${ticket.priority === 'urgent' ? 'bg-rose-500/20 text-rose-400 border border-rose-500/30' : 'bg-cyan-500/20 text-cyan-400 border border-cyan-500/30'}`}>
-                  {ticket.priority}
-                </span>
-              </div>
-            </div>
-            <div className="flex items-center gap-3 text-[11px] font-mono text-zinc-500 mt-4 flex-wrap">
-              <span className="bg-zinc-950 px-2.5 py-1.5 rounded-lg border border-zinc-800/80 shadow-inner text-zinc-400">ID: {ticket.id.split('-')[0]}</span>
-              <span className="bg-zinc-950 px-2.5 py-1.5 rounded-lg border border-zinc-800/80 shadow-inner">Status: <span className="text-white font-bold">{ticket.status}</span></span>
-              <span className="bg-zinc-950 px-2.5 py-1.5 rounded-lg border border-zinc-800/80 shadow-inner">Dept: <span className="text-cyan-400 font-bold">{ticket.assigned_department || 'General'}</span></span>
-              <span className="bg-zinc-950 px-2.5 py-1.5 rounded-lg border border-zinc-800/80 shadow-inner">Source: <span className="text-emerald-400 font-bold uppercase">{ticket.metadata?.source || 'Web'}</span></span>
-
-              {/* CRITICAL FIX: Surface Cloudflare Distributed Trace ID for DevOps handoff */}
-              {ticket.metadata?.cf_ray && (
-                <span className="bg-zinc-950 px-2.5 py-1.5 rounded-lg border border-indigo-500/30 text-indigo-400 shadow-inner">
-                  Trace: <span className="font-bold">{ticket.metadata.cf_ray}</span>
-                </span>
-              )}
-              <span className="bg-zinc-950 px-2.5 py-1.5 rounded-lg border border-zinc-800/80 shadow-inner">Customer: <span className="text-fuchsia-400 font-bold">{ticket.contacts_ax2024?.email || 'Unknown'}</span></span>
-
-              {!ticket.assignee_id && ticket.status !== 'resolved' && (
-                 <button onClick={handleClaim} className="px-3 py-1.5 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 rounded-lg text-[10px] uppercase font-black tracking-widest transition-colors shadow-inner">
-                   🙋‍♂️ Claim Ticket
-                 </button>
-              )}
-              {ticket.assignee_id && (
-                 <span className="bg-emerald-950/20 px-2.5 py-1.5 rounded-lg border border-emerald-900/30 text-emerald-500 font-bold shadow-inner">Assigned</span>
-              )}
-            </div>
+    <div className="flex flex-col h-full space-y-6 overflow-y-auto pr-2">
+      {/* Ticket Header & Metadata Bar */}
+      <div className="p-6 rounded-3xl bg-zinc-950/60 border border-zinc-800/80 backdrop-blur-md space-y-3">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-mono font-bold text-zinc-400">#{activeTicket.id.slice(0, 8)}</span>
+            <SLABadge priority="{activeTicket.priority}" status="{activeTicket.status}"/>
           </div>
+          <span className="text-[10px] font-mono text-zinc-500">
+            {new Date(activeTicket.created_at).toLocaleString()}
+          </span>
+        </div>
+        <h2 className="text-lg font-bold text-white tracking-tight">{activeTicket.subject}</h2>
+        <p className="text-xs text-zinc-400 font-sans leading-relaxed">{activeTicket.description}</p>
+      </div>
 
-          {attachments.length > 0 && (
-            <div className="glass-panel bg-cyan-950/10 border-cyan-900/30 rounded-3xl p-6 mb-6">
-              <h3 className="text-xs font-mono font-bold uppercase tracking-widest text-cyan-500 mb-3 flex items-center gap-2">
-                <FiPaperclip /> Attached Diagnostics
-              </h3>
-              <div className="flex flex-wrap gap-3">
-                {attachments.map(att => (
-                  <a
-                    key={att.id}
-                    href={`${import.meta.env.VITE_SUPABASE_URL}/storage/v1/object/public/ticket_attachments/${att.file_path}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="flex items-center gap-2 px-4 py-2 bg-black/50 border border-zinc-800 hover:border-cyan-500/50 rounded-xl transition-all group"
-                  >
-                    <FiFileText className="text-zinc-500 group-hover:text-cyan-400 transition-colors" />
-                    <div>
-                      <p className="text-sm font-medium text-zinc-300 group-hover:text-white transition-colors">{att.file_name}</p>
-                      <p className="text-[10px] text-zinc-600 font-mono uppercase">{(att.file_size / 1024 / 1024).toFixed(2)} MB</p>
-                    </div>
-                  </a>
-                ))}
-              </div>
-            </div>
+      {/* Main Workstation Grid */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+        {/* Left Column: Investigation & Message Thread */}
+        <div className="lg:col-span-8 space-y-6">
+          <OnyxInvestigationPanel ticketId="{activeTicket.id}"/>
+
+          {/* AI Auto-Draft Whisper Component with Inject Handler */}
+          {sampleDraft && (
+            <AutoDraftWhisper draftText="{sampleDraft}" onApplyDraft="{handleApplyDraft}"/>
           )}
-          <AutoDraftWhisper
-            ticketId={ticket.id}
-            onApplyDraft={(draft) => {
-              setReplyText(draft);
-              setAiDraftUsed(true); // Flag that the AI draft was utilized
-            }}
-          />
 
-          <div className="glass-panel bg-zinc-950/80 border-zinc-800 rounded-3xl p-8">
-            <MessageThread ticketId={ticket.id} />
+          {/* Interactive Message Thread */}
+          <MessageThread messages="{activeThreadMessages}"/>
 
-            {/* Reply Composer */}
-            <div className="mt-8 pt-8 border-t border-zinc-900">
-              <div className="flex items-center justify-between mb-3">
-                <div className="flex items-center gap-3">
-                  <label className="text-xs font-mono font-bold uppercase tracking-widest text-zinc-400">Response Editor</label>
-                  {isAnotherAgentTyping && (
-                    <span className="px-2 py-0.5 bg-rose-500/20 text-rose-400 border border-rose-500/30 rounded text-[9px] uppercase font-black animate-pulse shadow-[0_0_10px_rgba(225,29,72,0.3)]">
-                      🔒 Locked: Another agent is drafting
-                    </span>
-                  )}
-                  {!isTicketClosed && !isAnotherAgentTyping && (
-                     <AutoDraftWhisper
-                       ticketId={ticket.id}
-                       onApplyDraft={(draft) => {
-                         setReplyText(draft);
-                         setAiDraftUsed(true); // Flag that the AI draft was utilized
-                       }}
-                     />
-                  )}
-                </div>
-                <button
-                  onClick={() => setIsInternal(!isInternal)}
-                  className={`flex items-center gap-2 px-3 py-1.5 rounded text-[10px] uppercase font-black tracking-widest transition-colors ${isInternal ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30' : 'bg-zinc-800 text-zinc-400 hover:text-white'}`}
-                >
-                  {isInternal ? <FiLock /> : <FiUnlock />}
-                  {isInternal ? 'Internal Note' : 'Public Reply'}
-                </button>
-              </div>
-              <textarea
-                value={replyText}
-                onChange={handleTyping}
-                placeholder={isInternal ? "Add an internal note visible only to agents..." : "Draft a response to the customer..."}
-                className={`w-full min-h-[150px] bg-black/50 border rounded-2xl p-4 text-sm focus:outline-none transition-colors resize-y ${isInternal ? 'border-amber-500/30 focus:border-amber-500/60' : 'border-zinc-800 focus:border-cyan-500/50'}`}
-                disabled={isComposerDisabled}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
-                    e.preventDefault();
-                    handleSendReply();
-                  }
-                  // Quick Macro: /template
-                  if (e.key === ' ' && replyText.trim() === '/template') {
-                    e.preventDefault();
-                    setReplyText('**Hello,**\n\nThank you for reaching out. Upon reviewing your diagnostics...\n\n**Next Steps:**\n- \n- \n\nBest,\nAXiM Support');
-                  }
-                }}
-              />
-              <div className="flex justify-between items-center mt-4">
-                <span className="text-[10px] text-zinc-600 font-mono uppercase">Cmd/Ctrl + Enter to send</span>
-                <div className="flex gap-3">
-                  <button
-                    onClick={handleResolve}
-                    className="flex items-center gap-2 px-6 py-2.5 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 rounded-xl text-xs font-bold uppercase tracking-widest transition-colors"
-                  >
-                    <FiCheckCircle /> Resolve
-                  </button>
-                  <button
-                    disabled={isSubmitting || !replyText.trim()}
-                    onClick={handleSendReply}
-                    className={`flex items-center gap-2 px-8 py-2.5 rounded-xl text-xs font-bold uppercase tracking-widest transition-colors disabled:opacity-50 disabled:cursor-not-allowed text-black ${isInternal ? 'bg-amber-500 hover:bg-amber-400' : 'bg-cyan-500 hover:bg-cyan-400'}`}
-                  >
-                    {isSubmitting ? <div className="w-4 h-4 border-2 border-black/20 border-t-black rounded-full animate-spin" /> : <FiSend />}
-                    {isInternal ? 'Save Note' : 'Send Reply'}
-                  </button>
-                </div>
-              </div>
+          {/* Reply Composer Form */}
+          <form onSubmit={handleSendMessage} className="p-4 rounded-2xl bg-zinc-950/80 border border-zinc-800/80 space-y-3">
+            <div className="flex items-center justify-between text-xs text-zinc-400 font-mono">
+              <span className="font-bold uppercase tracking-wider">Reply Composer</span>
+              <span className="text-[10px] text-zinc-500">Press Enter or click Send</span>
             </div>
-          </div>
+            <textarea
+              ref={composerRef}
+              value={replyText}
+              onChange={(e) => setReplyText(e.target.value)}
+              placeholder="Type your response or apply an AI draft whisper..."
+              rows={4}
+              className="w-full p-3 rounded-xl bg-black/50 border border-zinc-800 text-xs text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-indigo-500/50 transition-all resize-none font-sans"
+            />
+            <div className="flex items-center justify-between">
+              <button
+                type="button"
+                className="p-2 rounded-lg bg-zinc-900 hover:bg-zinc-800 text-zinc-400 border border-zinc-800 text-xs transition-colors"
+                title="Attach file"
+              >
+                <FiPaperclip/>
+              </button>
+              <button
+                type="submit"
+                disabled={!replyText.trim() || isSending}
+                className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-mono font-bold uppercase bg-emerald-500 hover:bg-emerald-400 text-black border border-emerald-400/20 transition-all disabled:opacity-50"
+              >
+                <FiSend/>
+                <span>{isSending ? 'Dispatching...' : 'Send Reply'}</span>
+              </button>
+            </div>
+          </form>
         </div>
 
-        {/* Sidebar */}
-        <div className="space-y-6">
-          <OnyxInvestigationPanel ticketId={ticket.id} subject={ticket.subject} description={ticket.description} />
-          <Customer360 customerId={ticket.customer_id} />
-          <KBSidebar ticketId={ticket.id} />
+        {/* Right Column: Customer360 & KB Assistant */}
+        <div className="lg:col-span-4 space-y-6">
+          <Customer360 ticketId="{activeTicket.id}"/>
+          <KBSidebar ticketId="{activeTicket.id}"/>
         </div>
       </div>
     </div>
