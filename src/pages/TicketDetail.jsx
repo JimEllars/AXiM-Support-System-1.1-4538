@@ -7,12 +7,12 @@ import Customer360 from '../components/tickets/Customer360';
 import KBSidebar from '../components/tickets/KBSidebar';
 import SLABadge from '../components/tickets/SLABadge';
 import AgentPresence from '../components/AgentPresence';
-import { FiSend, FiPaperclip, FiRefreshCw, FiCommand } from 'react-icons/fi';
+import { FiSend, FiPaperclip, FiRefreshCw, FiCommand, FiAlertCircle } from 'react-icons/fi';
 import toast from 'react-hot-toast';
 import { supabase } from '../lib/supabaseClient';
 
 export default function TicketDetail({ ticketId }) {
-  const { activeTicket, activeThreadMessages, selectTicket, isLoading } = useTicketStore();
+  const { activeTicket, activeThreadMessages, selectTicket, isLoading, isCoreOnline } = useTicketStore();
   const [replyText, setReplyText] = useState('');
   const [isSending, setIsSending] = useState(false);
   const [isTyping, setIsTyping] = useState(false);
@@ -96,6 +96,7 @@ export default function TicketDetail({ ticketId }) {
   }
 
   const sampleDraft = activeTicket.metadata?.auto_response_draft || null;
+  const isIncomingThread = activeThreadMessages && activeThreadMessages.length > 0 && activeThreadMessages[activeThreadMessages.length - 1].sender_id !== 'operator';
 
   return (
     <div className="flex flex-col h-full space-y-6 overflow-y-auto pr-2">
@@ -136,6 +137,14 @@ export default function TicketDetail({ ticketId }) {
                 <FiCommand className="text-[9px]"/> + Enter to send
               </span>
             </div>
+
+            {isIncomingThread && (
+              <div className="flex items-center gap-2 p-2 rounded-lg bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 text-xs font-mono mb-2">
+                <FiAlertCircle />
+                <span>Incoming message detected in thread. Review before replying.</span>
+              </div>
+            )}
+
             <textarea
               ref={composerRef}
               value={replyText}
@@ -156,7 +165,7 @@ export default function TicketDetail({ ticketId }) {
               </button>
               <button
                 type="submit"
-                disabled={!replyText.trim() || isSending}
+                disabled={!replyText.trim() || isSending || (!isCoreOnline && !activeTicket)}
                 className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-mono font-bold uppercase bg-emerald-500 hover:bg-emerald-400 text-black border border-emerald-400/20 transition-all disabled:opacity-50"
               >
                 <FiSend/>
