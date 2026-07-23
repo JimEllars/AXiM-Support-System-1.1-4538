@@ -26,7 +26,7 @@ export default function TicketDetail({ ticketId }) {
   }, [ticketId, selectTicket]);
 
   const handleApplyDraft = (draftText) => {
-    setReplyText(draftText);
+    setReplyText(prev => prev ? prev + '\n\n' + draftText : draftText);
     if (composerRef.current) {
       composerRef.current.focus();
     }
@@ -169,7 +169,7 @@ export default function TicketDetail({ ticketId }) {
         {/* Right Column: Customer360 & KB Assistant */}
         <div className="lg:col-span-4 space-y-6">
           <Customer360 ticketId={activeTicket.id}/>
-          <KBSidebar ticketId={activeTicket.id}/>
+          <KBSidebar ticketId={activeTicket.id} onAttachPlaybook={handleApplyDraft}/>
         </div>
       </div>
     </div>
