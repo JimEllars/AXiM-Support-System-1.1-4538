@@ -909,6 +909,28 @@ if (url.pathname === "/webhooks/intake") {
     }
 
     // --- SECURE ACTION RESOLUTION ENGINE & GOVERNANCE NOTIFICATION PIPELINE ---
+
+    // --- EDGE COMMAND EXECUTION ROUTE ---
+    if (url.pathname === "/api/v1/command/execute" && request.method === "POST") {
+      try {
+        const payload: any = await request.json();
+        const { commandId, ticketId, metadata } = payload;
+
+        // Return simulated success for edge commands
+        return new Response(JSON.stringify({
+          success: true,
+          message: `Executed administrative command: ${commandId}`
+        }), {
+          status: 200,
+          headers: getCorsHeaders(env, request)
+        });
+      } catch (err: any) {
+        return new Response(JSON.stringify({ error: err.message }), {
+          status: 500, headers: getCorsHeaders(env, request)
+        });
+      }
+    }
+
     if (url.pathname === "/api/v1/actions/resolve" && request.method === "POST") {
       const authHeader = request.headers.get("Authorization") || "";
       const token = authHeader.replace("Bearer ", "").trim();

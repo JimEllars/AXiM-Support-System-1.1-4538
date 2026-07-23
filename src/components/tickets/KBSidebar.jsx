@@ -1,8 +1,9 @@
-import React, { useState, useEffect } from 'react';
-import { FiBookOpen, FiSearch, FiCpu, FiExternalLink } from 'react-icons/fi';
+import React, { useState } from 'react';
+import { FiBookOpen, FiSearch, FiCpu, FiCornerDownLeft } from 'react-icons/fi';
+import toast from 'react-hot-toast';
 import { getEdgeWorkerUrl } from '../../lib/edgeWorkerUrl';
 
-export default function KBSidebar({ ticketId }) {
+export default function KBSidebar({ ticketId, onAttachPlaybook }) {
   const [searchQuery, setSearchQuery] = useState('');
   const [articles, setArticles] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -30,6 +31,15 @@ export default function KBSidebar({ ticketId }) {
       console.error('KB Vector search error:', err);
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  const handleAttach = (content) => {
+    if (onAttachPlaybook) {
+      onAttachPlaybook(content);
+      toast.success("Playbook steps attached to composer!", {
+        style: { background: '#09090b', color: '#10b981', border: '1px solid rgba(16,185,129,0.3)' }
+      });
     }
   };
 
@@ -65,16 +75,23 @@ export default function KBSidebar({ ticketId }) {
           </div>
         ) : articles.length > 0 ? (
           articles.map((art) => (
-            <div key={art.id} className="p-3 rounded-xl bg-black/40 border border-zinc-800/60 space-y-1 hover:border-zinc-700 transition-colors">
-              <h4 className="text-xs font-bold text-zinc-200 flex items-center justify-between">
-                <span>{art.title}</span>
-                <span className="text-[9px] font-mono text-indigo-400 uppercase bg-indigo-500/10 px-1.5 py-0.5 rounded">
+            <div key={art.id} className="p-3 rounded-xl bg-black/40 border border-zinc-800/60 space-y-2 hover:border-zinc-700 transition-colors">
+              <div className="flex items-center justify-between">
+                <h4 className="text-xs font-bold text-zinc-200 truncate pr-2">{art.title}</h4>
+                <span className="text-[9px] font-mono text-indigo-400 uppercase bg-indigo-500/10 px-1.5 py-0.5 rounded flex-shrink-0">
                   {art.category || 'Docs'}
                 </span>
-              </h4>
+              </div>
               <p className="text-[11px] text-zinc-400 line-clamp-2 font-sans leading-relaxed">
                 {art.content}
               </p>
+              <button
+                type="button"
+                onClick={() => handleAttach(art.content)}
+                className="w-full flex items-center justify-center gap-1 py-1 rounded-lg bg-zinc-900 hover:bg-zinc-800 text-[10px] font-mono text-indigo-300 border border-zinc-800 transition-all"
+              >
+                <FiCornerDownLeft className="text-[9px]"/> Insert Playbook into Reply
+              </button>
             </div>
           ))
         ) : (
