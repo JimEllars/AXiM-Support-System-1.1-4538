@@ -1,0 +1,7 @@
+1. Read `onyx-edge-worker/src/index.ts` to locate appropriate places to add the helper function `sendEmailItNotification` and the new route handler `/api/v1/email/send`.
+2. Inject `sendEmailItNotification` helper function.
+3. Inject `POST /api/v1/email/send` in the router block in `export default { async fetch() {} }` in `onyx-edge-worker/src/index.ts`.
+4. Update `handleTelemetryIngress` in `onyx-edge-worker/src/index.ts` to send email for urgent/critical tickets.
+5. Update `handleExecuteAction` in `onyx-edge-worker/src/index.ts` to send email for HITL proposals requiring manual approval.
+6. Create the Vitest test file `onyx-edge-worker/test/email.test.js`.
+7. Pre-commit check by running `npx tsc --noEmit` and `npm run build` and tests.

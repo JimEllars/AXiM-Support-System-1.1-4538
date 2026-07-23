@@ -181,6 +181,7 @@ export interface Env {
   CORE_API_URL: string;
   IDEMPOTENCY_KV: KVNamespace;
   KB_CACHE: KVNamespace;
+  EMAILIT_API_KEY?: string;
   STATUS_KV: KVNamespace;
   RESEND_API_KEY?: string;
   RESEND_FROM_EMAIL?: string;
@@ -447,6 +448,41 @@ async function dispatchHITLNotification(ticketId: string, toolType: string, payl
     console.error("Critical connection failure attempting to transmit governance notification:", err);
   }
 }
+// --- EMAILIT DISPATCH UTILITY ---
+async function sendEmailItNotification(
+  to: string,
+  subject: string,
+  htmlBody: string,
+  env: Env
+): Promise<boolean> {
+  const apiKey = env.EMAILIT_API_KEY || (env as any).EMAIL_IT_API_KEY;
+  if (!apiKey) {
+    console.warn("[EMAILIT] Missing EMAILIT_API_KEY secret binding in worker environment.");
+    return false;
+  }
+
+  try {
+    const res = await fetch("https://api.emailit.com/v1/emails", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${apiKey}`
+      },
+      body: JSON.stringify({
+        from: "AXiM Support Operations <notifications@axim.us.com>",
+        to,
+        subject,
+        html: htmlBody
+      })
+    });
+
+    return res.ok;
+  } catch (err: any) {
+    console.error("[EMAILIT DISPATCH FAULT] Failed to deliver email:", err.message);
+    return false;
+  }
+}
+
 
 export default {
   async scheduled(event: any, env: Env, ctx: any) {
@@ -475,6 +511,62 @@ export default {
     }
 
     // 2. Route Handling
+
+    // --- SECURE EMAIL DISPATCH ROUTE ---
+    if (url.pathname === "/api/v1/email/send" && request.method === "POST") {
+      const authHeader = request.headers.get("Authorization") || "";
+      const token = authHeader.replace("Bearer ", "").trim();
+      if (!token) {
+        return new Response(JSON.stringify({ error: "UNAUTHORIZED_EMAIL_DISPATCH" }), {
+          status: 401, headers: getCorsHeaders(env, request)
+        });
+      }
+
+      const supabaseAuth = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY, {
+        global: { headers: { Authorization: `Bearer ${token}` } }
+      });
+      const { data: { user }, error: authError } = await supabaseAuth.auth.getUser();
+      if (authError || !user) {
+        return new Response(JSON.stringify({ error: "INVALID_OPERATOR_SESSION" }), {
+          status: 403, headers: getCorsHeaders(env, request)
+        });
+      }
+
+      try {
+        const payload: any = await request.json();
+        const { to, subject, html } = payload;
+
+        if (!to || !subject || !html) {
+          return new Response(JSON.stringify({ error: "MISSING_EMAIL_PARAMETERS" }), {
+            status: 400, headers: getCorsHeaders(env, request)
+          });
+        }
+
+        const sent = await sendEmailItNotification(to, subject, html, env);
+        const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
+
+        await supabase.from("events_ax2024").insert({
+          type: "email_dispatched",
+          payload: {
+            recipient: to,
+            subject,
+            operator_id: user.id,
+            success: sent,
+            timestamp: new Date().toISOString()
+          }
+        });
+
+        return new Response(JSON.stringify({ success: sent, recipient: to }), {
+          status: sent ? 200 : 502,
+          headers: { "Content-Type": "application/json", ...getCorsHeaders(env, request) }
+        });
+      } catch (err: any) {
+        return new Response(JSON.stringify({ error: err.message }), {
+          status: 500, headers: getCorsHeaders(env, request)
+        });
+      }
+    }
+
 
     // --- EDGE VECTOR EMBEDDING KB SEARCH ROUTE ---
     if (url.pathname === "/api/v1/kb/search" && request.method === "POST") {
@@ -3255,6 +3347,20 @@ async function handleSandboxResolution(request: Request, env: Env, ctx: any): Pr
     }).select().single();
 
     if (hitlError) throw hitlError;
+    // Inside handleExecuteAction when an HITL proposal requires manual approval:
+    ctx.waitUntil(sendEmailItNotification(
+      "james.ellars@axim.us.com",
+      `⚡ [HITL APPROVAL REQUIRED] Action Proposal for Ticket #${hitlLog.support_ticket_id?.slice(0, 8) || 'N/A'}`,
+      `<div style="font-family: monospace; background: #09090b; color: #f4f4f5; padding: 20px; border-radius: 12px;">
+        <h2 style="color: #6366f1; margin-top: 0;">HUMAN-IN-THE-LOOP APPROVAL REQUESTED</h2>
+        <p><strong>Tool Type:</strong> ${hitlLog.tool_type}</p>
+        <p><strong>Ticket ID:</strong> ${hitlLog.support_ticket_id || 'N/A'}</p>
+        <p><strong>Status:</strong> Pending Approval</p>
+        <p><a href="https://support.axim.us.com" style="color: #10b981; font-weight: bold;">Enter Support Cockpit HUD to Approve</a></p>
+      </div>`,
+      env
+    ));
+
 
     // Inject proposed action into the message thread
     await supabase.from("ticket_messages").insert({
@@ -3446,6 +3552,22 @@ async function handleTelemetryIngress(payload: any, env: Env, ctx: any, request:
       .single();
 
     if (ticketError) throw ticketError;
+    // Inside handleTelemetryIngress after creating a new urgent ticket:
+    if (payload.severity === "critical" || newTicket.priority === "urgent") {
+      ctx.waitUntil(sendEmailItNotification(
+        "james.ellars@axim.us.com",
+        `🚨 [URGENT SLA ALERT] Support Ticket #${newTicket.id.slice(0, 8)} Spawned`,
+        `<div style="font-family: monospace; background: #09090b; color: #f4f4f5; padding: 20px; border-radius: 12px;">
+          <h2 style="color: #f43f5e; margin-top: 0;">CRITICAL SYSTEM ANOMALY DETECTED</h2>
+          <p><strong>App Target:</strong> ${targetApplicationCode}</p>
+          <p><strong>Error Code:</strong> ${incidentErrorCode}</p>
+          <p><strong>Details:</strong> ${incidentDescription}</p>
+          <p style="color: #a1a1aa; font-size: 11px;">Edge Node Location: ${logCtx.edge_colo}</p>
+        </div>`,
+        env
+      ));
+    }
+
 
     // Save the new incident mapping tracker to Cloudflare KV with a rolling 5-minute (300s) suppression expiration TTL window
     ctx.waitUntil(env.STATUS_KV.put(debouncingCacheKey, newTicket.id, { expirationTtl: 300 }));
