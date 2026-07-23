@@ -184,6 +184,7 @@ export interface Env {
   STATUS_KV: KVNamespace;
   RESEND_API_KEY?: string;
   RESEND_FROM_EMAIL?: string;
+  AI?: any;
 }
 
 async function handleHealthCheck(env: Env, request: Request, ctx: any): Promise<Response> {
@@ -474,6 +475,71 @@ export default {
     }
 
     // 2. Route Handling
+
+    // --- EDGE VECTOR EMBEDDING KB SEARCH ROUTE ---
+    if (url.pathname === "/api/v1/kb/search" && request.method === "POST") {
+      try {
+        const payload: any = await request.json();
+        const { query } = payload;
+
+        if (!query) {
+          return new Response(JSON.stringify({ error: "QUERY_TEXT_REQUIRED" }), {
+            status: 400, headers: getCorsHeaders(env, request)
+          });
+        }
+
+        let queryVector = null;
+        let provenance = "text_matching";
+
+        if (env.AI) {
+          try {
+            const embeddings: any = await env.AI.run("@cf/baai/bge-small-en-v1.5", {
+              text: [query]
+            });
+            queryVector = embeddings.data?.[0] || null;
+            if (queryVector) provenance = "cloudflare_vector_bge";
+          } catch (embedErr) {
+            console.warn("[WORKERS_AI EMBEDDING FAULT] Falling back to text search:", embedErr);
+          }
+        }
+
+        const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
+        let results = [];
+
+        if (queryVector) {
+          // Perform vector similarity RPC lookup
+          const { data, error } = await supabase.rpc("match_kb_articles", {
+            query_embedding: queryVector,
+            match_threshold: 0.5,
+            match_count: 5
+          });
+          if (!error && data) results = data;
+        }
+
+        // Text search fallback if vector search returns empty
+        if (results.length === 0) {
+          const { data } = await supabase
+            .from("knowledge_articles")
+            .select("id, title, content, category")
+            .ilike("title", `%${query}%`)
+            .limit(5);
+          if (data) results = data;
+        }
+
+        return new Response(JSON.stringify({
+          success: true,
+          articles: results,
+          provenance,
+          timestamp: new Date().toISOString()
+        }), {
+          status: 200, headers: { "Content-Type": "application/json", ...getCorsHeaders(env, request) }
+        });
+      } catch (err: any) {
+        return new Response(JSON.stringify({ error: err.message }), {
+          status: 500, headers: getCorsHeaders(env, request)
+        });
+      }
+    }
 
     // --- EDGE HEALTH & SYSTEM TELEMETRY ENDPOINT ---
     if (url.pathname === "/api/v1/health" && request.method === "GET") {
@@ -2048,113 +2114,153 @@ async function getCachedRAGContext(queryText: string, env: Env, supabase: any, c
 async function analyzeWithOnyx(
   subject: string,
   description: string,
-  apiKey: string,
-  imageBase64?: string | null,
-  imageMime?: string | null,
-  contextText?: string,
-  env?: Env // Accept env block array properties to securely trace connected provider flags
-) {
-  const defaultFallback = {
-    priority: description.toLowerCase().includes("urgent") ? "urgent" : "medium",
-    sentiment: description.toLowerCase().includes("angry") ? "negative" : "neutral",
-    category: "technical_support",
-    draft: "Hello, Onyx AI has received your request regarding " + subject + "\n\nWe are analyzing the issue.",
-    confidence: 50,
-    metrics: { latency_ms: 0, input_tokens: 0, output_tokens: 0, provider: "fallback" }
-  };
+  anthropicApiKey: string | null,
+  attachmentBase64: string | null,
+  attachmentMime: string | null,
+  contextText: string,
+  env: Env
+): Promise<{
+  priority: "low" | "medium" | "urgent";
+  sentiment: string;
+  category: string;
+  draft: string;
+  confidence: number;
+  metrics?: any;
+}> {
+  const prompt = `You are Onyx, the advanced support AI for AXiM. Analyze this ticket and respond strictly in valid JSON matching this schema:
+{
+  "priority": "low" | "medium" | "urgent",
+  "sentiment": "positive" | "neutral" | "negative",
+  "category": "technical" | "billing" | "account" | "general",
+  "confidence": 0-100,
+  "draft_reply": "your text response"
+}
 
-  const systemInstructions = `You are the AXiM Support Triage AI. ${contextText ? `Here are the relevant AXiM operational guidelines for this issue:\n[Context]\n${contextText}\n[End Context]\nUse these guidelines to determine priority and draft a response.\n` : ""}You MUST return your response STRICTLY as a stringified JSON object matching this exact schema:\n{\n  "priority": "low" | "medium" | "high" | "urgent",\n  "sentiment": "positive" | "neutral" | "negative",\n  "category": "string",\n  "draft": "string",\n  "confidence": number\n}`;
-  const promptText = `Subject: ${subject}\nDescription: ${description}`;
+Context playbooks retrieved from KB memory cache banks:
+${contextText || "No context playbooks available."}
 
-  try {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 15000);
-    const startTime = Date.now();
+Ticket Subject: ${subject}
+Ticket Description: ${description}`;
 
-    // Primary AI Route Optimization: Deepseek (Consolidated Cost-Effectiveness Strategy)
-    if (env?.DEEPSEEK_API_KEY) {
-      try {
-        const deepseekRes = await fetch("https://api.deepseek.com/v1/chat/completions", {
-          method: "POST",
-          headers: { "Content-Type": "application/json", "Authorization": `Bearer ${env.DEEPSEEK_API_KEY}` },
-          body: JSON.stringify({
-            model: "deepseek-chat",
-            max_tokens: 1024,
-            messages: [
-              { role: "system", content: systemInstructions },
-              { role: "user", content: promptText }
-            ],
-            response_format: { type: "json_object" }
-          }),
-          signal: controller.signal
-        });
+  let priority: "low" | "medium" | "urgent" = "medium";
+  let sentiment = "neutral";
+  let category = "general";
+  let draft = "";
+  let confidence = 85;
+  let modelProvenance = "system_fallback";
 
-        if (deepseekRes.ok) {
-          clearTimeout(timeoutId);
-          const data: any = await deepseekRes.json();
-          const parsed = JSON.parse(data.choices[0].message.content.trim());
-          return {
-            priority: parsed.priority || defaultFallback.priority,
-            sentiment: parsed.sentiment || defaultFallback.sentiment,
-            category: parsed.category || defaultFallback.category,
-            draft: parsed.draft || defaultFallback.draft,
-            confidence: parsed.confidence || defaultFallback.confidence,
-            metrics: {
-              latency_ms: Date.now() - startTime,
-              input_tokens: data.usage?.prompt_tokens || 0,
-              output_tokens: data.usage?.completion_tokens || 0,
-              provider: "deepseek" // THE 5% TELEMETRY FEATURE: Inject provider tracking provenance attributes
-            }
-          };
-        }
-      } catch (dsErr) {
-        console.error("[DEEPSEEK INGESTION VOLATILITY: Falling back to Anthropic Claude core pipeline]");
+  const aiStartMarker = performance.now();
+
+  // Tier 1: Zero-Latency Cloudflare Workers AI (Edge Native)
+  if (env?.AI) {
+    try {
+      const aiResult: any = await env.AI.run("@cf/meta/llama-3.1-8b-instruct", {
+        messages: [
+          { role: "system", content: "You are Onyx, an expert support AI. Always output valid JSON objects." },
+          { role: "user", content: prompt }
+        ],
+        response_format: { type: "json_object" }
+      });
+
+      const parsed = typeof aiResult.response === "string"
+        ? JSON.parse(aiResult.response)
+        : aiResult.response;
+
+      if (parsed && (parsed.draft_reply || parsed.draft)) {
+        priority = parsed.priority || "medium";
+        sentiment = parsed.sentiment || "neutral";
+        category = parsed.category || "general";
+        draft = parsed.draft_reply || parsed.draft || "";
+        confidence = parsed.confidence || 90;
+        modelProvenance = "Cloudflare-Workers-AI-Llama3.1";
       }
+    } catch (cfAiErr) {
+      console.warn("[WORKERS_AI TRIAGE BYPASS] Edge inference failed, executing failover LLM path:", cfAiErr);
     }
-
-    // Secondary AI Route Selection: Anthropic Claude (Fallback Track)
-    const messages = [{ role: "user", content: [{ type: "text", text: promptText }] as any[] }];
-    if (imageBase64 && imageMime) {
-      messages[0].content.push({ type: "image", source: { type: "base64", media_type: imageMime, data: imageBase64 } });
-    }
-
-    const anthropicRes = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: { "x-api-key": apiKey, "anthropic-version": "2023-06-01", "content-type": "application/json" },
-      body: JSON.stringify({
-        model: "claude-3-haiku-20240307",
-        max_tokens: 1024,
-        system: systemInstructions,
-        messages: messages
-      }),
-      signal: controller.signal
-    });
-
-    clearTimeout(timeoutId);
-
-    if (!anthropicRes.ok) return defaultFallback;
-
-    const data: any = await anthropicRes.json();
-    let textRes = data.content[0].text;
-    textRes = textRes.replace(/```json/g, '').replace(/```/g, '').trim();
-
-    const parsed = JSON.parse(textRes);
-    return {
-      priority: parsed.priority || defaultFallback.priority,
-      sentiment: parsed.sentiment || defaultFallback.sentiment,
-      category: parsed.category || defaultFallback.category,
-      draft: parsed.draft || defaultFallback.draft,
-      confidence: parsed.confidence || defaultFallback.confidence,
-      metrics: {
-        latency_ms: Date.now() - startTime,
-        input_tokens: data.usage?.input_tokens || 0,
-        output_tokens: data.usage?.output_tokens || 0,
-        provider: "anthropic"
-      }
-    };
-  } catch (error) {
-    return { ...defaultFallback, metrics: { latency_ms: 0, input_tokens: 0, output_tokens: 0, provider: "error" } };
   }
+
+  // Tier 2: Cost-Optimized DeepSeek-V3 Fallback Path
+  if (!draft && env?.DEEPSEEK_API_KEY) {
+    try {
+      const response = await fetch("https://api.deepseek.com/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${env.DEEPSEEK_API_KEY}`
+        },
+        body: JSON.stringify({
+          model: "deepseek-chat",
+          response_format: { type: "json_object" },
+          messages: [{ role: "user", content: prompt }]
+        })
+      });
+
+      if (response.ok) {
+        const data = await response.json() as any;
+        const parsed = JSON.parse(data.choices[0].message.content);
+        priority = parsed.priority || "medium";
+        sentiment = parsed.sentiment || "neutral";
+        category = parsed.category || "general";
+        draft = parsed.draft_reply || "";
+        confidence = parsed.confidence || 80;
+        modelProvenance = "DeepSeek-V3";
+      }
+    } catch (dsErr) {
+      console.error("DeepSeek triage gateway failure, moving to tertiary failover path.");
+    }
+  }
+
+  // Tier 3: Anthropic Claude Fallback Path
+  if (!draft && anthropicApiKey) {
+    try {
+      const response = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-api-key": anthropicApiKey,
+          "anthropic-version": "2023-06-01",
+        },
+        body: JSON.stringify({
+          model: "claude-3-haiku-20240307",
+          max_tokens: 600,
+          messages: [{ role: "user", content: prompt }],
+        }),
+      });
+
+      if (response.ok) {
+        const data = await response.json() as any;
+        const rawText = data.content[0].text;
+        const parsed = JSON.parse(rawText.substring(rawText.indexOf("{"), rawText.lastIndexOf("}") + 1));
+        priority = parsed.priority || "medium";
+        sentiment = parsed.sentiment || "neutral";
+        category = parsed.category || "general";
+        draft = parsed.draft_reply || "";
+        confidence = parsed.confidence || 75;
+        modelProvenance = "Anthropic-Claude-3-Haiku";
+      }
+    } catch (anthropicErr) {
+      console.error("Critical: All upstream LLM routing paths exhausted.");
+    }
+  }
+
+  if (!draft) {
+    draft = `Hello, thank you for contacting support regarding "${subject}". An internal systems engineer has been flagged to investigate this case manually.`;
+  }
+
+  const aiDurationDeltaMs = Math.round(performance.now() - aiStartMarker);
+
+  return {
+    priority,
+    sentiment,
+    category,
+    draft,
+    confidence,
+    metrics: {
+      provider_provenance: modelProvenance,
+      generation_latency_ms: aiDurationDeltaMs,
+      cloudflare_edge_processed: true
+    }
+  };
 }
 
 const ONYX_TOOLS = [
