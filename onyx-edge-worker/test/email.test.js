@@ -44,4 +44,20 @@ describe('EmailIt Edge Dispatch Endpoint', () => {
     expect(data.success).toBe(true);
     expect(data.recipient).toBe('james.ellars@axim.us.com');
   });
+
+  it('should reject digest dispatch requests missing authorization token', async () => {
+    vi.mocked(fetch).mockResolvedValueOnce({
+      status: 401,
+      json: async () => ({ error: "UNAUTHORIZED_DIGEST_REQUEST" })
+    });
+
+    const res = await fetch('http://localhost:8787/api/v1/email/digest', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' }
+    });
+
+    expect(res.status).toBe(401);
+    const data = await res.json();
+    expect(data.error).toBe("UNAUTHORIZED_DIGEST_REQUEST");
+  });
 });
