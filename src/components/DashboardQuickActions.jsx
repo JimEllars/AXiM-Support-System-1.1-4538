@@ -1,56 +1,54 @@
-import React from 'react';
-import SafeIcon from '../common/SafeIcon';
-import * as FiIcons from 'react-icons/fi';
-import { useTicketStore } from '../store/useTicketStore';
-import { FiRefreshCw } from 'react-icons/fi';
+import React, { useState } from 'react';
+import { FiMail, FiSend, FiRefreshCw } from 'react-icons/fi';
+import toast from 'react-hot-toast';
+import { supabase } from '../lib/supabaseClient';
+import { getEdgeWorkerUrl } from '../lib/edgeWorkerUrl';
 
-const { FiZap, FiShield, FiCpu, FiMessageSquare, FiFlag } = FiIcons;
+export default function DashboardQuickActions() {
+  const [isSendingDigest, setIsSendingDigest] = useState(false);
 
-const ACTIONS = [
-  { id: 'triage', label: 'Batch Triage', icon: FiCpu, color: 'text-fuchsia-400', bg: 'bg-fuchsia-500/10' },
-  { id: 'esc', label: 'Escalate High', icon: FiFlag, color: 'text-rose-400', bg: 'bg-rose-500/10' },
-  { id: 'broadcast', label: 'System Alert', icon: FiShield, color: 'text-amber-400', bg: 'bg-amber-500/10' },
-  { id: 'auto', label: 'Auto-Resolve', icon: FiZap, color: 'text-cyan-400', bg: 'bg-cyan-500/10' }
-];
+  const handleSendDigest = async () => {
+    if (isSendingDigest) return;
+    setIsSendingDigest(true);
 
-export default function DashboardQuickActions({ onAction }) {
-  const { fetchTickets } = useTicketStore();
-  const [isSyncing, setIsSyncing] = React.useState(false);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const token = session?.access_token;
+      if (!token) throw new Error("Active session required.");
 
-  const handleForceSync = async () => {
-    setIsSyncing(true);
-    await fetchTickets();
-    setTimeout(() => setIsSyncing(false), 500);
+      const workerUrl = getEdgeWorkerUrl();
+      const res = await fetch(`${workerUrl}/api/v1/email/digest`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        }
+      });
+
+      const data = await res.json();
+      if (!res.ok || !data.success) throw new Error(data.error || 'Failed to send executive digest.');
+
+      toast.success("Executive Digest emailed to james.ellars@axim.us.com!", {
+        style: { background: '#09090b', color: '#10b981', border: '1px solid rgba(16,185,129,0.3)' }
+      });
+    } catch (err) {
+      toast.error(`Digest Dispatch Error: ${err.message}`);
+    } finally {
+      setIsSendingDigest(false);
+    }
   };
 
   return (
-    <>
-      {ACTIONS.map((action) => (
-        <button 
-          key={action.id}
-          onClick={() => onAction?.(action.id)}
-          className="group flex items-center gap-4 p-5 bg-zinc-900/40 border border-zinc-800 rounded-3xl hover:border-zinc-700 hover:bg-zinc-800/40 transition-all text-left"
-        >
-          <div className={`w-12 h-12 rounded-2xl ${action.bg} flex items-center justify-center ${action.color} border border-white/5 shadow-lg group-hover:scale-110 transition-transform`}>
-            <SafeIcon icon={action.icon} className="text-xl" />
-          </div>
-          <div>
-            <p className="text-xs font-black text-white tracking-tight uppercase">{action.label}</p>
-            <p className="text-[9px] font-bold text-zinc-600 tracking-widest mt-0.5">QUICK_OPS</p>
-          </div>
-        </button>
-      ))}
+    <div className="flex items-center gap-2">
       <button
-        onClick={handleForceSync}
-        disabled={isSyncing}
-        className="flex flex-col items-center justify-center gap-2 p-4 bg-zinc-900/50 border border-zinc-800/50 rounded-2xl hover:bg-zinc-800 transition-colors group"
+        onClick={handleSendDigest}
+        disabled={isSendingDigest}
+        className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-[11px] font-mono font-bold uppercase text-indigo-300 bg-indigo-500/10 border border-indigo-500/20 hover:bg-indigo-500/20 transition-all disabled:opacity-50"
+        title="Email daily executive summary to james.ellars@axim.us.com"
       >
-        <div className="w-10 h-10 rounded-full bg-cyan-500/10 flex items-center justify-center text-cyan-400 group-hover:bg-cyan-500/20 transition-colors">
-          <FiRefreshCw className={isSyncing ? "animate-spin text-lg" : "text-lg"} />
-        </div>
-        <span className="text-xs font-bold text-zinc-300">Force Sync</span>
-        <span className="text-[9px] text-zinc-500 text-center px-2">Pull latest queue state</span>
+        <FiMail className={isSendingDigest ? 'animate-spin' : ''} />
+        <span>{isSendingDigest ? 'Sending...' : 'Email Digest'}</span>
       </button>
-    </>
+    </div>
   );
 }

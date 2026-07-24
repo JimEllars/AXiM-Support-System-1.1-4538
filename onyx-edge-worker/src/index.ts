@@ -484,9 +484,63 @@ async function sendEmailItNotification(
 }
 
 
+
+// --- EXECUTIVE DIGEST SUMMARY GENERATOR ---
+async function generateAndSendExecutiveDigest(env: Env): Promise<boolean> {
+  const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
+  const past24HoursISO = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+
+  // Query past 24h operational metrics
+  const { count: openTickets } = await supabase
+    .from("support_tickets")
+    .select("id", { count: "exact", head: true })
+    .eq("status", "open");
+
+  const { count: urgentTickets } = await supabase
+    .from("support_tickets")
+    .select("id", { count: "exact", head: true })
+    .eq("priority", "urgent");
+
+  const { count: resolved24h } = await supabase
+    .from("support_tickets")
+    .select("id", { count: "exact", head: true })
+    .gte("updated_at", past24HoursISO)
+    .in("status", ["resolved", "closed"]);
+
+  const { count: dlqFaults } = await supabase
+    .from("events_ax2024")
+    .select("id", { count: "exact", head: true })
+    .gte("timestamp", past24HoursISO)
+    .eq("type", "dlq_retry_executed");
+
+  const summaryHtml = `
+    <div style="font-family: monospace; background: #09090b; color: #f4f4f5; padding: 24px; border-radius: 16px; border: 1px solid #27272a;">
+      <h2 style="color: #6366f1; margin-top: 0; font-size: 18px;">AXiM SUPPORT COCKPIT — DAILY EXECUTIVE DIGEST</h2>
+      <p style="color: #a1a1aa; font-size: 12px;">Generated automatically via Cloudflare Edge Worker at ${new Date().toUTCString()}</p>
+      <hr style="border: 0; border-top: 1px solid #27272a; margin: 16px 0;" />
+      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; font-size: 13px;">
+        <p><strong>Open Active Tickets:</strong> <span style="color: #38bdf8;">${openTickets || 0}</span></p>
+        <p><strong>Urgent SLA Alerts:</strong> <span style="color: #f43f5e;">${urgentTickets || 0}</span></p>
+        <p><strong>Resolved (24h Window):</strong> <span style="color: #34d399;">${resolved24h || 0}</span></p>
+        <p><strong>DLQ Recoveries (24h):</strong> <span style="color: #fbbf24;">${dlqFaults || 0}</span></p>
+      </div>
+      <hr style="border: 0; border-top: 1px solid #27272a; margin: 16px 0;" />
+      <p style="margin-bottom: 0;"><a href="https://support.axim.us.com" style="color: #6366f1; font-weight: bold; text-decoration: none;">Launch Support Operations Cockpit HUD &rarr;</a></p>
+    </div>
+  `;
+
+  return await sendEmailItNotification(
+    "james.ellars@axim.us.com",
+    `📊 [DAILY EXECUTIVE DIGEST] AXiM Support Operations Summary`,
+    summaryHtml,
+    env
+  );
+}
+
 export default {
   async scheduled(event: any, env: Env, ctx: any) {
     ctx.waitUntil(generateAndSendDailyDigest(env));
+    ctx.waitUntil(generateAndSendExecutiveDigest(env));
     ctx.waitUntil(handleSLASweep(env));
     ctx.waitUntil(handleDataRetentionSweep(env));
     ctx.waitUntil(handleStaleTicketSweep(env));
@@ -1003,15 +1057,68 @@ if (url.pathname === "/webhooks/intake") {
     // --- SECURE ACTION RESOLUTION ENGINE & GOVERNANCE NOTIFICATION PIPELINE ---
 
     // --- EDGE COMMAND EXECUTION ROUTE ---
-    if (url.pathname === "/api/v1/command/execute" && request.method === "POST") {
+
+    // --- ON-DEMAND EXECUTIVE DIGEST DISPATCH ROUTE ---
+    if (url.pathname === "/api/v1/email/digest" && request.method === "POST") {
+      const authHeader = request.headers.get("Authorization") || "";
+      const token = authHeader.replace("Bearer ", "").trim();
+      if (!token) {
+        return new Response(JSON.stringify({ error: "UNAUTHORIZED_DIGEST_REQUEST" }), {
+          status: 401, headers: getCorsHeaders(env, request)
+        });
+      }
+
+      const supabaseAuth = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY, {
+        global: { headers: { Authorization: `Bearer ${token}` } }
+      });
+      const { data: { user }, error: authError } = await supabaseAuth.auth.getUser();
+      if (authError || !user) {
+        return new Response(JSON.stringify({ error: "INVALID_OPERATOR_SESSION" }), {
+          status: 403, headers: getCorsHeaders(env, request)
+        });
+      }
+
+      const success = await generateAndSendExecutiveDigest(env);
+      return new Response(JSON.stringify({ success, recipient: "james.ellars@axim.us.com" }), {
+        status: success ? 200 : 502,
+        headers: { "Content-Type": "application/json", ...getCorsHeaders(env, request) }
+      });
+    }
+
+if (url.pathname === "/api/v1/command/execute" && request.method === "POST") {
       try {
         const payload: any = await request.json();
-        const { commandId, ticketId, metadata } = payload;
+        const { commandId, command: rawCommand, ticketId, metadata } = payload;
+
+        const command = rawCommand || commandId;
+
+        let updatePayload = {};
+        let auditAction = `Executed administrative command: ${command}`;
+
+        if (command === "/draft") {
+          let freshDraft = "No AI draft generated.";
+          const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
+          if (env.AI) {
+            const { data: tData } = await supabase.from("support_tickets").select("subject, description").eq("id", ticketId).single();
+            if (tData) {
+              const aiRes: any = await env.AI.run("@cf/meta/llama-3.1-8b-instruct", {
+                messages: [
+                  { role: "system", content: "You are Onyx Support AI. Output a concise response draft." },
+                  { role: "user", content: `Subject: ${tData.subject}\nDescription: ${tData.description}` }
+                ]
+              });
+              freshDraft = typeof aiRes.response === "string" ? aiRes.response : JSON.stringify(aiRes.response);
+            }
+          }
+          updatePayload = { metadata: { auto_response_draft: freshDraft } };
+          auditAction = "Regenerated AI response draft via Workers AI.";
+        }
 
         // Return simulated success for edge commands
         return new Response(JSON.stringify({
           success: true,
-          message: `Executed administrative command: ${commandId}`
+          message: auditAction,
+          payload: updatePayload
         }), {
           status: 200,
           headers: getCorsHeaders(env, request)
