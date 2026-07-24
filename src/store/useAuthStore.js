@@ -13,6 +13,17 @@ export const useAuthStore = create((set) => ({
       return;
     }
 
+    const currentState = useAuthStore.getState();
+    // Prevent unneeded re-fetches or clearing of activeOrganization on minor token refresh
+    if (currentState.user?.id === session.user.id && currentState.activeOrganization) {
+       set({
+         user: session.user,
+         session: session,
+         isAuthenticated: true
+       });
+       return;
+    }
+
     // Fetch user's organization profile
     const { data: profile } = await supabase.from('team_profiles').select('organization_id').eq('id', session.user.id).single();
 
