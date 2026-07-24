@@ -732,6 +732,56 @@ export default {
     }
 
     // --- SECURE EMAIL DISPATCH ROUTE ---
+    // --- INBOUND EMAIL WEBHOOK INGESTION ROUTE ---
+    if (url.pathname === "/api/v1/email/inbound" && request.method === "POST") {
+      try {
+        const payload: any = await request.json();
+        const sender = payload.from || payload.sender || "unknown@external.com";
+        const subject = payload.subject || "";
+        const bodyText = payload.text || payload.plain_body || payload.html || "Empty email body.";
+
+        // Extract ticket UUID from subject format e.g. "Re: [Ticket #12345678] Subject"
+        const ticketMatch = subject.match(/\[Ticket #([a-f0-9-]+)\]/i);
+        const ticketId = ticketMatch ? ticketMatch[1] : null;
+
+        const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
+
+        if (ticketId) {
+          // Verify ticket exists
+          const { data: ticket } = await supabase.from("support_tickets").select("id").eq("id", ticketId).single();
+
+          if (ticket) {
+            await supabase.from("ticket_messages").insert({
+              ticket_id: ticket.id,
+              sender_id: sender,
+              message_body: `**[📧 INBOUND EMAIL RECEIVED]**\n\n${bodyText.trim()}`,
+              is_internal_note: false,
+              metadata: { source: "emailit_inbound_webhook", original_subject: subject }
+            });
+          }
+        }
+
+        // Log inbound email telemetry
+        await supabase.from("events_ax2024").insert({
+          type: "inbound_email_ingested",
+          payload: {
+            sender,
+            subject,
+            matched_ticket_id: ticketId,
+            timestamp: new Date().toISOString()
+          }
+        });
+
+        return new Response(JSON.stringify({ success: true, matched_ticket_id: ticketId }), {
+          status: 200, headers: { "Content-Type": "application/json", ...getCorsHeaders(env, request) }
+        });
+      } catch (err: any) {
+        return new Response(JSON.stringify({ error: err.message }), {
+          status: 500, headers: getCorsHeaders(env, request)
+        });
+      }
+    }
+
     if (url.pathname === "/api/v1/email/send" && request.method === "POST") {
       const authHeader = request.headers.get("Authorization") || "";
       const token = authHeader.replace("Bearer ", "").trim();

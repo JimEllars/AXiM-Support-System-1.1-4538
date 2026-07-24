@@ -1,11 +1,13 @@
 import React, { useState } from 'react';
-import { FiMail, FiSend, FiRefreshCw } from 'react-icons/fi';
+import { FiMail, FiUserCheck } from 'react-icons/fi';
 import toast from 'react-hot-toast';
 import { supabase } from '../lib/supabaseClient';
 import { getEdgeWorkerUrl } from '../lib/edgeWorkerUrl';
+import ExecutiveDirectiveHistoryModal from './modals/ExecutiveDirectiveHistoryModal';
 
 export default function DashboardQuickActions() {
   const [isSendingDigest, setIsSendingDigest] = useState(false);
+  const [isModalOpen, setIsModalOpen] = useState(false);
 
   const handleSendDigest = async () => {
     if (isSendingDigest) return;
@@ -28,7 +30,7 @@ export default function DashboardQuickActions() {
       const data = await res.json();
       if (!res.ok || !data.success) throw new Error(data.error || 'Failed to send executive digest.');
 
-      toast.success("Executive Digest emailed to james.ellars@axim.us.com!", {
+      toast.success("Executive Briefing emailed to james.ellars@axim.us.com!", {
         style: { background: '#09090b', color: '#10b981', border: '1px solid rgba(16,185,129,0.3)' }
       });
     } catch (err) {
@@ -41,14 +43,25 @@ export default function DashboardQuickActions() {
   return (
     <div className="flex items-center gap-2">
       <button
+        onClick={() => setIsModalOpen(true)}
+        className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-[11px] font-mono font-bold uppercase text-amber-300 bg-amber-500/10 border border-amber-500/20 hover:bg-amber-500/20 transition-all"
+        title="View executive directive audit history"
+      >
+        <FiUserCheck/>
+        <span>Exec History</span>
+      </button>
+
+      <button
         onClick={handleSendDigest}
         disabled={isSendingDigest}
         className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-[11px] font-mono font-bold uppercase text-indigo-300 bg-indigo-500/10 border border-indigo-500/20 hover:bg-indigo-500/20 transition-all disabled:opacity-50"
         title="Email daily executive summary to james.ellars@axim.us.com"
       >
         <FiMail className={isSendingDigest ? 'animate-spin' : ''} />
-        <span>{isSendingDigest ? 'Sending...' : 'Email Digest'}</span>
+        <span>{isSendingDigest ? 'Sending...' : 'Email Briefing'}</span>
       </button>
+
+      <ExecutiveDirectiveHistoryModal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} />
     </div>
   );
 }
