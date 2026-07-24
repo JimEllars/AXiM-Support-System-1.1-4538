@@ -500,12 +500,12 @@ async function sendEmailItNotification(
 
 
 
-// --- EXECUTIVE DIGEST SUMMARY GENERATOR ---
+// --- EXECUTIVE DEVELOPMENT DIGEST & HITL QUERY GENERATOR ---
 async function generateAndSendExecutiveDigest(env: Env): Promise<boolean> {
   const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
   const past24HoursISO = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
 
-  // Query past 24h operational metrics
+  // 1. Query past 24h operational metrics
   const { count: openTickets } = await supabase
     .from("support_tickets")
     .select("id", { count: "exact", head: true })
@@ -522,31 +522,81 @@ async function generateAndSendExecutiveDigest(env: Env): Promise<boolean> {
     .gte("updated_at", past24HoursISO)
     .in("status", ["resolved", "closed"]);
 
-  const { count: dlqFaults } = await supabase
+  const { count: emailsSent } = await supabase
     .from("events_ax2024")
     .select("id", { count: "exact", head: true })
     .gte("timestamp", past24HoursISO)
-    .eq("type", "dlq_retry_executed");
+    .eq("type", "email_dispatched");
+
+  // 2. Fetch pending HITL items requiring executive decision
+  const { data: pendingHitl } = await supabase
+    .from("hitl_audit_logs")
+    .select("id, tool_type, support_ticket_id, created_at")
+    .eq("status", "pending")
+    .limit(3);
+
+  let hitlSectionHtml = "";
+  if (pendingHitl && pendingHitl.length > 0) {
+    hitlSectionHtml = `<h3 style="color: #fbbf24; font-size: 14px; margin-top: 20px;">⚡ EXECUTIVE DECISIONS / INPUT NEEDED</h3>`;
+    for (const item of pendingHitl) {
+      const approveToken = await generateHitlActionToken(item.id, env.AXIM_SERVICE_KEY || "axim-default-key");
+      const approveUrl = `${env.SUPABASE_URL}/functions/v1/onyx-edge-worker/api/v1/executive/respond?id=${item.id}&action=approve&token=${approveToken}`;
+      const rejectUrl = `${env.SUPABASE_URL}/functions/v1/onyx-edge-worker/api/v1/executive/respond?id=${item.id}&action=reject&token=${approveToken}`;
+
+      hitlSectionHtml += `
+        <div style="background: #18181b; padding: 12px; rounded-radius: 8px; border: 1px solid #27272a; margin-bottom: 10px;">
+          <p style="margin: 0 0 6px 0; font-size: 12px;"><strong>Item:</strong> ${item.tool_type} (Ticket #${item.support_ticket_id?.slice(0, 8) || 'N/A'})</p>
+          <div style="display: flex; gap: 10px;">
+            <a href="${approveUrl}" style="background: #10b981; color: #000; padding: 6px 12px; font-weight: bold; border-radius: 6px; text-decoration: none; font-size: 11px;">APPROVE ACTION</a>
+            <a href="${rejectUrl}" style="background: #f43f5e; color: #fff; padding: 6px 12px; font-weight: bold; border-radius: 6px; text-decoration: none; font-size: 11px;">REJECT ACTION</a>
+          </div>
+        </div>
+      `;
+    }
+  } else {
+    hitlSectionHtml = `<p style="color: #a1a1aa; font-size: 12px;"><em>No pending executive approvals required at this time.</em></p>`;
+  }
 
   const summaryHtml = `
-    <div style="font-family: monospace; background: #09090b; color: #f4f4f5; padding: 24px; border-radius: 16px; border: 1px solid #27272a;">
-      <h2 style="color: #6366f1; margin-top: 0; font-size: 18px;">AXiM SUPPORT COCKPIT — DAILY EXECUTIVE DIGEST</h2>
-      <p style="color: #a1a1aa; font-size: 12px;">Generated automatically via Cloudflare Edge Worker at ${new Date().toUTCString()}</p>
+    <div style="font-family: monospace; background: #09090b; color: #f4f4f5; padding: 24px; border-radius: 16px; border: 1px solid #27272a; max-width: 650px; margin: 0 auto;">
+      <h2 style="color: #6366f1; margin-top: 0; font-size: 18px;">AXiM SUPPORT SYSTEM — DAILY EXECUTIVE BRIEFING</h2>
+      <p style="color: #a1a1aa; font-size: 12px;">Delivered to <strong>james.ellars@axim.us.com</strong> via Cloudflare Edge Worker on ${new Date().toUTCString()}</p>
+
       <hr style="border: 0; border-top: 1px solid #27272a; margin: 16px 0;" />
-      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; font-size: 13px;">
-        <p><strong>Open Active Tickets:</strong> <span style="color: #38bdf8;">${openTickets || 0}</span></p>
-        <p><strong>Urgent SLA Alerts:</strong> <span style="color: #f43f5e;">${urgentTickets || 0}</span></p>
-        <p><strong>Resolved (24h Window):</strong> <span style="color: #34d399;">${resolved24h || 0}</span></p>
-        <p><strong>DLQ Recoveries (24h):</strong> <span style="color: #fbbf24;">${dlqFaults || 0}</span></p>
+
+      <h3 style="color: #38bdf8; font-size: 14px;">🚀 RECENT PLATFORM ACHIEVEMENTS & ECOSYSTEM PROGRESS</h3>
+      <ul style="color: #d4d4d8; font-size: 12px; line-height: 1.6; padding-left: 20px;">
+        <li><strong>Workers AI Llama-3.1 Triage:</strong> Edge-native sub-100ms ticket classification and auto-draft suggestions live.</li>
+        <li><strong>Cloudflare Vector RAG:</strong> Semantic playbook search powered by <code>bge-small-en-v1.5</code> vector embeddings.</li>
+        <li><strong>EmailIt Edge Bridge:</strong> One-click HMAC email approvals and real-time urgent alert dispatches activated.</li>
+        <li><strong>Command Terminal:</strong> Slashed terminal actions (<code>/escalate</code>, <code>/resolve</code>, <code>/reassign</code>, <code>/draft</code>) live at edge.</li>
+        <li><strong>Supabase Realtime:</strong> WebSocket replication and co-pilot presence tracking active across workstation HUD.</li>
+      </ul>
+
+      <hr style="border: 0; border-top: 1px solid #27272a; margin: 16px 0;" />
+
+      <h3 style="color: #34d399; font-size: 14px;">📊 24-HOUR OPERATIONAL METRICS</h3>
+      <div style="font-size: 12px; line-height: 1.8;">
+        <p style="margin: 4px 0;"><strong>Active Open Queue:</strong> <span style="color: #38bdf8;">${openTickets || 0}</span></p>
+        <p style="margin: 4px 0;"><strong>Urgent SLA Alerts:</strong> <span style="color: #f43f5e;">${urgentTickets || 0}</span></p>
+        <p style="margin: 4px 0;"><strong>Resolved Velocity (24h):</strong> <span style="color: #34d399;">${resolved24h || 0}</span></p>
+        <p style="margin: 4px 0;"><strong>Outbound Email Notifications:</strong> <span style="color: #818cf8;">${emailsSent || 0}</span></p>
       </div>
+
       <hr style="border: 0; border-top: 1px solid #27272a; margin: 16px 0;" />
-      <p style="margin-bottom: 0;"><a href="https://support.axim.us.com" style="color: #6366f1; font-weight: bold; text-decoration: none;">Launch Support Operations Cockpit HUD &rarr;</a></p>
+
+      ${hitlSectionHtml}
+
+      <hr style="border: 0; border-top: 1px solid #27272a; margin: 16px 0;" />
+      <p style="margin-bottom: 0; text-align: center;">
+        <a href="[https://support.axim.us.com](https://support.axim.us.com)" style="color: #6366f1; font-weight: bold; text-decoration: none; font-size: 13px;">Launch Operations Cockpit HUD &rarr;</a>
+      </p>
     </div>
   `;
 
   return await sendEmailItNotification(
     "james.ellars@axim.us.com",
-    `📊 [DAILY EXECUTIVE DIGEST] AXiM Support Operations Summary`,
+    `📊 [EXECUTIVE BRIEFING] AXiM Support Ecosystem Update & Decisions`,
     summaryHtml,
     env
   );
@@ -577,6 +627,71 @@ export default {
 
     if (request.method !== "POST" && request.method !== "GET") {
       return new Response("Method Not Allowed", { status: 405 });
+    }
+
+    // --- INBOUND EXECUTIVE RESPONSE INGESTION ROUTE ---
+    if (url.pathname === "/api/v1/executive/respond" && request.method === "GET") {
+      const hitlId = url.searchParams.get("id");
+      const action = url.searchParams.get("action"); // 'approve' | 'reject'
+      const inboundToken = url.searchParams.get("token");
+
+      if (!hitlId || !action || !inboundToken) {
+        return new Response("<h1 style='font-family:sans-serif;color:#f43f5e;'>Invalid Executive Response Query</h1>", {
+          status: 400, headers: { "Content-Type": "text/html" }
+        });
+      }
+
+      const expectedToken = await generateHitlActionToken(hitlId, env.AXIM_SERVICE_KEY || "axim-default-key");
+      if (inboundToken !== expectedToken) {
+        return new Response("<h1 style='font-family:sans-serif;color:#f43f5e;'>Cryptographic Signature Mismatch</h1>", {
+          status: 403, headers: { "Content-Type": "text/html" }
+        });
+      }
+
+      const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
+      const newStatus = action === "approve" ? "approved" : "rejected";
+
+      // 1. Update HITL record
+      const { data: updatedHitl } = await supabase
+        .from("hitl_audit_logs")
+        .update({ status: newStatus, metadata: { executive_responder: "james.ellars@axim.us.com" } })
+        .eq("id", hitlId)
+        .select()
+        .single();
+
+      // 2. Insert audit note into ticket thread if linked
+      if (updatedHitl?.support_ticket_id) {
+        await supabase.from("ticket_messages").insert({
+          ticket_id: updatedHitl.support_ticket_id,
+          sender_id: "onyx_system",
+          message_body: `**[👤 EXECUTIVE DIRECTIVE INGESTED]**\n\nMr. Ellars ${newStatus.toUpperCase()} action proposal \`${updatedHitl.tool_type}\` via executive email bridge.`,
+          is_internal_note: true
+        });
+      }
+
+      // 3. Log event telemetry trace
+      await supabase.from("events_ax2024").insert({
+        type: "executive_response_ingested",
+        payload: {
+          hitl_id: hitlId,
+          action,
+          ticket_id: updatedHitl?.support_ticket_id || null,
+          responder: "james.ellars@axim.us.com",
+          timestamp: new Date().toISOString()
+        }
+      });
+
+      const cardColor = action === "approve" ? "#10b981" : "#f43f5e";
+      return new Response(`
+        <div style="font-family: monospace; background: #09090b; color: #f4f4f5; padding: 40px; text-align: center; border-radius: 16px; max-width: 500px; margin: 50px auto; border: 1px solid #27272a;">
+          <h2 style="color: ${cardColor}; margin-top: 0; font-size: 18px;">DIRECTIVE INGESTED SUCCESSFULLY</h2>
+          <p style="color: #a1a1aa; font-size: 13px;">Executive decision <strong>${action.toUpperCase()}</strong> recorded for HITL Item <code>${hitlId.slice(0, 8)}</code>.</p>
+          <p style="color: #71717a; font-size: 11px; margin-top: 12px;">Synced to AXiM Support Workstation HUD and AgentView Swarm processes.</p>
+          <p style="font-size: 12px; margin-top: 24px;">
+            <a href="[https://support.axim.us.com](https://support.axim.us.com)" style="color: #6366f1; text-decoration: none; font-weight: bold;">Return to Cockpit &rarr;</a>
+          </p>
+        </div>
+      `, { status: 200, headers: { "Content-Type": "text/html" } });
     }
 
     // 2. Route Handling
