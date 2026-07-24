@@ -61,3 +61,27 @@ describe('EmailIt Edge Dispatch Endpoint', () => {
     expect(data.error).toBe("UNAUTHORIZED_DIGEST_REQUEST");
   });
 });
+
+describe('EmailIt Edge Dispatch & One-Click Approval Endpoint', () => {
+  it('should reject email approval requests with missing parameters', async () => {
+    vi.mocked(fetch).mockResolvedValueOnce({
+      status: 400,
+      text: async () => '<h1>Invalid Approval Request</h1>'
+    });
+
+    const res = await fetch('http://localhost:8787/api/v1/hitl/approve-email', { method: 'GET' });
+    expect(res.status).toBe(400);
+  });
+
+  it('should process valid one-click email approvals successfully', async () => {
+    vi.mocked(fetch).mockResolvedValueOnce({
+      status: 200,
+      text: async () => '⚡ ACTION PROPOSAL APPROVED'
+    });
+
+    const res = await fetch('http://localhost:8787/api/v1/hitl/approve-email?id=hitl-123&token=valid_token', { method: 'GET' });
+    expect(res.status).toBe(200);
+    const html = await res.text();
+    expect(html).toContain('APPROVED');
+  });
+});

@@ -1,3 +1,18 @@
+// --- HITL EMAIL ACTION TOKEN GENERATOR ---
+async function generateHitlActionToken(hitlId: string, secret: string): Promise<string> {
+  const encoder = new TextEncoder();
+  const cryptoKey = await crypto.subtle.importKey(
+    "raw",
+    encoder.encode(secret),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"]
+  );
+  const sigBuffer = await crypto.subtle.sign("HMAC", cryptoKey, encoder.encode(`hitl_approve:${hitlId}`));
+  return Array.from(new Uint8Array(sigBuffer)).map(b => b.toString(16).padStart(2, "0")).join("");
+}
+
+
 /**
  * AXiM Support - Edge Worker
  * Handles ticket ingestion, batch triage, RAG search, and webhooks.
@@ -565,6 +580,41 @@ export default {
     }
 
     // 2. Route Handling
+
+
+    if (url.pathname === "/api/v1/hitl/approve-email" && request.method === "GET") {
+      const hitlId = url.searchParams.get("id");
+      const inboundToken = url.searchParams.get("token");
+
+      if (!hitlId || !inboundToken || !env.AXIM_SERVICE_KEY) {
+        return new Response("<h1 style='font-family:sans-serif;color:#f43f5e;'>Invalid Approval Request</h1>", {
+          status: 400, headers: { "Content-Type": "text/html" }
+        });
+      }
+
+      const expectedToken = await generateHitlActionToken(hitlId, env.AXIM_SERVICE_KEY);
+      if (inboundToken !== expectedToken) {
+        return new Response("<h1 style='font-family:sans-serif;color:#f43f5e;'>Cryptographic Signature Mismatch</h1>", {
+          status: 403, headers: { "Content-Type": "text/html" }
+        });
+      }
+
+      const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
+      await supabase.from("hitl_audit_logs").update({ status: "approved" }).eq("id", hitlId);
+
+      await supabase.from("events_ax2024").insert({
+        type: "hitl_email_approval_executed",
+        payload: { hitl_id: hitlId, approved_via: "email_one_click", timestamp: new Date().toISOString() }
+      });
+
+      return new Response(`
+        <div style="font-family: monospace; background: #09090b; color: #f4f4f5; padding: 40px; text-align: center; border-radius: 16px; max-w: 500px; margin: 50px auto; border: 1px solid #27272a;">
+          <h2 style="color: #10b981; margin-top: 0;">⚡ ACTION PROPOSAL APPROVED</h2>
+          <p style="color: #a1a1aa; font-size: 13px;">HITL Audit Log <code>${hitlId.slice(0, 8)}</code> has been authorized via EmailIt secure link.</p>
+          <p style="font-size: 12px; margin-top: 20px;"><a href="https://support.axim.us.com" style="color: #6366f1; text-decoration: none; font-weight: bold;">Return to Support Operations Cockpit &rarr;</a></p>
+        </div>
+      `, { status: 200, headers: { "Content-Type": "text/html" } });
+    }
 
     // --- SECURE EMAIL DISPATCH ROUTE ---
     if (url.pathname === "/api/v1/email/send" && request.method === "POST") {
@@ -3454,6 +3504,11 @@ async function handleSandboxResolution(request: Request, env: Env, ctx: any): Pr
     }).select().single();
 
     if (hitlError) throw hitlError;
+
+    const emailToken = await generateHitlActionToken(hitlLog.id, env.AXIM_SERVICE_KEY);
+    const workerDomain = new URL(request.url).origin;
+    const directApproveUrl = `${workerDomain}/api/v1/hitl/approve-email?id=${hitlLog.id}&token=${emailToken}`;
+
     // Inside handleExecuteAction when an HITL proposal requires manual approval:
     ctx.waitUntil(sendEmailItNotification(
       "james.ellars@axim.us.com",
@@ -3463,7 +3518,10 @@ async function handleSandboxResolution(request: Request, env: Env, ctx: any): Pr
         <p><strong>Tool Type:</strong> ${hitlLog.tool_type}</p>
         <p><strong>Ticket ID:</strong> ${hitlLog.support_ticket_id || 'N/A'}</p>
         <p><strong>Status:</strong> Pending Approval</p>
-        <p><a href="https://support.axim.us.com" style="color: #10b981; font-weight: bold;">Enter Support Cockpit HUD to Approve</a></p>
+                <hr style="border: 0; border-top: 1px solid #27272a; margin: 16px 0;" />
+        <a href="${directApproveUrl}" style="color: white; font-weight: bold; text-decoration: none; padding: 10px 15px; background: #10b981; border-radius: 6px; display: inline-block; margin-bottom: 10px;">One-Click Approve & Execute &rarr;</a>
+        <br />
+        <a href="https://support.axim.us.com/ticket/${hitlLog.support_ticket_id}" style="color: #6366f1; font-weight: bold; text-decoration: none; display: inline-block; margin-top: 10px;">View Dashboard &rarr;</a>
       </div>`,
       env
     ));

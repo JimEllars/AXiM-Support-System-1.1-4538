@@ -1,132 +1,102 @@
-import React, { useState, useEffect } from 'react';
-import { FiTrendingUp, FiCheckCircle, FiClock, FiAlertCircle, FiZap, FiCpu } from 'react-icons/fi';
+import React, { useEffect, useState } from 'react';
+import { FiInbox, FiAlertCircle, FiCheckCircle, FiMail } from 'react-icons/fi';
 import { supabase } from '../../lib/supabaseClient';
 
 export default function SupportMetrics() {
   const [metrics, setMetrics] = useState({
-    totalTickets: 0,
-    openTickets: 0,
-    resolvedTickets: 0,
-    urgentTickets: 0,
-    aiDraftsGenerated: 0,
-    aiDraftsAccepted: 0,
-    aiAcceptanceRate: 0,
-    isLoading: true
+    openCount: 0,
+    urgentCount: 0,
+    resolved24h: 0,
+    emailsSent24h: 0
   });
 
   useEffect(() => {
-    const fetchSupportAnalytics = async () => {
+    const fetchMetrics = async () => {
       try {
-        // 1. Query ticket status aggregations
-        const { data: tickets, error: ticketErr } = await supabase
+        const past24h = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+
+        const { count: open } = await supabase
           .from('support_tickets')
-          .select('id, status, priority');
+          .select('id', { count: 'exact', head: true })
+          .eq('status', 'open');
 
-        if (ticketErr) throw ticketErr;
+        const { count: urgent } = await supabase
+          .from('support_tickets')
+          .select('id', { count: 'exact', head: true })
+          .eq('priority', 'urgent');
 
-        // 2. Query total AI drafts generated from telemetry table
-        const { count: aiGeneratedCount, error: aiGenErr } = await supabase
-          .from('ticket_ai_telemetry')
-          .select('id', { count: 'exact', head: true });
+        const { count: resolved } = await supabase
+          .from('support_tickets')
+          .select('id', { count: 'exact', head: true })
+          .gte('updated_at', past24h)
+          .in('status', ['resolved', 'closed']);
 
-        if (aiGenErr) throw aiGenErr;
-
-        // 3. Query total accepted AI drafts from events table
-        const { count: aiAcceptedCount, error: aiAccErr } = await supabase
+        const { count: emails } = await supabase
           .from('events_ax2024')
           .select('id', { count: 'exact', head: true })
-          .eq('type', 'autodraft_accepted');
-
-        if (aiAccErr) throw aiAccErr;
-
-        const total = tickets?.length || 0;
-        const open = tickets?.filter(t => t.status === 'open' || t.status === 'in_progress').length || 0;
-        const resolved = tickets?.filter(t => t.status === 'resolved' || t.status === 'closed').length || 0;
-        const urgent = tickets?.filter(t => t.priority === 'urgent').length || 0;
-
-        const generated = aiGeneratedCount || 0;
-        const accepted = aiAcceptedCount || 0;
-        const rate = generated > 0 ? Math.round((accepted / generated) * 100) : 0;
+          .gte('timestamp', past24h)
+          .eq('type', 'email_dispatched');
 
         setMetrics({
-          totalTickets: total,
-          openTickets: open,
-          resolvedTickets: resolved,
-          urgentTickets: urgent,
-          aiDraftsGenerated: generated,
-          aiDraftsAccepted: accepted,
-          aiAcceptanceRate: rate,
-          isLoading: false
+          openCount: open || 0,
+          urgentCount: urgent || 0,
+          resolved24h: resolved || 0,
+          emailsSent24h: emails || 0
         });
       } catch (err) {
-        console.error('Failed to load support metrics telemetry:', err);
-        setMetrics(prev => ({ ...prev, isLoading: false }));
+        console.error('Failed to load support metrics:', err);
       }
     };
 
-    fetchSupportAnalytics();
+    fetchMetrics();
+    const interval = setInterval(fetchMetrics, 60000);
+    return () => clearInterval(interval);
   }, []);
 
-  if (metrics.isLoading) {
-    return (
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4 my-4 animate-pulse">
-        {[...Array(5)].map((_, i) => (
-          <div key={i} className="h-24 bg-zinc-900/60 rounded-2xl border border-zinc-800" />
-        ))}
-      </div>
-    );
-  }
-
   return (
-    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4 my-4">
-      {/* Total Tickets Card */}
-      <div className="p-4 rounded-2xl bg-zinc-950/60 border border-zinc-800/80 backdrop-blur-md">
-        <div className="flex items-center justify-between text-zinc-400 text-xs font-mono mb-2">
-          <span>Total Incidents</span>
-          <FiTrendingUp className="text-zinc-500"/>
+    <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 font-mono">
+      {/* Active Queue Card */}
+      <div className="p-4 rounded-2xl bg-zinc-950/60 border border-zinc-800/80 backdrop-blur-md flex items-center justify-between">
+        <div>
+          <span className="text-[10px] text-zinc-500 font-bold uppercase tracking-wider">Active Queue</span>
+          <div className="text-xl font-bold text-white mt-1">{metrics.openCount}</div>
         </div>
-        <p className="text-2xl font-mono font-black text-white">{metrics.totalTickets}</p>
-        <span className="text-[10px] font-mono text-zinc-500">{metrics.openTickets} Active Queue</span>
+        <div className="w-9 h-9 rounded-xl bg-sky-500/10 border border-sky-500/20 flex items-center justify-center text-sky-400">
+          <FiInbox className="text-base"/>
+        </div>
       </div>
 
-      {/* Resolved Tickets Card */}
-      <div className="p-4 rounded-2xl bg-zinc-950/60 border border-zinc-800/80 backdrop-blur-md">
-        <div className="flex items-center justify-between text-zinc-400 text-xs font-mono mb-2">
-          <span>Resolved</span>
-          <FiCheckCircle className="text-emerald-400"/>
+      {/* Urgent SLA Alerts Card */}
+      <div className="p-4 rounded-2xl bg-zinc-950/60 border border-zinc-800/80 backdrop-blur-md flex items-center justify-between">
+        <div>
+          <span className="text-[10px] text-zinc-500 font-bold uppercase tracking-wider">Urgent SLAs</span>
+          <div className="text-xl font-bold text-rose-400 mt-1">{metrics.urgentCount}</div>
         </div>
-        <p className="text-2xl font-mono font-black text-emerald-400">{metrics.resolvedTickets}</p>
-        <span className="text-[10px] font-mono text-emerald-500/80">Closed Successfully</span>
+        <div className="w-9 h-9 rounded-xl bg-rose-500/10 border border-rose-500/20 flex items-center justify-center text-rose-400">
+          <FiAlertCircle className="text-base animate-pulse"/>
+        </div>
       </div>
 
-      {/* Urgent SLA Card */}
-      <div className="p-4 rounded-2xl bg-zinc-950/60 border border-zinc-800/80 backdrop-blur-md">
-        <div className="flex items-center justify-between text-zinc-400 text-xs font-mono mb-2">
-          <span>Urgent SLA</span>
-          <FiAlertCircle className="text-rose-400"/>
+      {/* 24h Resolved Velocity Card */}
+      <div className="p-4 rounded-2xl bg-zinc-950/60 border border-zinc-800/80 backdrop-blur-md flex items-center justify-between">
+        <div>
+          <span className="text-[10px] text-zinc-500 font-bold uppercase tracking-wider">Resolved (24h)</span>
+          <div className="text-xl font-bold text-emerald-400 mt-1">{metrics.resolved24h}</div>
         </div>
-        <p className="text-2xl font-mono font-black text-rose-400">{metrics.urgentTickets}</p>
-        <span className="text-[10px] font-mono text-rose-500/80">Priority Escalations</span>
+        <div className="w-9 h-9 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400">
+          <FiCheckCircle className="text-base"/>
+        </div>
       </div>
 
-      {/* AI Copilot Interventions Card */}
-      <div className="p-4 rounded-2xl bg-purple-950/20 border border-purple-500/30 backdrop-blur-md">
-        <div className="flex items-center justify-between text-purple-300 text-xs font-mono mb-2">
-          <span>AI Copilot Drafts</span>
-          <FiZap className="text-purple-400 animate-pulse"/>
+      {/* Outbound Email Dispatch Card */}
+      <div className="p-4 rounded-2xl bg-zinc-950/60 border border-zinc-800/80 backdrop-blur-md flex items-center justify-between">
+        <div>
+          <span className="text-[10px] text-zinc-500 font-bold uppercase tracking-wider">Outbound Emails</span>
+          <div className="text-xl font-bold text-indigo-400 mt-1">{metrics.emailsSent24h}</div>
         </div>
-        <p className="text-2xl font-mono font-black text-purple-300">{metrics.aiDraftsGenerated}</p>
-        <span className="text-[10px] font-mono text-purple-400/80">{metrics.aiDraftsAccepted} Accepted by Human</span>
-      </div>
-
-      {/* AI Draft Acceptance Rate Card */}
-      <div className="p-4 rounded-2xl bg-emerald-950/20 border border-emerald-500/30 backdrop-blur-md">
-        <div className="flex items-center justify-between text-emerald-300 text-xs font-mono mb-2">
-          <span>AI Acceptance Rate</span>
-          <FiCpu className="text-emerald-400"/>
+        <div className="w-9 h-9 rounded-xl bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center text-indigo-400">
+          <FiMail className="text-base"/>
         </div>
-        <p className="text-2xl font-mono font-black text-emerald-400">{metrics.aiAcceptanceRate}%</p>
-        <span className="text-[10px] font-mono text-emerald-500/80">Draft Accuracy Index</span>
       </div>
     </div>
   );
