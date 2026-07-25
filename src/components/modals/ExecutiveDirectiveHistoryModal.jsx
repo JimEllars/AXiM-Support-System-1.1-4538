@@ -53,7 +53,8 @@ export default function ExecutiveDirectiveHistoryModal({ isOpen, onClose }) {
         </div>
 
         {/* Filter Controls */}
-        <div className="flex items-center gap-2 text-xs">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2 text-xs">
           <button
             onClick={() => setFilter('all')}
             className={`px-3 py-1 rounded-lg border transition-all ${filter === 'all' ? 'bg-amber-500/20 text-amber-300 border-amber-500/40' : 'bg-zinc-900 text-zinc-400 border-zinc-800'}`}
@@ -71,6 +72,32 @@ export default function ExecutiveDirectiveHistoryModal({ isOpen, onClose }) {
             className={`px-3 py-1 rounded-lg border transition-all ${filter === 'rejected' ? 'bg-rose-500/20 text-rose-300 border-rose-500/40' : 'bg-zinc-900 text-zinc-400 border-zinc-800'}`}
           >
             Rejected
+          </button>
+          </div>
+          <button
+            onClick={async () => {
+              try {
+                const session = await supabase.auth.getSession();
+                const token = session.data?.session?.access_token;
+                if (!token) throw new Error("No session token");
+                const res = await fetch("http://localhost:8787/api/v1/executive/remind-stale", {
+                  method: "POST",
+                  headers: {
+                    "Content-Type": "application/json",
+                    "Authorization": `Bearer ${token}`
+                  }
+                });
+                if (!res.ok) throw new Error("Failed to nudge exec");
+                alert("Nudge triggered successfully.");
+              } catch (err) {
+                console.error(err);
+                alert("Failed to nudge exec.");
+              }
+            }}
+            className="px-3 py-1 rounded-lg border transition-all bg-amber-500/20 text-amber-300 border-amber-500/40 hover:bg-amber-500/30 text-xs flex items-center gap-2"
+          >
+            <FiRefreshCw className="text-[10px]" />
+            Nudge Exec
           </button>
         </div>
 

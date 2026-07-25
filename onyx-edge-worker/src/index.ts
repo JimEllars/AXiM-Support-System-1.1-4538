@@ -693,6 +693,72 @@ export default {
       return new Response("Method Not Allowed", { status: 405 });
     }
 
+    // --- AI EXECUTIVE POLICY SYNTHESIS ENDPOINT (KV CACHED) ---
+    if (url.pathname === "/api/v1/executive/summary" && request.method === "GET") {
+      try {
+        const cacheKey = "exec_policy_summary_v1";
+
+        // 1. Check Cloudflare KV Cache
+        if (env.STATUS_KV) {
+          const cachedSummary = await env.STATUS_KV.get(cacheKey);
+          if (cachedSummary) {
+            return new Response(JSON.stringify({
+              success: true,
+              policy_summary: cachedSummary,
+              cached: true,
+              timestamp: new Date().toISOString()
+            }), {
+              status: 200, headers: { "Content-Type": "application/json", ...getCorsHeaders(env, request) }
+            });
+          }
+        }
+
+        const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
+        const { data: logs } = await supabase
+          .from("hitl_audit_logs")
+          .select("tool_type, status, metadata")
+          .in("status", ["approved", "rejected"])
+          .order("updated_at", { ascending: false })
+          .limit(10);
+
+        let policySummary = "Executive policy favors standard automated escalation with manual review for critical tools.";
+
+        if (env.AI && logs && logs.length > 0) {
+          try {
+            const promptText = `Analyze these executive decisions made by James Ellars and summarize his overall policy guidance in ONE concise sentence:\n${JSON.stringify(logs)}`;
+            const aiRes: any = await env.AI.run("@cf/meta/llama-3.1-8b-instruct", {
+              messages: [
+                { role: "system", content: "You are an executive operational analyst. Output exactly ONE sentence summarizing executive approval trends." },
+                { role: "user", content: promptText }
+              ]
+            });
+            const text = typeof aiRes.response === "string" ? aiRes.response : JSON.stringify(aiRes.response);
+            if (text.trim()) policySummary = text.trim();
+          } catch (aiErr) {
+            console.warn("[WORKERS_AI POLICY SYNTHESIS BYPASS]", aiErr);
+          }
+        }
+
+        // 2. Store in Cloudflare KV Cache (1 Hour TTL)
+        if (env.STATUS_KV && policySummary) {
+          ctx.waitUntil(env.STATUS_KV.put(cacheKey, policySummary, { expirationTtl: 3600 }));
+        }
+
+        return new Response(JSON.stringify({
+          success: true,
+          policy_summary: policySummary,
+          cached: false,
+          timestamp: new Date().toISOString()
+        }), {
+          status: 200, headers: { "Content-Type": "application/json", ...getCorsHeaders(env, request) }
+        });
+      } catch (err: any) {
+        return new Response(JSON.stringify({ error: err.message }), {
+          status: 500, headers: getCorsHeaders(env, request)
+        });
+      }
+    }
+
     // Inside fetch switch tree for POST /api/v1/executive/remind-stale:
     if (url.pathname === "/api/v1/executive/remind-stale" && request.method === "POST") {
       const authHeader = request.headers.get("Authorization") || "";
