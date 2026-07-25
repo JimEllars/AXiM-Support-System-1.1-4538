@@ -8,6 +8,17 @@ export class ErrorBoundary extends React.Component {
   componentDidCatch(error, errorInfo) { console.error("UI Caught Error:", error, errorInfo); }
   render() {
     if (this.state.hasError) {
+      if (this.props.fallback) {
+        return this.props.fallback;
+      }
+      if (this.props.inline) {
+        return (
+          <div className="flex items-center gap-2 p-3 bg-red-950/20 border border-red-900/30 rounded-xl text-red-400 text-xs font-mono">
+            <SafeIcon icon={FiAlertTriangle} />
+            <span>{this.state.error?.message || "Component Failed"}</span>
+          </div>
+        );
+      }
       return (
         <div className="flex flex-col items-center justify-center min-h-[400px] p-8 text-center bg-zinc-950 border border-red-900/30 rounded-2xl">
            <SafeIcon icon={FiAlertTriangle} className="text-4xl text-red-500 mb-4" />

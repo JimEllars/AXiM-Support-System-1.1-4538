@@ -3853,7 +3853,7 @@ async function handleTelemetryIngress(payload: any, env: Env, ctx: any, request:
 
     if (activeIncidentTrackerId) {
       // TELEMETRY DEBOUNCING ACTIVE: Deduplicate high-frequency floods under a single parent ticket note
-      ctx.waitUntil((async () => {
+      const debouncePromise = (async () => {
         const timestampMarker = new Date().toISOString();
         await supabase.from("ticket_messages").insert({
           ticket_id: activeIncidentTrackerId,
@@ -3861,7 +3861,8 @@ async function handleTelemetryIngress(payload: any, env: Env, ctx: any, request:
           message_body: `**[HIGH-FREQUENCY TELEMETRY ANOMALY BUNDLED]**\n\nDuplicate signal burst suppressed at edge node: \`${logCtx.edge_colo}\`.\nTimestamp: \`${timestampMarker}\`.\nTrace Block Details: ${incidentDescription}`,
           is_internal_note: true
         });
-      })());
+      })();
+      ctx.waitUntil(debouncePromise);
 
       return new Response(JSON.stringify({ success: true, debounced: true, ticket_id: activeIncidentTrackerId }), {
         status: 200, headers: { "Content-Type": "application/json", ...getCorsHeaders(env, request) }
@@ -3903,7 +3904,7 @@ async function handleTelemetryIngress(payload: any, env: Env, ctx: any, request:
     ctx.waitUntil(env.STATUS_KV.put(debouncingCacheKey, newTicket.id, { expirationTtl: 300 }));
 
     // Async background triage calculation thread invocation pass
-    ctx.waitUntil((async () => {
+    const backgroundTriagePromise = (async () => {
       const onyxAnalysis = await analyzeWithOnyx(newTicket.subject, incidentDescription, env.ANTHROPIC_API_KEY, null, null, "", env);
 
       const synchronizedMetrics = {
@@ -3912,15 +3913,25 @@ async function handleTelemetryIngress(payload: any, env: Env, ctx: any, request:
         ingest_method: "universal_telemetry_valve"
       };
 
-      await supabase.from("ticket_ai_telemetry").insert({
-        ticket_id: newTicket.id,
-        analyzed_sentiment: onyxAnalysis.sentiment,
-        suggested_category: onyxAnalysis.category,
-        auto_response_draft: onyxAnalysis.draft,
-        confidence_score: onyxAnalysis.confidence,
-        metadata: synchronizedMetrics
-      });
-    })());
+      try {
+        await supabase.from("ticket_ai_telemetry").insert({
+          ticket_id: newTicket.id,
+          analyzed_sentiment: onyxAnalysis.sentiment,
+          suggested_category: onyxAnalysis.category,
+          auto_response_draft: onyxAnalysis.draft,
+          confidence_score: onyxAnalysis.confidence,
+          metadata: synchronizedMetrics
+        });
+      } catch (insertErr: any) {
+         console.error("Telemetry insert failed:", insertErr);
+         if (env.STATUS_KV) {
+           // Fallback queue for telemetry
+           const fallbackKey = `failed_telemetry:${newTicket.id}:${Date.now()}`;
+           await env.STATUS_KV.put(fallbackKey, JSON.stringify(synchronizedMetrics), { expirationTtl: 86400 });
+         }
+      }
+    })();
+    ctx.waitUntil(backgroundTriagePromise);
 
     return new Response(JSON.stringify({ success: true, debounced: false, ticket_id: newTicket.id }), {
       status: 201, headers: { "Content-Type": "application/json", ...getCorsHeaders(env, request) }
