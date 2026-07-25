@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { FiCode, FiExternalLink, FiChevronDown, FiChevronRight, FiGitCommit, FiUser, FiCpu } from 'react-icons/fi';
+import { FiCode, FiExternalLink, FiChevronDown, FiChevronRight, FiGitCommit, FiUser, FiCpu, FiFileText, FiMail } from 'react-icons/fi';
 
 export default function MessageThread({ messages = [] }) {
   const [expandedDiffs, setExpandedDiffs] = useState({});
@@ -21,6 +21,8 @@ export default function MessageThread({ messages = [] }) {
     <div className="space-y-4 my-4">
       {messages.map((msg) => {
         const isGitOpsPatch = msg.metadata?.source_interlock === 'the_coding_lab' || msg.metadata?.patch_delta;
+        const isEmailInbound = msg.metadata?.source === 'emailit_inbound_webhook';
+        const hasParsedAttachments = msg.metadata?.has_parsed_attachments;
         const isSystem = msg.sender_id === 'onyx_system' || msg.sender_id === 'system' || isGitOpsPatch;
 
         return (
@@ -29,9 +31,11 @@ export default function MessageThread({ messages = [] }) {
             className={`p-4 rounded-2xl border transition-all ${
               isGitOpsPatch
                 ? 'bg-purple-950/20 border-purple-500/30 shadow-[0_0_15px_rgba(168,85,247,0.05)]'
-                : isSystem
-                  ? 'bg-zinc-900/50 border-zinc-800'
-                  : 'bg-black/40 border-zinc-800/60'
+                : isEmailInbound
+                  ? 'bg-sky-950/20 border-sky-500/30 shadow-[0_0_15px_rgba(14,165,233,0.05)]'
+                  : isSystem
+                    ? 'bg-zinc-900/50 border-zinc-800'
+                    : 'bg-black/40 border-zinc-800/60'
             }`}
           >
             {/* Header / Sender */}
@@ -39,19 +43,28 @@ export default function MessageThread({ messages = [] }) {
               <div className="flex items-center gap-2">
                 <div className={`w-6 h-6 rounded-lg flex items-center justify-center text-xs ${
                   isGitOpsPatch ? 'bg-purple-500/20 text-purple-400 border border-purple-500/30' :
+                  isEmailInbound ? 'bg-sky-500/20 text-sky-400 border border-sky-500/30' :
                   isSystem ? 'bg-emerald-500/20 text-emerald-400' : 'bg-zinc-800 text-zinc-300'
                 }`}>
-                  {isGitOpsPatch ? <FiCode/> : isSystem ? <FiCpu/> : <FiUser/>}
+                  {isGitOpsPatch ? <FiCode/> : isEmailInbound ? <FiMail/> : isSystem ? <FiCpu/> : <FiUser/>}
                 </div>
                 <span className="text-xs font-mono font-bold text-zinc-300">
-                  {isGitOpsPatch ? 'The Coding Lab Interlock' : msg.sender_id}
+                  {isGitOpsPatch ? 'The Coding Lab Interlock' : isEmailInbound ? `Inbound Email (\${msg.sender_id})` : msg.sender_id}
                 </span>
+
                 {msg.is_internal_note && (
                   <span className="text-[9px] font-mono bg-amber-500/10 text-amber-400 px-1.5 py-0.5 rounded border border-amber-500/20 uppercase">
                     Internal Note
                   </span>
                 )}
+
+                {hasParsedAttachments && (
+                  <span className="text-[9px] font-mono bg-emerald-500/10 text-emerald-400 px-1.5 py-0.5 rounded border border-emerald-500/20 uppercase flex items-center gap-1">
+                    <FiFileText className="text-[9px]"/> Workers AI Doc Parsed
+                  </span>
+                )}
               </div>
+
               <span className="text-[10px] font-mono text-zinc-500">
                 {msg.created_at ? new Date(msg.created_at).toLocaleTimeString() : ''}
               </span>
@@ -106,7 +119,6 @@ export default function MessageThread({ messages = [] }) {
         );
       })}
 
-      {/* Auto-Scroll Anchor Element */}
       <div ref={messagesEndRef} />
     </div>
   );
