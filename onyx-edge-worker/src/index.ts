@@ -693,6 +693,103 @@ export default {
       return new Response("Method Not Allowed", { status: 405 });
     }
 
+    // --- EXECUTIVE THREAD BRIEFING EXPORT ROUTE ---
+    if (url.pathname === "/api/v1/executive/export-thread" && request.method === "POST") {
+      const authHeader = request.headers.get("Authorization") || "";
+      const token = authHeader.replace("Bearer ", "").trim();
+      if (!token) {
+        return new Response(JSON.stringify({ error: "UNAUTHORIZED_EXPORT_REQUEST" }), {
+          status: 401, headers: getCorsHeaders(env, request)
+        });
+      }
+
+      const supabaseAuth = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY, {
+        global: { headers: { Authorization: `Bearer ${token}` } }
+      });
+      const { data: { user }, error: authError } = await supabaseAuth.auth.getUser();
+      if (authError || !user) {
+        return new Response(JSON.stringify({ error: "INVALID_OPERATOR_SESSION" }), {
+          status: 403, headers: getCorsHeaders(env, request)
+        });
+      }
+
+      try {
+        const payload: any = await request.json();
+        const { ticketId } = payload;
+        if (!ticketId) {
+          return new Response(JSON.stringify({ error: "TICKET_ID_REQUIRED" }), {
+            status: 400, headers: getCorsHeaders(env, request)
+          });
+        }
+
+        const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
+        const { data: ticket } = await supabase.from("support_tickets").select("*").eq("id", ticketId).single();
+        const { data: messages } = await supabase.from("ticket_messages").select("sender_id, message_body, created_at").eq("ticket_id", ticketId).order("created_at", { ascending: true });
+
+        if (!ticket) {
+          return new Response(JSON.stringify({ error: "TICKET_NOT_FOUND" }), {
+            status: 404, headers: getCorsHeaders(env, request)
+          });
+        }
+
+        let aiBriefing = "Thread history compiled for review.";
+        if (env.AI && messages && messages.length > 0) {
+          try {
+            const promptText = `Summarize this support thread for Executive James Ellars in 3 concise bullet points:\nSubject: ${ticket.subject}\nMessages:\n${messages.map((m: any) => `[${m.sender_id}]:${m.message_body}`).join("\n")}`;
+            const aiRes: any = await env.AI.run("@cf/meta/llama-3.1-8b-instruct", {
+              messages: [
+                { role: "system", content: "You are Onyx Executive AI. Output 3 concise bullet points." },
+                { role: "user", content: promptText }
+              ]
+            });
+            aiBriefing = typeof aiRes.response === "string" ? aiRes.response : JSON.stringify(aiRes.response);
+          } catch (aiErr) {
+            console.warn("[WORKERS_AI THREAD BRIEFING BYPASS]", aiErr);
+          }
+        }
+
+        const htmlBody = `
+          <div style="font-family: monospace; background: #09090b; color: #f4f4f5; padding: 24px; border-radius: 16px; border: 1px solid #27272a; max-width: 600px; margin: 0 auto;">
+            <h2 style="color: #38bdf8; margin-top: 0; font-size: 16px;">📋 EXECUTIVE TICKET BRIEFING</h2>
+            <p style="font-size: 12px; color: #a1a1aa;"><strong>Ticket:</strong> #${ticket.id.slice(0, 8)} - ${ticket.subject}</p>
+            <p style="font-size: 11px; color: #71717a;">Exported by Operator: ${user.email}</p>
+
+            <hr style="border: 0; border-top: 1px solid #27272a; margin: 16px 0;" />
+
+            <h3 style="color: #10b981; font-size: 13px;">AI SYNTHESIZED EXECUTIVE SUMMARY</h3>
+            <div style="font-size: 12px; color: #d4d4d8; line-height: 1.6; white-space: pre-wrap;">${aiBriefing}</div>
+
+            <hr style="border: 0; border-top: 1px solid #27272a; margin: 16px 0;" />
+            <p style="margin-bottom: 0; text-align: center;">
+              <a href="https://support.axim.us.com" style="color: #6366f1; font-weight: bold; text-decoration: none; font-size: 12px;">Open Ticket Workstation HUD &rarr;</a>
+            </p>
+          </div>
+        `;
+
+        const sent = await sendEmailItNotification(
+          "james.ellars@axim.us.com",
+          `📋 [EXECUTIVE BRIEFING] Ticket #${ticket.id.slice(0, 8)} Summary`,
+          htmlBody,
+          env
+        );
+
+        await supabase.from("events_ax2024").insert({
+          type: "thread_executive_briefing_exported",
+          payload: { ticket_id: ticketId, exported_by: user.email, success: sent, timestamp: new Date().toISOString() }
+        });
+
+        return new Response(JSON.stringify({ success: sent, recipient: "james.ellars@axim.us.com" }), {
+          status: sent ? 200 : 502,
+          headers: { "Content-Type": "application/json", ...getCorsHeaders(env, request) }
+        });
+      } catch (err: any) {
+        return new Response(JSON.stringify({ error: err.message }), {
+          status: 500, headers: getCorsHeaders(env, request)
+        });
+      }
+    }
+
+
     // --- AI EXECUTIVE POLICY SYNTHESIS ENDPOINT (KV CACHED) ---
     if (url.pathname === "/api/v1/executive/summary" && request.method === "GET") {
       try {
