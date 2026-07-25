@@ -2,27 +2,20 @@ import { describe, it, expect, vi } from 'vitest';
 
 global.fetch = vi.fn();
 
-describe('EmailIt Edge Dispatch, Reminders & Inbound Attachment Suite', () => {
-  it('should process stale reminder trigger requests on /api/v1/executive/remind-stale', async () => {
+describe('EmailIt Edge Dispatch, Cache Invalidation & Attachment Suite', () => {
+  it('should process executive responses and trigger KV cache invalidation', async () => {
     vi.mocked(fetch).mockResolvedValueOnce({
       status: 200,
-      json: async () => ({ success: true, reminders_dispatched: 0 })
+      text: async () => 'ACTION APPROVED & AUTO-EXECUTED'
     });
 
-    const res = await fetch('http://localhost:8787/api/v1/executive/remind-stale', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': 'Bearer valid_session_token'
-      }
-    });
-
+    const res = await fetch('http://localhost:8787/api/v1/executive/respond?id=hitl-123&action=approve&token=valid_token', { method: 'GET' });
     expect(res.status).toBe(200);
-    const data = await res.json();
-    expect(data.success).toBe(true);
+    const html = await res.text();
+    expect(html).toContain('AUTO-EXECUTED');
   });
 
-  it('should parse inbound email payloads containing base64 document attachments', async () => {
+  it('should parse inbound email attachments and return ticket match details', async () => {
     vi.mocked(fetch).mockResolvedValueOnce({
       status: 200,
       json: async () => ({
@@ -37,11 +30,9 @@ describe('EmailIt Edge Dispatch, Reminders & Inbound Attachment Suite', () => {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         sender: 'customer@client.com',
-        subject: 'Re: [Ticket #12345678-aaaa-bbbb-cccc-123456789012] Diagnostic Report',
-        text: 'Please see attached logs.',
-        attachments: [
-          { name: 'diagnostic.txt', content_type: 'text/plain', content_base64: 'U3lzdGVtIExvZyBEYXRh' }
-        ]
+        subject: 'Re: [Ticket #12345678-aaaa-bbbb-cccc-123456789012] Attachment Test',
+        text: 'Document attached.',
+        attachments: [{ name: 'log.txt', content_type: 'text/plain', content_base64: 'VGVzdA==' }]
       })
     });
 

@@ -827,6 +827,10 @@ export default {
         }
       });
 
+      if (env.STATUS_KV) {
+        ctx.waitUntil(env.STATUS_KV.delete("exec_policy_summary_v1"));
+      }
+
       const cardColor = action === "approve" ? "#10b981" : "#f43f5e";
       return new Response(`
         <div style="font-family: monospace; background: #09090b; color: #f4f4f5; padding: 40px; text-align: center; border-radius: 16px; max-width: 500px; margin: 50px auto; border: 1px solid #27272a;">
@@ -930,6 +934,10 @@ export default {
               type: "executive_text_response_ingested",
               payload: { hitl_id: hitlId, action: newStatus, sender, timestamp: new Date().toISOString() }
             });
+          }
+
+          if (isExecutive && hitlId && env.STATUS_KV) {
+            ctx.waitUntil(env.STATUS_KV.delete("exec_policy_summary_v1"));
           }
         }
 
