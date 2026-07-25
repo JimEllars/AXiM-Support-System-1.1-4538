@@ -1,8 +1,9 @@
 import React, { useState } from 'react';
 import { FiFeather, FiCopy, FiCheck, FiCornerDownLeft } from 'react-icons/fi';
 import toast from 'react-hot-toast';
+import { ErrorBoundary } from '../layout/ErrorBoundary';
 
-export default function AutoDraftWhisper({ draftText, onApplyDraft }) {
+function AutoDraftWhisperContent({ draftText, onApplyDraft }) {
   const [copied, setCopied] = useState(false);
 
   if (!draftText) return null;
@@ -59,5 +60,13 @@ export default function AutoDraftWhisper({ draftText, onApplyDraft }) {
         {draftText}
       </p>
     </div>
+  );
+}
+
+export default function AutoDraftWhisper(props) {
+  return (
+    <ErrorBoundary inline={true}>
+      <AutoDraftWhisperContent {...props} />
+    </ErrorBoundary>
   );
 }

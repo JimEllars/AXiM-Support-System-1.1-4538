@@ -9,6 +9,36 @@ export const useAuthStore = create((set) => ({
 
   setSession: async (session) => {
     if (!session) {
+      // Try to silently re-verify if session null arrives from a transient network blip
+      const currentLocalUser = useAuthStore.getState().user;
+      if (currentLocalUser) {
+        try {
+          const retries = 3;
+          for (let i = 0; i < retries; i++) {
+            try {
+              const { data: { session: newSession }, error: refreshError } = await supabase.auth.getSession();
+              if (!refreshError && newSession) {
+                console.log("[AuthGuard] Successfully recovered transient session drop.");
+                set({
+                  user: newSession.user,
+                  session: newSession,
+                  isAuthenticated: true
+                });
+                return;
+              }
+            } catch (err) {
+              console.warn(`[AuthGuard] Session retry ${i + 1} failed:`, err);
+            }
+            // Exponential backoff: 500ms, 1000ms, 2000ms
+            await new Promise(res => setTimeout(res, 500 * Math.pow(2, i)));
+          }
+          console.warn("[AuthGuard] Exhausted retries. Dropping session.");
+        } catch (fatalErr) {
+          console.error("[AuthGuard] Fatal failure during session recovery loop:", fatalErr);
+        }
+      }
+
+      // If we completely exhausted retries or didn't have a user, do hard reset
       set({ session: null, user: null, activeOrganization: null, isAuthenticated: false });
       return;
     }

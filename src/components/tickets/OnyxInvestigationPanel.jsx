@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { FiCpu, FiClock, FiActivity, FiLayers, FiHelpCircle, FiGlobe } from 'react-icons/fi';
 import { supabase } from '../../lib/supabaseClient';
+import { ErrorBoundary } from '../layout/ErrorBoundary';
 
-export default function OnyxInvestigationPanel({ ticketId }) {
+function OnyxInvestigationPanelContent({ ticketId }) {
   const [telemetry, setTelemetry] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
 
@@ -120,5 +121,11 @@ export default function OnyxInvestigationPanel({ ticketId }) {
         </p>
       </div>
     </div>
+  );
+}export default function OnyxInvestigationPanel(props) {
+  return (
+    <ErrorBoundary inline={true}>
+      <OnyxInvestigationPanelContent {...props} />
+    </ErrorBoundary>
   );
 }

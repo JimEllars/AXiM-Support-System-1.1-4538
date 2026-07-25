@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { FiInbox, FiAlertCircle, FiCheckCircle, FiUserCheck } from 'react-icons/fi';
+import { FiInbox, FiAlertCircle, FiCheckCircle, FiUserCheck, FiCpu } from 'react-icons/fi';
 import { supabase } from '../../lib/supabaseClient';
 
 export default function SupportMetrics() {
@@ -7,7 +7,8 @@ export default function SupportMetrics() {
     openCount: 0,
     urgentCount: 0,
     resolved24h: 0,
-    pendingExecutiveInputs: 0
+    pendingExecutiveInputs: 0,
+    curatedInsights: 0
   });
 
   useEffect(() => {
@@ -36,11 +37,17 @@ export default function SupportMetrics() {
           .select('id', { count: 'exact', head: true })
           .eq('status', 'pending');
 
+        const { count: curatedAI } = await supabase
+          .from('ticket_ai_telemetry')
+          .select('id', { count: 'exact', head: true })
+          .eq('is_curated', true);
+
         setMetrics({
           openCount: open || 0,
           urgentCount: urgent || 0,
           resolved24h: resolved || 0,
-          pendingExecutiveInputs: pendingHitl || 0
+          pendingExecutiveInputs: pendingHitl || 0,
+          curatedInsights: curatedAI || 0
         });
       } catch (err) {
         console.error('Failed to load support metrics:', err);
@@ -53,7 +60,7 @@ export default function SupportMetrics() {
   }, []);
 
   return (
-    <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 font-mono">
+    <div className="grid grid-cols-2 lg:grid-cols-5 gap-4 font-mono">
       {/* Active Queue Card */}
       <div className="p-4 rounded-2xl bg-zinc-950/60 border border-zinc-800/80 backdrop-blur-md flex items-center justify-between">
         <div>
@@ -95,6 +102,16 @@ export default function SupportMetrics() {
         </div>
         <div className="w-9 h-9 rounded-xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-center text-amber-400">
           <FiUserCheck className="text-base"/>
+        </div>
+      </div>
+      {/* Curated AI Insights Card */}
+      <div className="p-4 rounded-2xl bg-zinc-950/60 border border-zinc-800/80 backdrop-blur-md flex items-center justify-between">
+        <div>
+          <span className="text-[10px] text-zinc-500 font-bold uppercase tracking-wider">Curated AI Insights</span>
+          <div className="text-xl font-bold text-fuchsia-400 mt-1">{metrics.curatedInsights}</div>
+        </div>
+        <div className="w-9 h-9 rounded-xl bg-fuchsia-500/10 border border-fuchsia-500/20 flex items-center justify-center text-fuchsia-400">
+          <FiCpu className="text-base"/>
         </div>
       </div>
     </div>
