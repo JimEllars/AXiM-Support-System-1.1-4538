@@ -7,38 +7,81 @@ import Customer360 from '../components/tickets/Customer360';
 import KBSidebar from '../components/tickets/KBSidebar';
 import SLABadge from '../components/tickets/SLABadge';
 import AgentPresence from '../components/AgentPresence';
-import { FiSend, FiPaperclip, FiRefreshCw, FiCommand, FiAlertCircle } from 'react-icons/fi';
+import { FiSend, FiPaperclip, FiRefreshCw, FiCommand, FiBell, FiMail } from 'react-icons/fi';
 import toast from 'react-hot-toast';
 import { supabase } from '../lib/supabaseClient';
+import { getEdgeWorkerUrl } from '../lib/edgeWorkerUrl';
 
 export default function TicketDetail({ ticketId }) {
-  const { activeTicket, activeThreadMessages, selectTicket, isLoading, isCoreOnline } = useTicketStore();
+  const { activeTicket, activeThreadMessages, selectTicket, isLoading } = useTicketStore();
   const [replyText, setReplyText] = useState('');
   const [isSending, setIsSending] = useState(false);
+  const [isExporting, setIsExporting] = useState(false);
   const [isTyping, setIsTyping] = useState(false);
+  const [hasNewIncoming, setHasNewIncoming] = useState(false);
+  const prevMessageCountRef = useRef(activeThreadMessages?.length || 0);
   const composerRef = useRef(null);
   const typingTimeoutRef = useRef(null);
 
   useEffect(() => {
     if (ticketId) {
       selectTicket(ticketId);
+      setHasNewIncoming(false);
     }
   }, [ticketId, selectTicket]);
 
+  useEffect(() => {
+    if (activeThreadMessages && activeThreadMessages.length > prevMessageCountRef.current) {
+      if (replyText.trim().length > 0) {
+        setHasNewIncoming(true);
+      }
+    }
+    prevMessageCountRef.current = activeThreadMessages?.length || 0;
+  }, [activeThreadMessages?.length, replyText]);
+
   const handleApplyDraft = (draftText) => {
-    setReplyText(prev => prev ? prev + '\n\n' + draftText : draftText);
+    setReplyText((prev) => (prev ? `${prev}\n\n${draftText}` : draftText));
     if (composerRef.current) {
       composerRef.current.focus();
     }
   };
 
+  const handleExportBriefing = async () => {
+    if (isExporting || !activeTicket) return;
+    setIsExporting(true);
+
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const token = session?.access_token;
+      if (!token) throw new Error("Active session token required.");
+
+      const workerUrl = getEdgeWorkerUrl();
+      const res = await fetch(`${workerUrl}/api/v1/executive/export-thread`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({ ticketId: activeTicket.id })
+      });
+
+      const data = await res.json();
+      if (!res.ok || !data.success) throw new Error(data.error || 'Failed to export briefing.');
+
+      toast.success("Executive thread briefing emailed to james.ellars@axim.us.com!", {
+        style: { background: '#09090b', color: '#10b981', border: '1px solid rgba(16,185,129,0.3)' }
+      });
+    } catch (err) {
+      toast.error(`Briefing Export Error: ${err.message}`);
+    } finally {
+      setIsExporting(false);
+    }
+  };
+
   const handleTextChange = (e) => {
     setReplyText(e.target.value);
-
-    // Broadcast typing state
     if (!isTyping) setIsTyping(true);
 
-    // Debounce typing state timeout
     if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
     typingTimeoutRef.current = setTimeout(() => {
       setIsTyping(false);
@@ -56,6 +99,7 @@ export default function TicketDetail({ ticketId }) {
 
     setIsSending(true);
     setIsTyping(false);
+    setHasNewIncoming(false);
     if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
 
     try {
@@ -96,7 +140,6 @@ export default function TicketDetail({ ticketId }) {
   }
 
   const sampleDraft = activeTicket.metadata?.auto_response_draft || null;
-  const isIncomingThread = activeThreadMessages && activeThreadMessages.length > 0 && activeThreadMessages[activeThreadMessages.length - 1].sender_id !== 'operator';
 
   return (
     <div className="flex flex-col h-full space-y-6 overflow-y-auto pr-2">
@@ -105,13 +148,24 @@ export default function TicketDetail({ ticketId }) {
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div className="flex items-center gap-3">
             <span className="text-xs font-mono font-bold text-zinc-400">#{activeTicket.id.slice(0, 8)}</span>
-            <SLABadge priority={activeTicket.priority} status={activeTicket.status}/>
-            {/* Live Co-pilot Presence & Typing Tracker */}
-            <AgentPresence isTypingLocal={isTyping} ticketId={activeTicket.id}/>
+            <SLABadge priority={activeTicket.priority} status={activeTicket.status} />
+            <AgentPresence isTypingLocal={isTyping} ticketId={activeTicket.id} />
           </div>
-          <span className="text-[10px] font-mono text-zinc-500">
-            {new Date(activeTicket.created_at).toLocaleString()}
-          </span>
+
+          <div className="flex items-center gap-3">
+            <button
+              onClick={handleExportBriefing}
+              disabled={isExporting}
+              className="flex items-center gap-1.5 px-3 py-1 rounded-xl text-[10px] font-mono font-bold uppercase text-sky-300 bg-sky-500/10 border border-sky-500/20 hover:bg-sky-500/20 transition-all disabled:opacity-50"
+              title="Summarize and email thread briefing to Mr. Ellars"
+            >
+              <FiMail className={isExporting ? "animate-spin" : ""} />
+              <span>{isExporting ? 'Exporting...' : 'Email Briefing'}</span>
+            </button>
+            <span className="text-[10px] font-mono text-zinc-500">
+              {new Date(activeTicket.created_at).toLocaleString()}
+            </span>
+          </div>
         </div>
         <h2 className="text-lg font-bold text-white tracking-tight">{activeTicket.subject}</h2>
         <p className="text-xs text-zinc-400 font-sans leading-relaxed">{activeTicket.description}</p>
@@ -119,15 +173,30 @@ export default function TicketDetail({ ticketId }) {
 
       {/* Main Workstation Grid */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-        {/* Left Column: Investigation & Message Thread */}
         <div className="lg:col-span-8 space-y-6">
-          <OnyxInvestigationPanel ticketId={activeTicket.id}/>
+          <OnyxInvestigationPanel ticketId={activeTicket.id} />
 
           {sampleDraft && (
-            <AutoDraftWhisper draftText={sampleDraft} onApplyDraft={handleApplyDraft}/>
+            <AutoDraftWhisper draftText={sampleDraft} onApplyDraft={handleApplyDraft} />
           )}
 
-          <MessageThread messages={activeThreadMessages}/>
+          <MessageThread messages={activeThreadMessages} />
+
+          {hasNewIncoming && (
+            <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-between text-xs font-mono text-amber-300 animate-pulse">
+              <div className="flex items-center gap-2">
+                <FiBell className="text-amber-400"/>
+                <span>New activity received in thread while composing reply.</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setHasNewIncoming(false)}
+                className="text-[10px] uppercase font-bold text-amber-400 hover:underline"
+              >
+                Dismiss
+              </button>
+            </div>
+          )}
 
           {/* Reply Composer Form */}
           <form onSubmit={handleSendMessage} className="p-4 rounded-2xl bg-zinc-950/80 border border-zinc-800/80 space-y-3">
@@ -137,14 +206,6 @@ export default function TicketDetail({ ticketId }) {
                 <FiCommand className="text-[9px]"/> + Enter to send
               </span>
             </div>
-
-            {isIncomingThread && (
-              <div className="flex items-center gap-2 p-2 rounded-lg bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 text-xs font-mono mb-2">
-                <FiAlertCircle />
-                <span>Incoming message detected in thread. Review before replying.</span>
-              </div>
-            )}
-
             <textarea
               ref={composerRef}
               value={replyText}
@@ -165,7 +226,7 @@ export default function TicketDetail({ ticketId }) {
               </button>
               <button
                 type="submit"
-                disabled={!replyText.trim() || isSending || (!isCoreOnline && !activeTicket)}
+                disabled={!replyText.trim() || isSending}
                 className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-mono font-bold uppercase bg-emerald-500 hover:bg-emerald-400 text-black border border-emerald-400/20 transition-all disabled:opacity-50"
               >
                 <FiSend/>
@@ -175,10 +236,9 @@ export default function TicketDetail({ ticketId }) {
           </form>
         </div>
 
-        {/* Right Column: Customer360 & KB Assistant */}
         <div className="lg:col-span-4 space-y-6">
-          <Customer360 ticketId={activeTicket.id}/>
-          <KBSidebar ticketId={activeTicket.id} onAttachPlaybook={handleApplyDraft}/>
+          <Customer360 ticketId={activeTicket.id} />
+          <KBSidebar onAttachPlaybook={handleApplyDraft} ticketId={activeTicket.id} />
         </div>
       </div>
     </div>
