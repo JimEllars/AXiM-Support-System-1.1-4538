@@ -602,6 +602,69 @@ async function generateAndSendExecutiveDigest(env: Env): Promise<boolean> {
   );
 }
 
+// --- STALE HITL REMINDER DISPATCH ENGINE ---
+async function checkAndSendStaleHitlReminders(env: Env): Promise<number> {
+  const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
+  const twelveHoursAgoISO = new Date(Date.now() - 12 * 60 * 60 * 1000).toISOString();
+
+  // Query pending HITL logs older than 12 hours
+  const { data: staleItems } = await supabase
+    .from("hitl_audit_logs")
+    .select("id, tool_type, support_ticket_id, created_at")
+    .eq("status", "pending")
+    .lt("created_at", twelveHoursAgoISO);
+
+  if (!staleItems || staleItems.length === 0) {
+    return 0;
+  }
+
+  let sentCount = 0;
+  for (const item of staleItems) {
+    const approveToken = await generateHitlActionToken(item.id, env.AXIM_SERVICE_KEY || "axim-default-key");
+    const approveUrl = `${env.SUPABASE_URL}/functions/v1/onyx-edge-worker/api/v1/executive/respond?id=${item.id}&action=approve&token=${approveToken}`;
+    const rejectUrl = `${env.SUPABASE_URL}/functions/v1/onyx-edge-worker/api/v1/executive/respond?id=${item.id}&action=reject&token=${approveToken}`;
+
+    const reminderHtml = `
+      <div style="font-family: monospace; background: #09090b; color: #f4f4f5; padding: 24px; border-radius: 16px; border: 1px solid #f43f5e; max-width: 550px; margin: 0 auto;">
+        <h2 style="color: #f43f5e; margin-top: 0; font-size: 16px;">⚠️ [URGENT STALE DECISION NOTICE] Approval Pending >12 Hours</h2>
+        <p style="color: #a1a1aa; font-size: 12px;">The following Human-in-the-Loop action proposal requires executive intervention:</p>
+
+        <div style="background: #18181b; padding: 14px; border-radius: 8px; border: 1px solid #27272a; margin: 16px 0;">
+          <p style="margin: 0 0 6px 0; font-size: 13px;"><strong>Tool Action:</strong> ${item.tool_type}</p>
+          <p style="margin: 0 0 6px 0; font-size: 12px; color: #a1a1aa;"><strong>Ticket ID:</strong> #${item.support_ticket_id?.slice(0, 8) || 'N/A'}</p>
+          <p style="margin: 0 0 12px 0; font-size: 11px; color: #71717a;">Created: ${new Date(item.created_at).toUTCString()}</p>
+
+          <div style="display: flex; gap: 10px;">
+            <a href="${approveUrl}" style="background: #10b981; color: #000; padding: 8px 14px; font-weight: bold; border-radius: 6px; text-decoration: none; font-size: 11px;">APPROVE NOW</a>
+            <a href="${rejectUrl}" style="background: #f43f5e; color: #fff; padding: 8px 14px; font-weight: bold; border-radius: 6px; text-decoration: none; font-size: 11px;">REJECT ACTION</a>
+          </div>
+        </div>
+
+        <p style="margin-bottom: 0; font-size: 11px; color: #71717a;">
+          <a href="[https://support.axim.us.com](https://support.axim.us.com)" style="color: #6366f1; font-weight: bold; text-decoration: none;">View in Support Cockpit HUD &rarr;</a>
+        </p>
+      </div>
+    `;
+
+    const ok = await sendEmailItNotification(
+      "james.ellars@axim.us.com",
+      `⚠️ [STALE DECISION NOTICE] Action Required for HITL #${item.id.slice(0, 8)}`,
+      reminderHtml,
+      env
+    );
+
+    if (ok) {
+      sentCount++;
+      await supabase.from("events_ax2024").insert({
+        type: "stale_hitl_reminder_dispatched",
+        payload: { hitl_id: item.id, recipient: "james.ellars@axim.us.com", timestamp: new Date().toISOString() }
+      });
+    }
+  }
+
+  return sentCount;
+}
+
 export default {
   async scheduled(event: any, env: Env, ctx: any) {
     ctx.waitUntil(generateAndSendDailyDigest(env));
@@ -609,6 +672,7 @@ export default {
     ctx.waitUntil(handleSLASweep(env));
     ctx.waitUntil(handleDataRetentionSweep(env));
     ctx.waitUntil(handleStaleTicketSweep(env));
+    ctx.waitUntil(checkAndSendStaleHitlReminders(env));
   },
   async fetch(request: Request, env: Env, ctx: any): Promise<Response> {
     const url = new URL(request.url);
@@ -627,6 +691,22 @@ export default {
 
     if (request.method !== "POST" && request.method !== "GET") {
       return new Response("Method Not Allowed", { status: 405 });
+    }
+
+    // Inside fetch switch tree for POST /api/v1/executive/remind-stale:
+    if (url.pathname === "/api/v1/executive/remind-stale" && request.method === "POST") {
+      const authHeader = request.headers.get("Authorization") || "";
+      const token = authHeader.replace("Bearer ", "").trim();
+      if (!token) {
+        return new Response(JSON.stringify({ error: "UNAUTHORIZED_REMINDER_REQUEST" }), {
+          status: 401, headers: getCorsHeaders(env, request)
+        });
+      }
+
+      const sentCount = await checkAndSendStaleHitlReminders(env);
+      return new Response(JSON.stringify({ success: true, reminders_dispatched: sentCount }), {
+        status: 200, headers: { "Content-Type": "application/json", ...getCorsHeaders(env, request) }
+      });
     }
 
     // --- INBOUND EXECUTIVE RESPONSE INGESTION ROUTE ---
@@ -738,41 +818,77 @@ export default {
         const payload: any = await request.json();
         const sender = payload.from || payload.sender || "unknown@external.com";
         const subject = payload.subject || "";
-        const bodyText = payload.text || payload.plain_body || payload.html || "Empty email body.";
+        let bodyText = payload.text || payload.plain_body || payload.html || "Empty email body.";
 
-        // Extract ticket UUID from subject format e.g. "Re: [Ticket #12345678] Subject"
-        const ticketMatch = subject.match(/\[Ticket #([a-f0-9-]+)\]/i);
-        const ticketId = ticketMatch ? ticketMatch[1] : null;
+        // Pre-process inbound email attachments via Workers AI toMarkdown
+        if (env.AI && payload.attachments && Array.isArray(payload.attachments)) {
+          for (const att of payload.attachments) {
+            if (att.content_base64 && att.name) {
+              try {
+                const fileBuffer = Uint8Array.from(atob(att.content_base64), c => c.charCodeAt(0));
+                const markdownResult = await env.AI.toMarkdown({
+                  name: att.name,
+                  blob: new Blob([fileBuffer], { type: att.content_type || 'application/octet-stream' })
+                });
+
+                if (markdownResult?.data) {
+                  bodyText += `\n\n--- Attached Document Markdown (${att.name}) ---\n${markdownResult.data}`;
+                }
+              } catch (attErr) {
+                console.warn(`[INBOUND ATTACHMENT MARKDOWN FAULT] Failed to parse ${att.name}:`, attErr);
+              }
+            }
+          }
+        }
 
         const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
 
-        if (ticketId) {
-          // Verify ticket exists
-          const { data: ticket } = await supabase.from("support_tickets").select("id").eq("id", ticketId).single();
+        // Smart Executive Directive Text Parser
+        const isExecutive = sender.toLowerCase().includes("james.ellars@axim.us.com");
+        const hitlMatch = bodyText.match(/\[HITL #([a-f0-9-]+)\]/i) || subject.match(/\[HITL #([a-f0-9-]+)\]/i);
+        const hitlId = hitlMatch ? hitlMatch[1] : null;
 
+        if (isExecutive && hitlId) {
+          const isApprove = /\[APPROVE\]/i.test(bodyText) || /approve/i.test(bodyText);
+          const isReject = /\[REJECT\]/i.test(bodyText) || /reject/i.test(bodyText);
+
+          if (isApprove || isReject) {
+            const newStatus = isApprove ? "approved" : "rejected";
+            await supabase.from("hitl_audit_logs").update({
+              status: newStatus,
+              updated_at: new Date().toISOString(),
+              metadata: { executive_responder: sender, method: "email_text_reply" }
+            }).eq("id", hitlId);
+
+            await supabase.from("events_ax2024").insert({
+              type: "executive_text_response_ingested",
+              payload: { hitl_id: hitlId, action: newStatus, sender, timestamp: new Date().toISOString() }
+            });
+          }
+        }
+
+        // Match Ticket UUID
+        const ticketMatch = subject.match(/\[Ticket #([a-f0-9-]+)\]/i);
+        const ticketId = ticketMatch ? ticketMatch[1] : null;
+
+        if (ticketId) {
+          const { data: ticket } = await supabase.from("support_tickets").select("id").eq("id", ticketId).single();
           if (ticket) {
             await supabase.from("ticket_messages").insert({
               ticket_id: ticket.id,
               sender_id: sender,
               message_body: `**[📧 INBOUND EMAIL RECEIVED]**\n\n${bodyText.trim()}`,
               is_internal_note: false,
-              metadata: { source: "emailit_inbound_webhook", original_subject: subject }
+              metadata: { source: "emailit_inbound_webhook", original_subject: subject, has_parsed_attachments: !!payload.attachments?.length }
             });
           }
         }
 
-        // Log inbound email telemetry
-        await supabase.from("events_ax2024").insert({
-          type: "inbound_email_ingested",
-          payload: {
-            sender,
-            subject,
-            matched_ticket_id: ticketId,
-            timestamp: new Date().toISOString()
-          }
-        });
-
-        return new Response(JSON.stringify({ success: true, matched_ticket_id: ticketId }), {
+        return new Response(JSON.stringify({
+          success: true,
+          matched_ticket_id: ticketId,
+          executive_directive_parsed: isExecutive && !!hitlId
+        }), {
           status: 200, headers: { "Content-Type": "application/json", ...getCorsHeaders(env, request) }
         });
       } catch (err: any) {
