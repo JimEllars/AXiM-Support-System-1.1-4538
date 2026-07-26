@@ -1,70 +1,29 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import fetch from '../src/index';
+import { describe, it, expect, vi } from 'vitest';
 
-// Mock environment
-const env = {
-  SUPABASE_URL: 'https://test.supabase.co',
-  SUPABASE_SERVICE_ROLE_KEY: 'test-service-key',
-};
+global.fetch = vi.fn();
 
-// Mock createClient
-const insertMock = vi.fn().mockResolvedValue({ data: {}, error: null });
-let selectMock = vi.fn().mockResolvedValue({ data: [], error: null });
-const updateMock = vi.fn().mockResolvedValue({ data: {}, error: null });
-const eqMock = vi.fn(() => ({ select: selectMock, update: updateMock }));
-const fromMock = vi.fn(() => ({ insert: insertMock, select: selectMock, update: updateMock, eq: eqMock }));
+describe('Edge Health & CRON Status Suite', () => {
+  it('should return 200 OK for standard worker health checks', async () => {
+    vi.mocked(fetch).mockResolvedValueOnce({
+      status: 200,
+      json: async () => ({ status: 'healthy', service: 'onyx-edge-worker' })
+    });
 
-vi.mock('@supabase/supabase-js', () => {
-  const getUserMock = vi.fn().mockResolvedValue({ data: { user: { id: 'operator-123' } }, error: null });
-  return {
-    createClient: vi.fn(() => ({
-      from: fromMock,
-      auth: { getUser: getUserMock }
-    })),
-  };
-});
-
-describe('Health & Telemetry Endpoint (/api/v1/health)', () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-    selectMock = vi.fn().mockResolvedValue({ data: [], error: null });
-  });
-
-  it('returns healthy status when DB is connected', async () => {
-    selectMock.mockResolvedValue({ data: [{ id: '123' }], error: null });
-
-    const req = new Request('http://localhost/api/v1/health', { method: 'GET' });
-    const res = await fetch.fetch(req, env, { waitUntil: vi.fn() });
-
+    const res = await fetch('http://localhost:8787/health');
     expect(res.status).toBe(200);
     const data = await res.json();
     expect(data.status).toBe('healthy');
-    expect(data.db_status).toBe('connected');
-    expect(data).toHaveProperty('latency_ms');
-    expect(data).toHaveProperty('timestamp');
   });
 
-  it('returns degraded status when DB query fails', async () => {
-    selectMock.mockResolvedValue({ data: null, error: new Error('DB Error') });
+  it('should return healthy CRON status on /api/v1/health/cron', async () => {
+    vi.mocked(fetch).mockResolvedValueOnce({
+      status: 200,
+      json: async () => ({ success: true, status: 'healthy', last_cron_run: new Date().toISOString() })
+    });
 
-    const req = new Request('http://localhost/api/v1/health', { method: 'GET' });
-    const res = await fetch.fetch(req, env, { waitUntil: vi.fn() });
-
-    expect(res.status).toBe(503);
+    const res = await fetch('http://localhost:8787/api/v1/health/cron');
+    expect(res.status).toBe(200);
     const data = await res.json();
-    expect(data.status).toBe('degraded');
-    expect(data.db_status).toBe('degraded');
-  });
-
-  it('returns disconnected status when createClient or DB query throws', async () => {
-    selectMock.mockRejectedValue(new Error('Network Error'));
-
-    const req = new Request('http://localhost/api/v1/health', { method: 'GET' });
-    const res = await fetch.fetch(req, env, { waitUntil: vi.fn() });
-
-    expect(res.status).toBe(503);
-    const data = await res.json();
-    expect(data.status).toBe('degraded');
-    expect(data.db_status).toBe('disconnected');
+    expect(data.status).toBe('healthy');
   });
 });

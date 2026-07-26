@@ -1,0 +1,2 @@
+In SPRINT 6.3 / PHASE 147, we added CRON health pulse indicators and executive receipt email confirmations.
+When dealing with user-provided JSX snippets that have syntax errors (like mangled template literals or incorrect react-icons imports, e.g. FiCheckCircle2 instead of FiCheckCircle), it's important to correct them to ensure the build passes.
