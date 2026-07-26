@@ -183,6 +183,7 @@ async function logToEvents(
 }
 
 export interface Env {
+  EMAILIT_WEBHOOK_SECRET?: string;
   AXIM_TELEMETRY_SECRET: string;
   TURNSTILE_SECRET_KEY: string;
   ADMIN_EMAIL?: string;
@@ -665,6 +666,27 @@ async function checkAndSendStaleHitlReminders(env: Env): Promise<number> {
   return sentCount;
 }
 
+
+// --- WEBHOOK HMAC SIGNATURE VERIFIER ---
+async function verifyEmailItWebhookSignature(rawBody: string, signature: string, secret: string): Promise<boolean> {
+  if (!signature || !secret) return false;
+  try {
+    const encoder = new TextEncoder();
+    const cryptoKey = await crypto.subtle.importKey(
+      "raw",
+      encoder.encode(secret),
+      { name: "HMAC", hash: "SHA-256" },
+      false,
+      ["sign"]
+    );
+    const sigBuffer = await crypto.subtle.sign("HMAC", cryptoKey, encoder.encode(rawBody));
+    const expectedSig = Array.from(new Uint8Array(sigBuffer)).map(b => b.toString(16).padStart(2, "0")).join("");
+    return signature === expectedSig;
+  } catch (e) {
+    return false;
+  }
+}
+
 export default {
   async scheduled(event: any, env: Env, ctx: any) {
     ctx.waitUntil(generateAndSendDailyDigest(env));
@@ -1101,12 +1123,41 @@ export default {
     // --- INBOUND EMAIL WEBHOOK INGESTION ROUTE ---
     if (url.pathname === "/api/v1/email/inbound" && request.method === "POST") {
       try {
-        const payload: any = await request.json();
+        const rawBody = await request.text();
+        const signature = request.headers.get("X-EmailIt-Signature") || "";
+
+        // 1. Webhook Signature Verification (If secret configured)
+        if (env.EMAILIT_WEBHOOK_SECRET) {
+          const isValid = await verifyEmailItWebhookSignature(rawBody, signature, env.EMAILIT_WEBHOOK_SECRET);
+          if (!isValid) {
+            return new Response(JSON.stringify({ error: "INVALID_WEBHOOK_SIGNATURE" }), {
+              status: 401, headers: getCorsHeaders(env, request)
+            });
+          }
+        }
+
+        const payload: any = JSON.parse(rawBody || "{}");
         const sender = payload.from || payload.sender || "unknown@external.com";
         const subject = payload.subject || "";
+
+        // 2. Cloudflare KV Rate-Limiting (30 requests / minute)
+        if (env.STATUS_KV) {
+          const clientIp = request.headers.get("CF-Connecting-IP") || sender;
+          const rateKey = `rate_inbound_${clientIp}`;
+          const currentCount = parseInt((await env.STATUS_KV.get(rateKey)) || "0", 10);
+
+          if (currentCount >= 30) {
+            return new Response(JSON.stringify({ error: "RATE_LIMIT_EXCEEDED" }), {
+              status: 429, headers: getCorsHeaders(env, request)
+            });
+          }
+
+          await env.STATUS_KV.put(rateKey, (currentCount + 1).toString(), { expirationTtl: 60 });
+        }
+
         let bodyText = payload.text || payload.plain_body || payload.html || "Empty email body.";
 
-        // Pre-process inbound email attachments via Workers AI toMarkdown
+        // Pre-process attachments via Workers AI toMarkdown
         if (env.AI && payload.attachments && Array.isArray(payload.attachments)) {
           for (const att of payload.attachments) {
             if (att.content_base64 && att.name) {
@@ -1121,7 +1172,7 @@ export default {
                   bodyText += `\n\n--- Attached Document Markdown (${att.name}) ---\n${markdownResult.data}`;
                 }
               } catch (attErr) {
-                console.warn(`[INBOUND ATTACHMENT MARKDOWN FAULT] Failed to parse ${att.name}:`, attErr);
+                console.warn(`[ATTACHMENT MARKDOWN FAULT] Failed to parse ${att.name}:`, attErr);
               }
             }
           }
@@ -1129,9 +1180,9 @@ export default {
 
         const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
 
-        // Smart Executive Directive Text Parser
+        // Smart Executive Directive Parser
         const isExecutive = sender.toLowerCase().includes("james.ellars@axim.us.com");
-        const hitlMatch = bodyText.match(/\[HITL #([a-f0-9-]+)\]/i) || subject.match(/\[HITL #([a-f0-9-]+)\]/i);
+        const hitlMatch = bodyText.match(/\[HITL #([a-f0-9-]+)\]/i) || payload.subject?.match(/\[HITL #([a-f0-9-]+)\]/i);
         const hitlId = hitlMatch ? hitlMatch[1] : null;
 
         if (isExecutive && hitlId) {
@@ -1146,47 +1197,24 @@ export default {
               metadata: { executive_responder: sender, method: "email_text_reply" }
             }).eq("id", hitlId);
 
-            await supabase.from("events_ax2024").insert({
-              type: "executive_text_response_ingested",
-              payload: { hitl_id: hitlId, action: newStatus, sender, timestamp: new Date().toISOString() }
-            });
-          }
-
-          if (isExecutive && hitlId && env.STATUS_KV) {
-            ctx.waitUntil(env.STATUS_KV.delete("exec_policy_summary_v1"));
-          }
-        }
-
-        // Inside POST /api/v1/email/inbound handler after parsing executive text directive:
-        if (isExecutive && hitlId) {
-          const sendInboundPromise = (async () => {
-            let sendInstant = true;
             if (env.STATUS_KV) {
-              const raw = await env.STATUS_KV.get("email_prefs_global");
-              if (raw) {
-                try {
-                  const prefs = JSON.parse(raw);
-                  if (prefs.instant_receipts === false) sendInstant = false;
-                } catch (e) {}
-              }
+              ctx.waitUntil(env.STATUS_KV.delete("exec_policy_summary_v1"));
             }
-            if (sendInstant) {
-              await sendEmailItNotification(
-                "james.ellars@axim.us.com",
-                `✅ [DIRECTIVE CONFIRMED] Inbound Text Directive Processed`,
-                `<div style="font-family: monospace; background: #09090b; color: #f4f4f5; padding: 20px; border-radius: 12px; border: 1px solid #27272a;">
-                  <h2 style="color: #10b981; margin-top: 0; font-size: 16px;">TEXT DIRECTIVE INGESTED</h2>
-                  <p style="font-size: 12px; color: #a1a1aa;">Inbound reply text processed for HITL Item <code>${hitlId.slice(0, 8)}</code>.</p>
-                </div>`,
-                env
-              );
-            }
-          })();
-          ctx.waitUntil(sendInboundPromise);
+
+            ctx.waitUntil(sendEmailItNotification(
+              "james.ellars@axim.us.com",
+              `✅ [DIRECTIVE CONFIRMED] Inbound Text Directive Processed`,
+              `<div style="font-family: monospace; background: #09090b; color: #f4f4f5; padding: 20px; border-radius: 12px; border: 1px solid #27272a;">
+                <h2 style="color: #10b981; margin-top: 0;">TEXT DIRECTIVE INGESTED</h2>
+                <p>Decision <strong>${newStatus.toUpperCase()}</strong> recorded for HITL #${hitlId.slice(0, 8)}.</p>
+              </div>`,
+              env
+            ));
+          }
         }
 
         // Match Ticket UUID
-        const ticketMatch = subject.match(/\[Ticket #([a-f0-9-]+)\]/i);
+        const ticketMatch = payload.subject?.match(/\[Ticket #([a-f0-9-]+)\]/i);
         const ticketId = ticketMatch ? ticketMatch[1] : null;
 
         if (ticketId) {
@@ -1197,7 +1225,7 @@ export default {
               sender_id: sender,
               message_body: `**[📧 INBOUND EMAIL RECEIVED]**\n\n${bodyText.trim()}`,
               is_internal_note: false,
-              metadata: { source: "emailit_inbound_webhook", original_subject: subject, has_parsed_attachments: !!payload.attachments?.length }
+              metadata: { source: "emailit_inbound_webhook", original_subject: payload.subject, has_parsed_attachments: !!payload.attachments?.length }
             });
           }
         }
@@ -1404,12 +1432,31 @@ export default {
           }
         }
 
+
         await supabase.from("events_ax2024").insert({
           type: "dlq_batch_flushed",
           payload: { flushed_count: count, timestamp: new Date().toISOString() }
         });
 
+        if (count > 3) {
+          const dlqReportHtml = `
+            <div style="font-family: monospace; background: #09090b; color: #f4f4f5; padding: 20px; border-radius: 12px; border: 1px solid #fbbf24;">
+              <h2 style="color: #fbbf24; margin-top: 0; font-size: 16px;">⚡ BATCH DLQ RECOVERY DISPATCHED</h2>
+              <p style="font-size: 12px; color: #a1a1aa;">Edge operator re-queued <strong>${count} dead-letter queue items</strong> in a single batch.</p>
+              <p style="font-size: 11px; color: #71717a;">All failed ingestion events were re-processed and synced to ticket threads.</p>
+            </div>
+          `;
+
+          ctx.waitUntil(sendEmailItNotification(
+            "james.ellars@axim.us.com",
+            `⚡ [DLQ RECOVERY REPORT] ${count} Dead-Letter Items Re-queued`,
+            dlqReportHtml,
+            env
+          ));
+        }
+
         return new Response(JSON.stringify({ success: true, flushed_count: count }), {
+
           status: 200, headers: { "Content-Type": "application/json", ...getCorsHeaders(env, request) }
         });
       } catch (err: any) {
