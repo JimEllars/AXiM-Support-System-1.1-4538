@@ -116,9 +116,9 @@ export default function OnyxCommandHub({ isOpen, onClose }) {
           <div className="text-zinc-400 font-bold uppercase tracking-wider mb-1">Available Slashed Commands:</div>
           <div className="flex justify-between"><span>/escalate</span><span className="text-zinc-600">Escalate ticket priority to URGENT</span></div>
           <div className="flex justify-between"><span>/resolve</span><span className="text-zinc-600">Mark current ticket as RESOLVED</span></div>
-          <div className="flex justify-between"><span>/reassign [Dept]</span><span className="text-zinc-600">Reassign ticket department</span></div>
-          <div className="flex justify-between"><span>/draft</span><span className="text-zinc-600">Regenerate AI response draft</span></div>
-          <div className="flex justify-between"><span>/brief</span><span className="text-zinc-600">Email thread briefing to Mr. Ellars</span></div>
+          <div className="flex justify-between"><span>/reassign [Department]</span><span className="text-zinc-600">Reassign ticket department</span></div>
+          <div className="flex justify-between"><span>/draft</span><span className="text-zinc-600">Regenerate AI response draft suggestion</span></div>
+          <div className="flex justify-between"><span>/brief</span><span className="text-zinc-600">Email AI thread briefing to Mr. Ellars</span></div>
         </div>
       </div>
     </div>
