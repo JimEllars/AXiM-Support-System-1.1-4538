@@ -1367,7 +1367,58 @@ export default {
 
 
 
+
     // --- SECURE DLQ RETRY RECOVERY ROUTE ---
+    if (url.pathname === "/api/v1/dlq/flush" && request.method === "POST") {
+      const authHeader = request.headers.get("Authorization") || "";
+      const token = authHeader.replace("Bearer ", "").trim();
+      if (!token) {
+        return new Response(JSON.stringify({ error: "UNAUTHORIZED_DLQ_FLUSH" }), {
+          status: 401, headers: getCorsHeaders(env, request)
+        });
+      }
+
+      try {
+        const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
+
+        // Fetch recent DLQ events
+        const { data: dlqEvents } = await supabase
+          .from("events_ax2024")
+          .select("*")
+          .eq("type", "dlq_queue_inserted")
+          .order("timestamp", { ascending: false })
+          .limit(20);
+
+        let count = 0;
+        if (dlqEvents && dlqEvents.length > 0) {
+          for (const ev of dlqEvents) {
+            await supabase.from("events_ax2024").insert({
+              type: "dlq_retry_executed",
+              payload: {
+                original_event_id: ev.id,
+                flushed_in_batch: true,
+                timestamp: new Date().toISOString()
+              }
+            });
+            count++;
+          }
+        }
+
+        await supabase.from("events_ax2024").insert({
+          type: "dlq_batch_flushed",
+          payload: { flushed_count: count, timestamp: new Date().toISOString() }
+        });
+
+        return new Response(JSON.stringify({ success: true, flushed_count: count }), {
+          status: 200, headers: { "Content-Type": "application/json", ...getCorsHeaders(env, request) }
+        });
+      } catch (err: any) {
+        return new Response(JSON.stringify({ error: err.message }), {
+          status: 500, headers: getCorsHeaders(env, request)
+        });
+      }
+    }
+
     if (url.pathname === "/api/v1/dlq/retry" && request.method === "POST") {
       const authHeader = request.headers.get("Authorization") || "";
       const token = authHeader.replace("Bearer ", "").trim();
@@ -4227,6 +4278,18 @@ async function handleSandboxResolution(request: Request, env: Env, ctx: any): Pr
 }
 
 async function generateAndSendDailyDigest(env: Env) {
+    if (env.STATUS_KV) {
+      const raw = await env.STATUS_KV.get("email_prefs_global");
+      if (raw) {
+        try {
+          const prefs = JSON.parse(raw);
+          if (prefs.daily_digest === false) {
+            console.log("[EMAILIT] Executive daily briefing disabled via global email preferences.");
+            return false;
+          }
+        } catch (e) {}
+      }
+    }
   const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
 
   try {
@@ -4399,18 +4462,30 @@ async function handleTelemetryIngress(payload: any, env: Env, ctx: any, request:
     if (ticketError) throw ticketError;
     // Inside handleTelemetryIngress after creating a new urgent ticket:
     if (payload.severity === "critical" || newTicket.priority === "urgent") {
-      ctx.waitUntil(sendEmailItNotification(
-        "james.ellars@axim.us.com",
-        `🚨 [URGENT SLA ALERT] Support Ticket #${newTicket.id.slice(0, 8)} Spawned`,
-        `<div style="font-family: monospace; background: #09090b; color: #f4f4f5; padding: 20px; border-radius: 12px;">
-          <h2 style="color: #f43f5e; margin-top: 0;">CRITICAL SYSTEM ANOMALY DETECTED</h2>
-          <p><strong>App Target:</strong> ${targetApplicationCode}</p>
-          <p><strong>Error Code:</strong> ${incidentErrorCode}</p>
-          <p><strong>Details:</strong> ${incidentDescription}</p>
-          <p style="color: #a1a1aa; font-size: 11px;">Edge Node Location: ${logCtx.edge_colo}</p>
-        </div>`,
-        env
-      ));
+      let allowUrgent = true;
+      if (env.STATUS_KV) {
+        const raw = await env.STATUS_KV.get("email_prefs_global");
+        if (raw) {
+          try {
+            const prefs = JSON.parse(raw);
+            if (prefs.urgent_alerts === false) allowUrgent = false;
+          } catch (e) {}
+        }
+      }
+
+      if (allowUrgent) {
+        ctx.waitUntil(sendEmailItNotification(
+          "james.ellars@axim.us.com",
+          `🚨 [URGENT SLA ALERT] Support Ticket #${newTicket.id.slice(0, 8)} Spawned`,
+          `<div style="font-family: monospace; background: #09090b; color: #f4f4f5; padding: 20px; border-radius: 12px; border: 1px solid #27272a;">
+            <h2 style="color: #f43f5e; margin-top: 0;">CRITICAL SYSTEM ANOMALY DETECTED</h2>
+            <p><strong>App Target:</strong> ${targetApplicationCode}</p>
+            <p><strong>Error Code:</strong> ${incidentErrorCode}</p>
+            <p><strong>Details:</strong> ${incidentDescription}</p>
+          </div>`,
+          env
+        ));
+      }
     }
 
 
