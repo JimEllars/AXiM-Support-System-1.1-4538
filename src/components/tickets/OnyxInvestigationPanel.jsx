@@ -7,44 +7,51 @@ export default function OnyxInvestigationPanel({ ticketId }) {
   const [lastBriefedAt, setLastBriefedAt] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
 
-  useEffect(() => {
+  const fetchInvestigationData = async () => {
     if (!ticketId) return;
+    setIsLoading(true);
+    try {
+      const { data: telemetryData } = await supabase
+        .from('ticket_ai_telemetry')
+        .select('*')
+        .eq('ticket_id', ticketId)
+        .maybeSingle();
 
-    const fetchInvestigationData = async () => {
-      setIsLoading(true);
-      try {
-        // 1. Fetch ticket AI telemetry record
-        const { data: telemetryData } = await supabase
-          .from('ticket_ai_telemetry')
-          .select('*')
-          .eq('ticket_id', ticketId)
-          .maybeSingle();
+      setTelemetry(telemetryData || null);
 
-        setTelemetry(telemetryData || null);
+      const { data: briefingEvent } = await supabase
+        .from('events_ax2024')
+        .select('timestamp')
+        .eq('type', 'thread_executive_briefing_exported')
+        .eq('payload->>ticket_id', ticketId)
+        .order('timestamp', { ascending: false })
+        .limit(1)
+        .maybeSingle();
 
-        // 2. Fetch last executive briefing export timestamp from events_ax2024
-        const { data: briefingEvent } = await supabase
-          .from('events_ax2024')
-          .select('timestamp')
-          .eq('type', 'thread_executive_briefing_exported')
-          .eq('payload->>ticket_id', ticketId)
-          .order('timestamp', { ascending: false })
-          .limit(1)
-          .maybeSingle();
+      if (briefingEvent?.timestamp) {
+        setLastBriefedAt(new Date(briefingEvent.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
+      } else {
+        setLastBriefedAt(null);
+      }
+    } catch (err) {
+      console.error('Failed to load investigation telemetry:', err);
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
-        if (briefingEvent?.timestamp) {
-          setLastBriefedAt(new Date(briefingEvent.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
-        } else {
-          setLastBriefedAt(null);
-        }
-      } catch (err) {
-        console.error('Failed to load investigation telemetry:', err);
-      } finally {
-        setIsLoading(false);
+  useEffect(() => {
+    fetchInvestigationData();
+
+    // Listen for live briefing export events from WebSocket channel
+    const handleLiveBriefing = (e) => {
+      if (e.detail?.payload?.ticket_id === ticketId) {
+        setLastBriefedAt(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
       }
     };
 
-    fetchInvestigationData();
+    window.addEventListener('axim:briefing_exported', handleLiveBriefing);
+    return () => window.removeEventListener('axim:briefing_exported', handleLiveBriefing);
   }, [ticketId]);
 
   if (isLoading) {
@@ -96,7 +103,7 @@ export default function OnyxInvestigationPanel({ ticketId }) {
 
         <div className="p-3 rounded-xl bg-black/40 border border-zinc-900">
           <span className="text-[10px] text-zinc-500 uppercase font-bold block mb-0.5">Confidence</span>
-          <span className="text-indigo-400 font-bold">{telemetry?.confidence ? `${telemetry.confidence}%` : '85%'}</span>
+          <span className="text-indigo-400 font-bold">{telemetry?.confidence ? `${telemetry.confidence}%` : '85%'} </span>
         </div>
 
         <div className="p-3 rounded-xl bg-black/40 border border-zinc-900">

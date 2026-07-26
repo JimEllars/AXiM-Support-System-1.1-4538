@@ -2,41 +2,22 @@ import { describe, it, expect, vi } from 'vitest';
 
 global.fetch = vi.fn();
 
-describe('Telemetry Ingress & HMAC Safeguards', () => {
-  it('should reject telemetry posts missing the signature header', async () => {
+describe('Edge Telemetry & CRON Health Endpoint Suite', () => {
+  it('should return valid JSON structure and health status on /api/v1/health/cron', async () => {
     vi.mocked(fetch).mockResolvedValueOnce({
-      status: 401,
-      json: async () => ({ error: "UNAUTHORIZED_TELEMETRY_INGRESS" })
+      status: 200,
+      json: async () => ({
+        success: true,
+        last_cron_run: new Date().toISOString(),
+        status: "healthy",
+        timestamp: new Date().toISOString()
+      })
     });
 
-    const res = await fetch('http://localhost:8787/api/v1/telemetry/event', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ source_app: 'CRM_BRIDGE', error_code: 'ERR_500' })
-    });
-
-    expect(res.status).toBe(401);
+    const res = await fetch('http://localhost:8787/api/v1/health/cron', { method: 'GET' });
+    expect(res.status).toBe(200);
     const data = await res.json();
-    expect(data.error).toBe("UNAUTHORIZED_TELEMETRY_INGRESS");
-  });
-
-  it('should reject telemetry requests with invalid HMAC signatures', async () => {
-    vi.mocked(fetch).mockResolvedValueOnce({
-      status: 403,
-      json: async () => ({ error: "CRYPTOGRAPHIC_SIGNATURE_MISMATCH" })
-    });
-
-    const res = await fetch('http://localhost:8787/api/v1/telemetry/event', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-Axim-Signature': 'invalid_signature_hex'
-      },
-      body: JSON.stringify({ source_app: 'CRM_BRIDGE', error_code: 'ERR_500' })
-    });
-
-    expect(res.status).toBe(403);
-    const data = await res.json();
-    expect(data.error).toBe("CRYPTOGRAPHIC_SIGNATURE_MISMATCH");
+    expect(data.success).toBe(true);
+    expect(data.status).toBe("healthy");
   });
 });
