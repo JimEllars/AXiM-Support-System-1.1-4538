@@ -768,7 +768,36 @@ export default {
           await env.STATUS_KV.put("email_prefs_global", JSON.stringify(newPrefs));
         }
 
+        const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
+        await supabase.from("events_ax2024").insert({
+          type: "email_preferences_updated",
+          payload: { preferences: newPrefs, updated_by: "administrator", timestamp: new Date().toISOString() }
+        });
+
         return new Response(JSON.stringify({ success: true, preferences: newPrefs }), {
+          status: 200, headers: { "Content-Type": "application/json", ...getCorsHeaders(env, request) }
+        });
+      } catch (err: any) {
+        return new Response(JSON.stringify({ error: err.message }), {
+          status: 500, headers: getCorsHeaders(env, request)
+        });
+      }
+    }
+
+
+    // --- EDGE SECURITY SHIELD HEALTH ENDPOINT ---
+    if (url.pathname === "/api/v1/health/security" && request.method === "GET") {
+      try {
+        const hmacActive = !!env.EMAILIT_WEBHOOK_SECRET;
+        const kvActive = !!env.STATUS_KV;
+
+        return new Response(JSON.stringify({
+          success: true,
+          status: "shield_active",
+          hmac_verification: hmacActive ? "enforced" : "optional",
+          rate_limiting: kvActive ? "30_req_per_min" : "disabled",
+          timestamp: new Date().toISOString()
+        }), {
           status: 200, headers: { "Content-Type": "application/json", ...getCorsHeaders(env, request) }
         });
       } catch (err: any) {
