@@ -673,6 +673,17 @@ export default {
     ctx.waitUntil(handleDataRetentionSweep(env));
     ctx.waitUntil(handleStaleTicketSweep(env));
     ctx.waitUntil(checkAndSendStaleHitlReminders(env));
+
+    // Record CRON execution heartbeat telemetry
+    const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
+    ctx.waitUntil(supabase.from("events_ax2024").insert({
+      type: "cron_heartbeat",
+      payload: {
+        cron_schedule: event.cron,
+        scheduled_time: new Date(event.scheduledTime || Date.now()).toISOString(),
+        executed_at: new Date().toISOString()
+      }
+    }));
   },
   async fetch(request: Request, env: Env, ctx: any): Promise<Response> {
     const url = new URL(request.url);
@@ -691,6 +702,36 @@ export default {
 
     if (request.method !== "POST" && request.method !== "GET") {
       return new Response("Method Not Allowed", { status: 405 });
+    }
+
+    // Inside export default fetch switch tree for GET /api/v1/health/cron:
+    if (url.pathname === "/api/v1/health/cron" && request.method === "GET") {
+      try {
+        const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
+        const { data: lastCron } = await supabase
+          .from("events_ax2024")
+          .select("timestamp")
+          .eq("type", "cron_heartbeat")
+          .order("timestamp", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+
+        const lastRunISO = lastCron?.timestamp || null;
+        const isHealthy = lastRunISO ? (Date.now() - new Date(lastRunISO).getTime()) < 26 * 60 * 60 * 1000 : false;
+
+        return new Response(JSON.stringify({
+          success: true,
+          last_cron_run: lastRunISO,
+          status: isHealthy ? "healthy" : "pending_initial_run",
+          timestamp: new Date().toISOString()
+        }), {
+          status: 200, headers: { "Content-Type": "application/json", ...getCorsHeaders(env, request) }
+        });
+      } catch (err: any) {
+        return new Response(JSON.stringify({ error: err.message }), {
+          status: 500, headers: getCorsHeaders(env, request)
+        });
+      }
     }
 
     // --- EXECUTIVE THREAD BRIEFING EXPORT ROUTE ---
