@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { FiTerminal, FiCornerDownLeft, FiX, FiCheckCircle, FiAlertCircle } from 'react-icons/fi';
+import { FiTerminal, FiCornerDownLeft, FiX } from 'react-icons/fi';
 import toast from 'react-hot-toast';
 import { supabase } from '../lib/supabaseClient';
 import { getEdgeWorkerUrl } from '../lib/edgeWorkerUrl';
@@ -33,8 +33,8 @@ export default function OnyxCommandHub({ isOpen, onClose }) {
     const command = parts[0].toLowerCase();
     const targetValue = parts.slice(1).join(' ') || null;
 
-    if (!['/escalate', '/resolve', '/reassign', '/draft'].includes(command)) {
-      toast.error("Unsupported command. Use /escalate, /resolve, /draft, or /reassign [department]");
+    if (!['/escalate', '/resolve', '/reassign', '/draft', '/brief'].includes(command)) {
+      toast.error("Unsupported command. Use /escalate, /resolve, /reassign [dept], /draft, or /brief");
       return;
     }
 
@@ -99,7 +99,7 @@ export default function OnyxCommandHub({ isOpen, onClose }) {
               type="text"
               value={commandInput}
               onChange={(e) => setCommandInput(e.target.value)}
-              placeholder="Type command: /escalate, /resolve, /draft, or /reassign [dept]"
+              placeholder="Type command: /escalate, /resolve, /reassign [dept], /draft, or /brief"
               className="w-full pl-8 pr-12 py-3 rounded-2xl bg-black/60 border border-zinc-800 text-xs text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-indigo-500/50 transition-all"
             />
             <button
@@ -116,8 +116,9 @@ export default function OnyxCommandHub({ isOpen, onClose }) {
           <div className="text-zinc-400 font-bold uppercase tracking-wider mb-1">Available Slashed Commands:</div>
           <div className="flex justify-between"><span>/escalate</span><span className="text-zinc-600">Escalate ticket priority to URGENT</span></div>
           <div className="flex justify-between"><span>/resolve</span><span className="text-zinc-600">Mark current ticket as RESOLVED</span></div>
-          <div className="flex justify-between"><span>/reassign [Department]</span><span className="text-zinc-600">Reassign ticket department</span></div>
+          <div className="flex justify-between"><span>/reassign [Dept]</span><span className="text-zinc-600">Reassign ticket department</span></div>
           <div className="flex justify-between"><span>/draft</span><span className="text-zinc-600">Regenerate AI response draft</span></div>
+          <div className="flex justify-between"><span>/brief</span><span className="text-zinc-600">Email thread briefing to Mr. Ellars</span></div>
         </div>
       </div>
     </div>
