@@ -1,123 +1,126 @@
-import React, { useState } from 'react';
-import { useTicketStore } from '../../store/useTicketStore';
-import { FiAlertTriangle, FiRotateCw, FiTerminal, FiShield } from 'react-icons/fi';
-import PayloadTraceInspectorModal from '../modals/PayloadTraceInspectorModal';
+import React, { useState, useEffect } from 'react';
+import { FiAlertTriangle, FiRefreshCw, FiCheckCircle2, FiShield } from 'react-icons/fi';
+import { supabase } from '../../lib/supabaseClient';
 import { getEdgeWorkerUrl } from '../../lib/edgeWorkerUrl';
 import toast from 'react-hot-toast';
-import { supabase } from '../../lib/supabaseClient';
 
 export default function DLQMonitorBlock() {
-  const { dlqEvents, threatEvents, clearDLQEvents, tickets } = useTicketStore();
-  const [isReplaying, setIsReplaying] = useState(false);
-  const [inspectPayload, setInspectPayload] = useState(null);
-  const [viewMode, setViewMode] = useState('dlq'); // 'dlq' | 'threats'
+  const [dlqItems, setDlqItems] = useState([]);
+  const [recoveredCount24h, setRecoveredCount24h] = useState(0);
+  const [isLoading, setIsLoading] = useState(false);
+  const [retryingId, setRetryingId] = useState(null);
 
-  const handleBulkReplay = async () => {
-    if (dlqEvents.length === 0) return;
-    setIsReplaying(true);
-
+  const fetchDLQData = async () => {
+    setIsLoading(true);
     try {
-      const workerUrl = getEdgeWorkerUrl();
-      const { data: { session } } = await supabase.auth.getSession();
+      const past24h = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
 
-      if (!session?.access_token) throw new Error("No active operator session.");
+      // 1. Query past 24h DLQ recovery events from events_ax2024
+      const { count: recovered } = await supabase
+        .from('events_ax2024')
+        .select('id', { count: 'exact', head: true })
+        .gte('timestamp', past24h)
+        .eq('type', 'dlq_retry_executed');
 
-      let successCount = 0;
+      setRecoveredCount24h(recovered || 0);
 
-      for (const evt of dlqEvents) {
-         try {
-           const res = await fetch(`${workerUrl}/api/v1/dlq/retry`, {
-             method: 'POST',
-             headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${session.access_token}` },
-             body: JSON.stringify({
-                dlqId: evt.id,
-                ticketId: evt.payload?.ticket_id || null,
-                originalPayload: evt.payload
-             })
-           });
-           if (res.ok) successCount++;
-         } catch (e) {
-           console.error("Failed to replay payload", evt.id, e);
-         }
-      }
+      // 2. Fetch pending DLQ events (if dlq table exists)
+      const { data } = await supabase
+        .from('events_ax2024')
+        .select('*')
+        .eq('type', 'dlq_queue_inserted')
+        .order('timestamp', { ascending: false })
+        .limit(5);
 
-      if (successCount === 0) throw new Error("Gateway rejected all DLQ replays.");
-
-      clearDLQEvents();
-      toast.success(`Recovered ${successCount}/${dlqEvents.length} payloads.`, {
-        icon: <FiRotateCw className="text-cyan-400" />,
-        style: { background: '#09090b', color: '#22d3ee', border: '1px solid rgba(34,211,238,0.3)' }
-      });
+      setDlqItems(data || []);
     } catch (err) {
-      toast.error(err.message || 'DLQ Bulk Replay Failed.');
+      console.error('Failed to load DLQ monitor data:', err);
     } finally {
-      setIsReplaying(false);
+      setIsLoading(false);
     }
   };
 
-  if (dlqEvents.length === 0 && threatEvents.length === 0) {
-    return (
-      <div className="bg-zinc-950/50 border border-zinc-800/80 rounded-2xl p-4 flex items-center gap-3">
-        <FiShield className="text-zinc-600" />
-        <span className="text-xs font-mono text-zinc-500 uppercase tracking-widest">Edge Perimeter Clear</span>
-      </div>
-    );
-  }
+  useEffect(() => {
+    fetchDLQData();
+  }, []);
+
+  const handleRetryPayload = async (itemId, payload) => {
+    setRetryingId(itemId);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const token = session?.access_token;
+      if (!token) throw new Error("Session token required.");
+
+      const workerUrl = getEdgeWorkerUrl();
+      const res = await fetch(`${workerUrl}/api/v1/dlq/retry`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({ payload })
+      });
+
+      if (!res.ok) throw new Error("DLQ payload re-ingestion failed.");
+
+      toast.success("DLQ payload successfully re-queued!", {
+        style: { background: '#09090b', color: '#10b981', border: '1px solid rgba(16,185,129,0.3)' }
+      });
+      fetchDLQData();
+    } catch (err) {
+      toast.error(`Retry Failed: ${err.message}`);
+    } finally {
+      setRetryingId(null);
+    }
+  };
 
   return (
-    <div className={`bg-black/40 border rounded-2xl p-5 shadow-2xl transition-colors ${viewMode === 'dlq' ? 'border-rose-500/30 bg-rose-950/10' : 'border-amber-500/30 bg-amber-950/10'}`}>
-
-      {/* Header & Tabs */}
-      <div className="flex items-center justify-between mb-4">
-        <div className="flex items-center gap-2 bg-black/50 p-1 rounded-lg border border-zinc-800/50">
-          <button
-            onClick={() => setViewMode('dlq')}
-            className={`px-3 py-1 text-[9px] font-black uppercase tracking-widest rounded transition-colors ${viewMode === 'dlq' ? 'bg-rose-500/20 text-rose-400' : 'text-zinc-500 hover:text-zinc-300'}`}
-          >
-            Exceptions ({dlqEvents.length})
-          </button>
-          <button
-            onClick={() => setViewMode('threats')}
-            className={`px-3 py-1 text-[9px] font-black uppercase tracking-widest rounded transition-colors ${viewMode === 'threats' ? 'bg-amber-500/20 text-amber-400' : 'text-zinc-500 hover:text-zinc-300'}`}
-          >
-            Threats ({threatEvents.length})
-          </button>
+    <div className="p-5 rounded-3xl bg-zinc-950/60 border border-zinc-800/80 backdrop-blur-md space-y-4 font-mono">
+      <div className="flex items-center justify-between border-b border-zinc-900 pb-3">
+        <div className="flex items-center gap-2 text-rose-400 text-xs font-bold">
+          <FiAlertTriangle className="text-sm animate-pulse"/>
+          <span className="uppercase tracking-wider">Dead-Letter Queue Monitor</span>
         </div>
 
-        {viewMode === 'dlq' && dlqEvents.length > 0 && (
-          <button onClick={handleBulkReplay} disabled={isReplaying} className="flex items-center gap-2 px-3 py-1 bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 rounded text-[9px] font-bold uppercase tracking-widest transition-colors border border-rose-500/30 disabled:opacity-50">
-            <FiRotateCw className={isReplaying ? 'animate-spin' : ''} /> {isReplaying ? 'Replaying...' : 'Bulk Replay'}
-          </button>
-        )}
+        <div className="flex items-center gap-2">
+          <span className="text-[9px] text-amber-300 bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/20 flex items-center gap-1">
+            <FiCheckCircle2 className="text-[9px]"/> 24h Recoveries: {recoveredCount24h}
+          </span>
+          <span className="text-[9px] text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/20 flex items-center gap-1">
+            <FiShield className="text-[9px]"/> DLQ Guard Active
+          </span>
+        </div>
       </div>
 
-      {/* Matrix Display */}
-      <div className="space-y-2 max-h-[200px] overflow-y-auto pr-2">
-        {viewMode === 'dlq' ? (
-          dlqEvents.map(evt => (
-            <div key={evt.id} onClick={() => setInspectPayload(evt)} className="bg-black/50 border border-rose-900/50 rounded-xl p-3 flex justify-between items-center group hover:border-rose-500/50 transition-colors cursor-pointer">
-               <div className="truncate flex-1">
-                  <span className="text-[10px] text-zinc-500 font-mono mr-3">{new Date(evt.created_at).toLocaleTimeString()}</span>
-                  <span className="text-xs text-rose-200 font-mono truncate">{evt.payload?.error || evt.payload?.reason || 'Unknown Payload Exception'}</span>
-               </div>
-               <span className="text-[9px] text-rose-500 font-black uppercase bg-rose-950 px-2 py-0.5 rounded transition-colors group-hover:bg-rose-500 group-hover:text-black">Inspect</span>
+      <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
+        {isLoading ? (
+          <div className="text-center py-4 text-xs text-zinc-500 animate-pulse">
+            Scanning edge dead-letter queues...
+          </div>
+        ) : dlqItems.length > 0 ? (
+          dlqItems.map((item) => (
+            <div key={item.id} className="p-3 rounded-xl bg-black/50 border border-zinc-900 flex items-center justify-between text-xs">
+              <div className="space-y-0.5 truncate pr-2">
+                <div className="font-bold text-zinc-300 truncate">Event #{item.id.slice(0, 8)}</div>
+                <div className="text-[10px] text-zinc-500 font-sans truncate">{item.payload?.error_reason || 'Transient ingestion fault'}</div>
+              </div>
+
+              <button
+                onClick={() => handleRetryPayload(item.id, item.payload)}
+                disabled={retryingId === item.id}
+                className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-zinc-900 hover:bg-zinc-800 text-[10px] text-indigo-300 border border-zinc-800 transition-all flex-shrink-0 disabled:opacity-50"
+              >
+                <FiRefreshCw className={retryingId === item.id ? 'animate-spin' : ''} />
+                <span>{retryingId === item.id ? 'Retrying...' : 'Re-queue'}</span>
+              </button>
             </div>
           ))
         ) : (
-          threatEvents.map(evt => (
-            <div key={evt.id} className="bg-black/50 border border-amber-900/50 rounded-xl p-3 flex justify-between items-center group hover:border-amber-500/50 transition-colors">
-               <div className="truncate flex-1">
-                  <span className="text-[10px] text-zinc-500 font-mono mr-3">{new Date(evt.created_at).toLocaleTimeString()}</span>
-                  <span className="text-xs text-amber-200 font-mono truncate mr-2">[{evt.payload?.ip || '0.0.0.0'}]</span>
-                  <span className="text-[10px] text-zinc-400 font-mono truncate uppercase">{evt.payload?.reason || 'Access Denied'}</span>
-               </div>
-               {evt.payload?.cf_ray && <span className="text-[9px] text-amber-500/50 font-mono uppercase truncate max-w-[80px]">{evt.payload.cf_ray.split('-')[0]}</span>}
-            </div>
-          ))
+          <div className="text-center py-4 text-xs text-zinc-600">
+            Zero active dead-letter faults detected. Edge pipelines operating nominal.
+          </div>
         )}
       </div>
-
-      {inspectPayload && <PayloadTraceInspectorModal isOpen={true} payloadData={inspectPayload} onClose={() => setInspectPayload(null)} />}
     </div>
   );
 }
