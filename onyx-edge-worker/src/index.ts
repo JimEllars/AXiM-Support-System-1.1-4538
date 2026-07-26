@@ -705,6 +705,57 @@ export default {
     }
 
     // Inside export default fetch switch tree for GET /api/v1/health/cron:
+
+    // --- EMAIL NOTIFICATION PREFERENCES ROUTE ---
+    if (url.pathname === "/api/v1/email/preferences" && request.method === "GET") {
+      try {
+        let prefs = { instant_receipts: true, urgent_alerts: true, daily_digest: true };
+        if (env.STATUS_KV) {
+          const raw = await env.STATUS_KV.get("email_prefs_global");
+          if (raw) prefs = JSON.parse(raw);
+        }
+        return new Response(JSON.stringify({ success: true, preferences: prefs }), {
+          status: 200, headers: { "Content-Type": "application/json", ...getCorsHeaders(env, request) }
+        });
+      } catch (err: any) {
+        return new Response(JSON.stringify({ error: err.message }), {
+          status: 500, headers: getCorsHeaders(env, request)
+        });
+      }
+    }
+
+    if (url.pathname === "/api/v1/email/preferences" && request.method === "POST") {
+      const authHeader = request.headers.get("Authorization") || "";
+      const token = authHeader.replace("Bearer ", "").trim();
+      if (!token) {
+        return new Response(JSON.stringify({ error: "UNAUTHORIZED_PREFERENCES_UPDATE" }), {
+          status: 401, headers: getCorsHeaders(env, request)
+        });
+      }
+
+      try {
+        const payload: any = await request.json();
+        const { instant_receipts, urgent_alerts, daily_digest } = payload;
+        const newPrefs = {
+          instant_receipts: instant_receipts ?? true,
+          urgent_alerts: urgent_alerts ?? true,
+          daily_digest: daily_digest ?? true
+        };
+
+        if (env.STATUS_KV) {
+          await env.STATUS_KV.put("email_prefs_global", JSON.stringify(newPrefs));
+        }
+
+        return new Response(JSON.stringify({ success: true, preferences: newPrefs }), {
+          status: 200, headers: { "Content-Type": "application/json", ...getCorsHeaders(env, request) }
+        });
+      } catch (err: any) {
+        return new Response(JSON.stringify({ error: err.message }), {
+          status: 500, headers: getCorsHeaders(env, request)
+        });
+      }
+    }
+
     if (url.pathname === "/api/v1/health/cron" && request.method === "GET") {
       try {
         const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
@@ -966,16 +1017,31 @@ export default {
       });
 
       // Inside GET /api/v1/executive/respond handler after recording event telemetry:
-      ctx.waitUntil(sendEmailItNotification(
-        "james.ellars@axim.us.com",
-        `✅ [DIRECTIVE CONFIRMED] Action ${action.toUpperCase()} Ingested`,
-        `<div style="font-family: monospace; background: #09090b; color: #f4f4f5; padding: 20px; border-radius: 12px; border: 1px solid #27272a;">
-          <h2 style="color: #10b981; margin-top: 0; font-size: 16px;">EXECUTIVE DIRECTIVE CONFIRMED</h2>
-          <p style="font-size: 12px; color: #a1a1aa;">Your decision <strong>${action.toUpperCase()}</strong> for HITL Item <code>${hitlId.slice(0, 8)}</code> has been recorded.</p>
-          <p style="font-size: 11px; color: #71717a;">Synced to AXiM Support Workstation HUD in real time.</p>
-        </div>`,
-        env
-      ));
+      const sendActionPromise = (async () => {
+        let sendInstant = true;
+        if (env.STATUS_KV) {
+          const raw = await env.STATUS_KV.get("email_prefs_global");
+          if (raw) {
+            try {
+              const prefs = JSON.parse(raw);
+              if (prefs.instant_receipts === false) sendInstant = false;
+            } catch (e) {}
+          }
+        }
+        if (sendInstant) {
+          await sendEmailItNotification(
+            "james.ellars@axim.us.com",
+            `✅ [DIRECTIVE CONFIRMED] Action ${action.toUpperCase()} Ingested`,
+            `<div style="font-family: monospace; background: #09090b; color: #f4f4f5; padding: 20px; border-radius: 12px; border: 1px solid #27272a;">
+              <h2 style="color: #10b981; margin-top: 0; font-size: 16px;">EXECUTIVE DIRECTIVE CONFIRMED</h2>
+              <p style="font-size: 12px; color: #a1a1aa;">Your decision <strong>${action.toUpperCase()}</strong> for HITL Item <code>${hitlId.slice(0, 8)}</code> has been recorded.</p>
+              <p style="font-size: 11px; color: #71717a;">Synced to AXiM Support Workstation HUD in real time.</p>
+            </div>`,
+            env
+          );
+        }
+      })();
+      ctx.waitUntil(sendActionPromise);
 
       if (env.STATUS_KV) {
         ctx.waitUntil(env.STATUS_KV.delete("exec_policy_summary_v1"));
@@ -1093,15 +1159,30 @@ export default {
 
         // Inside POST /api/v1/email/inbound handler after parsing executive text directive:
         if (isExecutive && hitlId) {
-          ctx.waitUntil(sendEmailItNotification(
-            "james.ellars@axim.us.com",
-            `✅ [DIRECTIVE CONFIRMED] Inbound Text Directive Processed`,
-            `<div style="font-family: monospace; background: #09090b; color: #f4f4f5; padding: 20px; border-radius: 12px; border: 1px solid #27272a;">
-              <h2 style="color: #10b981; margin-top: 0; font-size: 16px;">TEXT DIRECTIVE INGESTED</h2>
-              <p style="font-size: 12px; color: #a1a1aa;">Inbound reply text processed for HITL Item <code>${hitlId.slice(0, 8)}</code>.</p>
-            </div>`,
-            env
-          ));
+          const sendInboundPromise = (async () => {
+            let sendInstant = true;
+            if (env.STATUS_KV) {
+              const raw = await env.STATUS_KV.get("email_prefs_global");
+              if (raw) {
+                try {
+                  const prefs = JSON.parse(raw);
+                  if (prefs.instant_receipts === false) sendInstant = false;
+                } catch (e) {}
+              }
+            }
+            if (sendInstant) {
+              await sendEmailItNotification(
+                "james.ellars@axim.us.com",
+                `✅ [DIRECTIVE CONFIRMED] Inbound Text Directive Processed`,
+                `<div style="font-family: monospace; background: #09090b; color: #f4f4f5; padding: 20px; border-radius: 12px; border: 1px solid #27272a;">
+                  <h2 style="color: #10b981; margin-top: 0; font-size: 16px;">TEXT DIRECTIVE INGESTED</h2>
+                  <p style="font-size: 12px; color: #a1a1aa;">Inbound reply text processed for HITL Item <code>${hitlId.slice(0, 8)}</code>.</p>
+                </div>`,
+                env
+              );
+            }
+          })();
+          ctx.waitUntil(sendInboundPromise);
         }
 
         // Match Ticket UUID
