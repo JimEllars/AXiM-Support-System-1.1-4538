@@ -965,6 +965,18 @@ export default {
         }
       });
 
+      // Inside GET /api/v1/executive/respond handler after recording event telemetry:
+      ctx.waitUntil(sendEmailItNotification(
+        "james.ellars@axim.us.com",
+        `✅ [DIRECTIVE CONFIRMED] Action ${action.toUpperCase()} Ingested`,
+        `<div style="font-family: monospace; background: #09090b; color: #f4f4f5; padding: 20px; border-radius: 12px; border: 1px solid #27272a;">
+          <h2 style="color: #10b981; margin-top: 0; font-size: 16px;">EXECUTIVE DIRECTIVE CONFIRMED</h2>
+          <p style="font-size: 12px; color: #a1a1aa;">Your decision <strong>${action.toUpperCase()}</strong> for HITL Item <code>${hitlId.slice(0, 8)}</code> has been recorded.</p>
+          <p style="font-size: 11px; color: #71717a;">Synced to AXiM Support Workstation HUD in real time.</p>
+        </div>`,
+        env
+      ));
+
       if (env.STATUS_KV) {
         ctx.waitUntil(env.STATUS_KV.delete("exec_policy_summary_v1"));
       }
@@ -1077,6 +1089,19 @@ export default {
           if (isExecutive && hitlId && env.STATUS_KV) {
             ctx.waitUntil(env.STATUS_KV.delete("exec_policy_summary_v1"));
           }
+        }
+
+        // Inside POST /api/v1/email/inbound handler after parsing executive text directive:
+        if (isExecutive && hitlId) {
+          ctx.waitUntil(sendEmailItNotification(
+            "james.ellars@axim.us.com",
+            `✅ [DIRECTIVE CONFIRMED] Inbound Text Directive Processed`,
+            `<div style="font-family: monospace; background: #09090b; color: #f4f4f5; padding: 20px; border-radius: 12px; border: 1px solid #27272a;">
+              <h2 style="color: #10b981; margin-top: 0; font-size: 16px;">TEXT DIRECTIVE INGESTED</h2>
+              <p style="font-size: 12px; color: #a1a1aa;">Inbound reply text processed for HITL Item <code>${hitlId.slice(0, 8)}</code>.</p>
+            </div>`,
+            env
+          ));
         }
 
         // Match Ticket UUID
