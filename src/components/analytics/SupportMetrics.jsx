@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { FiInbox, FiAlertCircle, FiCheckCircle, FiZap } from 'react-icons/fi';
 import { supabase } from '../../lib/supabaseClient';
+import { onyxService } from '../../services/onyxService';
 
 export default function SupportMetrics() {
   const [metrics, setMetrics] = useState({
@@ -15,6 +16,7 @@ export default function SupportMetrics() {
       try {
         const past24h = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
 
+        // Standard metrics handling fallback + default fetching
         const { count: open } = await supabase
           .from('support_tickets')
           .select('id', { count: 'exact', head: true })
@@ -31,11 +33,20 @@ export default function SupportMetrics() {
           .gte('updated_at', past24h)
           .in('status', ['resolved', 'closed']);
 
-        const { count: execResponses } = await supabase
-          .from('events_ax2024')
-          .select('id', { count: 'exact', head: true })
-          .gte('timestamp', past24h)
-          .in('type', ['executive_response_ingested', 'executive_text_response_ingested']);
+        let execResponses = 0;
+
+        // Connect to edge telemetry bridge
+        const edgeDiagnostics = await onyxService.getDiagnostics();
+        if (edgeDiagnostics && edgeDiagnostics.success && edgeDiagnostics.diagnostics?.telemetry_summary_24h) {
+            execResponses = edgeDiagnostics.diagnostics.telemetry_summary_24h.executive_briefings_exported || 0;
+        } else {
+             const { count: execFallback } = await supabase
+              .from('events_ax2024')
+              .select('id', { count: 'exact', head: true })
+              .gte('timestamp', past24h)
+              .in('type', ['thread_executive_briefing_exported', 'executive_response_ingested', 'executive_text_response_ingested']);
+              execResponses = execFallback || 0;
+        }
 
         setMetrics({
           openCount: open || 0,

@@ -1,11 +1,27 @@
 import { create } from 'zustand';
+import { persist } from 'zustand/middleware';
 import { supabase } from '../lib/supabaseClient';
 
-export const useAuthStore = create((set) => ({
+export const useAuthStore = create(
+  persist(
+    (set) => ({
   user: null,
   session: null,
   activeOrganization: null, // NEW
   isAuthenticated: false,
+
+  initializeSession: async () => {
+    try {
+      const { data: { session }, error } = await supabase.auth.getSession();
+      if (session) {
+         useAuthStore.getState().setSession(session);
+      } else {
+         useAuthStore.getState().setSession(null);
+      }
+    } catch (err) {
+      console.warn("[AuthGuard] Init session fetch failed:", err);
+    }
+  },
 
   setSession: async (session) => {
     if (!session) {
@@ -86,4 +102,10 @@ export const useAuthStore = create((set) => ({
     await supabase.auth.signOut();
     set({ user: null, session: null, activeOrganization: null, isAuthenticated: false });
   }
-}));
+    }),
+    {
+      name: 'axim-auth-storage', // name of the item in the storage (must be unique)
+      partialize: (state) => ({ activeOrganization: state.activeOrganization }), // only persist activeOrganization
+    }
+  )
+);

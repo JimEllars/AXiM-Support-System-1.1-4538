@@ -1,3 +1,10 @@
+
+- **Phase 106 Update**: Telemetry Bridge and UI Polish complete.
+  - Telemetry diagnostics now pull actively from the edge via `onyxService.getDiagnostics()`.
+  - Auth store is persistent via zustand middleware, protecting active sessions.
+  - Enhanced UI on `TicketDetail` and `OnyxInvestigationPanel` using advanced Tailwind directives.
+  - All tests verified green.
+
 # AXiM Support System - Reference for Coding Agents
 
 ## System Overview

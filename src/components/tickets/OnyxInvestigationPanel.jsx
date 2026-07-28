@@ -63,7 +63,7 @@ export default function OnyxInvestigationPanel({ ticketId }) {
   }
 
   return (
-    <div className="p-5 rounded-3xl bg-zinc-950/60 border border-zinc-800/80 backdrop-blur-md space-y-4 font-mono">
+    <div className="p-5 rounded-3xl bg-gradient-to-tr from-zinc-950/90 to-zinc-900/60 border border-zinc-800/80 backdrop-blur-lg shadow-xl shadow-indigo-900/10 space-y-4 font-mono transition-all duration-300 hover:shadow-indigo-900/20">
       <div className="flex items-center justify-between border-b border-zinc-900 pb-3">
         <div className="flex items-center gap-2 text-indigo-400 text-xs font-bold">
           <FiCpu className="text-sm animate-pulse"/>
@@ -86,7 +86,7 @@ export default function OnyxInvestigationPanel({ ticketId }) {
       </div>
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
-        <div className="p-3 rounded-xl bg-black/40 border border-zinc-900">
+        <div className="p-3 rounded-xl bg-zinc-900/50 border border-zinc-800/60 backdrop-blur-sm shadow-inner transition-colors duration-300 hover:bg-zinc-800/60">
           <span className="text-[10px] text-zinc-500 uppercase font-bold block mb-0.5">Sentiment</span>
           <span className={`font-bold ${
             telemetry?.sentiment === 'positive' ? 'text-emerald-400' :
@@ -96,17 +96,17 @@ export default function OnyxInvestigationPanel({ ticketId }) {
           </span>
         </div>
 
-        <div className="p-3 rounded-xl bg-black/40 border border-zinc-900">
+        <div className="p-3 rounded-xl bg-zinc-900/50 border border-zinc-800/60 backdrop-blur-sm shadow-inner transition-colors duration-300 hover:bg-zinc-800/60">
           <span className="text-[10px] text-zinc-500 uppercase font-bold block mb-0.5">Category</span>
           <span className="text-zinc-200 font-bold uppercase">{telemetry?.category || 'General'}</span>
         </div>
 
-        <div className="p-3 rounded-xl bg-black/40 border border-zinc-900">
+        <div className="p-3 rounded-xl bg-zinc-900/50 border border-zinc-800/60 backdrop-blur-sm shadow-inner transition-colors duration-300 hover:bg-zinc-800/60">
           <span className="text-[10px] text-zinc-500 uppercase font-bold block mb-0.5">Confidence</span>
           <span className="text-indigo-400 font-bold">{telemetry?.confidence ? `${telemetry.confidence}%` : '85%'} </span>
         </div>
 
-        <div className="p-3 rounded-xl bg-black/40 border border-zinc-900">
+        <div className="p-3 rounded-xl bg-zinc-900/50 border border-zinc-800/60 backdrop-blur-sm shadow-inner transition-colors duration-300 hover:bg-zinc-800/60">
           <span className="text-[10px] text-zinc-500 uppercase font-bold block mb-0.5">Triage Latency</span>
           <span className="text-emerald-400 font-bold flex items-center gap-1">
             <FiClock className="text-[10px]"/> {telemetry?.generation_latency_ms || '42'}ms

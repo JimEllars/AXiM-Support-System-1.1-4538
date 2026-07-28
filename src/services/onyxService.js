@@ -84,6 +84,28 @@ export const onyxService = {
       return response.json();
   },
 
+
+  async getDiagnostics() {
+      try {
+          const response = await fetch(`${ONYX_WORKER_URL}/api/v1/health/diagnostics`, {
+              method: 'GET',
+              headers: {
+                 'Content-Type': 'application/json'
+              }
+          });
+          if (!response.ok) throw new Error('Worker endpoint unreachable');
+          return await response.json();
+      } catch (e) {
+          // Fallback handling
+          console.warn('[onyxService] getDiagnostics fallback to standard metrics sync', e);
+          return {
+             success: false,
+             fallback: true,
+             error: e.message
+          };
+      }
+  },
+
   async syncTelemetryToCore(metrics) {
       // Sync metrics to core events table (simulated edge logic)
       try {

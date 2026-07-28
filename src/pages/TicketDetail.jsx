@@ -144,7 +144,7 @@ export default function TicketDetail({ ticketId }) {
   return (
     <div className="flex flex-col h-full space-y-6 overflow-y-auto pr-2">
       {/* Ticket Header & Presence Bar */}
-      <div className="p-6 rounded-3xl bg-zinc-950/60 border border-zinc-800/80 backdrop-blur-md space-y-3">
+      <div className="p-6 rounded-3xl bg-gradient-to-br from-zinc-950/80 to-zinc-900/60 border border-zinc-800/80 backdrop-blur-lg shadow-xl shadow-black/40 space-y-3 transition-all duration-300">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div className="flex items-center gap-3">
             <span className="text-xs font-mono font-bold text-zinc-400">#{activeTicket.id.slice(0, 8)}</span>
@@ -199,7 +199,7 @@ export default function TicketDetail({ ticketId }) {
           )}
 
           {/* Reply Composer Form */}
-          <form onSubmit={handleSendMessage} className="p-4 rounded-2xl bg-zinc-950/80 border border-zinc-800/80 space-y-3">
+          <form onSubmit={handleSendMessage} className="p-4 rounded-2xl bg-zinc-950/80 border border-zinc-800/80 shadow-inner backdrop-blur-md space-y-3 transition-all duration-300 hover:border-zinc-700/80">
             <div className="flex items-center justify-between text-xs text-zinc-400 font-mono">
               <span className="font-bold uppercase tracking-wider">Reply Composer</span>
               <span className="flex items-center gap-1 text-[10px] text-zinc-500 bg-zinc-900 px-2 py-0.5 rounded border border-zinc-800">

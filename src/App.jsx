@@ -68,7 +68,7 @@ function App() {
     // Check initial session
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session);
-      if (session?.user) {
+            if (session?.user) {
         supabase.from('team_profiles').upsert({
             id: session.user.id,
             email: session.user.email,
