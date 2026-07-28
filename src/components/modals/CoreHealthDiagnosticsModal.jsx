@@ -1,10 +1,14 @@
 import React, { useState, useEffect } from 'react';
-import { FiActivity, FiClock, FiShield, FiX, FiRefreshCw, FiAlertCircle } from 'react-icons/fi';
+import { FiActivity, FiClock, FiShield, FiX, FiRefreshCw, FiSend, FiZap } from 'react-icons/fi';
+import toast from 'react-hot-toast';
+import { supabase } from '../../lib/supabaseClient';
 import { getEdgeWorkerUrl } from '../../lib/edgeWorkerUrl';
 
 export default function CoreHealthDiagnosticsModal({ isOpen, onClose }) {
   const [data, setData] = useState(null);
+  const [isCached, setIsCached] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const [isTesting, setIsTesting] = useState(false);
 
   const fetchDiagnostics = async () => {
     setIsLoading(true);
@@ -14,6 +18,7 @@ export default function CoreHealthDiagnosticsModal({ isOpen, onClose }) {
       if (res.ok) {
         const json = await res.json();
         setData(json.diagnostics || null);
+        setIsCached(!!json.cached);
       }
     } catch (err) {
       console.error("Failed to load health diagnostics:", err);
@@ -26,6 +31,38 @@ export default function CoreHealthDiagnosticsModal({ isOpen, onClose }) {
     if (isOpen) fetchDiagnostics();
   }, [isOpen]);
 
+  const handleTestBriefing = async () => {
+    if (isTesting) return;
+    setIsTesting(true);
+
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const token = session?.access_token;
+      if (!token) throw new Error("Active session token required.");
+
+      const workerUrl = getEdgeWorkerUrl();
+      const res = await fetch(`${workerUrl}/api/v1/health/test-briefing`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        }
+      });
+
+      const json = await res.json();
+      if (!res.ok || !json.success) throw new Error(json.error || 'Pipeline test failed.');
+
+      toast.success("Diagnostic test email sent to james.ellars@axim.us.com!", {
+        style: { background: '#09090b', color: '#10b981', border: '1px solid rgba(16,185,129,0.3)' }
+      });
+      fetchDiagnostics();
+    } catch (err) {
+      toast.error(`Test Dispatch Error: ${err.message}`);
+    } finally {
+      setIsTesting(false);
+    }
+  };
+
   if (!isOpen) return null;
 
   return (
@@ -36,9 +73,17 @@ export default function CoreHealthDiagnosticsModal({ isOpen, onClose }) {
             <FiActivity className="text-sm animate-pulse"/>
             <span>Cloudflare Edge Core Diagnostics</span>
           </div>
-          <button onClick={onClose} className="p-1.5 rounded-lg text-zinc-500 hover:text-white bg-zinc-900 border border-zinc-800 transition-colors">
-            <FiX/>
-          </button>
+
+          <div className="flex items-center gap-2">
+            {isCached && (
+              <span className="text-[9px] text-indigo-300 bg-indigo-500/10 px-2 py-0.5 rounded border border-indigo-500/20 uppercase flex items-center gap-1">
+                <FiZap className="text-[9px]"/> KV Cached (30s)
+              </span>
+            )}
+            <button onClick={onClose} className="p-1.5 rounded-lg text-zinc-500 hover:text-white bg-zinc-900 border border-zinc-800 transition-colors">
+              <FiX/>
+            </button>
+          </div>
         </div>
 
         {isLoading ? (
@@ -79,10 +124,22 @@ export default function CoreHealthDiagnosticsModal({ isOpen, onClose }) {
               </div>
             </div>
 
-            {/* 24h Activity Summary */}
+            {/* 24h Activity Summary & Test Dispatch Action */}
             <div className="p-3.5 rounded-2xl bg-zinc-900/50 border border-zinc-800 flex items-center justify-between text-[11px]">
-              <span className="text-zinc-400 font-bold">24h Briefings Exported: <strong className="text-sky-300">{data.telemetry_summary_24h?.executive_briefings_exported}</strong></span>
-              <span className="text-zinc-400 font-bold">24h Stale Reminders Sent: <strong className="text-amber-300">{data.telemetry_summary_24h?.stale_hitl_reminders_sent}</strong></span>
+              <div className="space-y-0.5">
+                <div className="text-zinc-400 font-bold">24h Briefings: <strong className="text-sky-300">{data.telemetry_summary_24h?.executive_briefings_exported}</strong></div>
+                <div className="text-zinc-400 font-bold">24h Stale Reminders: <strong className="text-amber-300">{data.telemetry_summary_24h?.stale_hitl_reminders_sent}</strong></div>
+              </div>
+
+              <button
+                onClick={handleTestBriefing}
+                disabled={isTesting}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-indigo-500/10 text-indigo-300 border border-indigo-500/30 hover:bg-indigo-500/20 font-bold uppercase transition-all disabled:opacity-50"
+                title="Send test briefing email to Mr. Ellars to verify transport health"
+              >
+                <FiSend className={isTesting ? 'animate-spin' : ''} />
+                <span>{isTesting ? 'Testing...' : 'Trigger Test Briefing'}</span>
+              </button>
             </div>
           </div>
         ) : (

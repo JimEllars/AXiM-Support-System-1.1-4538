@@ -786,13 +786,23 @@ export default {
 
 
 
-    // --- AGGREGATED EDGE HEALTH DIAGNOSTICS ENDPOINT ---
+    // --- AGGREGATED EDGE HEALTH DIAGNOSTICS (KV CACHED 30s) ---
     if (url.pathname === "/api/v1/health/diagnostics" && request.method === "GET") {
       try {
+        const cacheKey = "edge_diagnostics_cache_v1";
+        if (env.STATUS_KV) {
+          const cachedRaw = await env.STATUS_KV.get(cacheKey);
+          if (cachedRaw) {
+            const cachedData = JSON.parse(cachedRaw);
+            return new Response(JSON.stringify({ ...cachedData, cached: true }), {
+              status: 200, headers: { "Content-Type": "application/json", ...getCorsHeaders(env, request) }
+            });
+          }
+        }
+
         const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
         const past24h = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
 
-        // Query 24h event counters
         const { count: rateLimitBlocks } = await supabase
           .from("events_ax2024")
           .select("id", { count: "exact", head: true })
@@ -819,8 +829,9 @@ export default {
           .limit(1)
           .maybeSingle();
 
-        return new Response(JSON.stringify({
+        const responsePayload = {
           success: true,
+          cached: false,
           diagnostics: {
             edge_worker: { status: "healthy", runtime: "cloudflare_workers" },
             cron_schedule: {
@@ -839,8 +850,57 @@ export default {
             }
           },
           timestamp: new Date().toISOString()
-        }), {
+        };
+
+        if (env.STATUS_KV) {
+          ctx.waitUntil(env.STATUS_KV.put(cacheKey, JSON.stringify(responsePayload), { expirationTtl: 30 }));
+        }
+
+        return new Response(JSON.stringify(responsePayload), {
           status: 200, headers: { "Content-Type": "application/json", ...getCorsHeaders(env, request) }
+        });
+      } catch (err: any) {
+        return new Response(JSON.stringify({ error: err.message }), {
+          status: 500, headers: getCorsHeaders(env, request)
+        });
+      }
+    }
+
+    // --- PIPELINE VALIDATION TEST BRIEFING ENDPOINT ---
+    if (url.pathname === "/api/v1/health/test-briefing" && request.method === "POST") {
+      const authHeader = request.headers.get("Authorization") || "";
+      const token = authHeader.replace("Bearer ", "").trim();
+      if (!token) {
+        return new Response(JSON.stringify({ error: "UNAUTHORIZED_TEST_TRIGGER" }), {
+          status: 401, headers: getCorsHeaders(env, request)
+        });
+      }
+
+      try {
+        const testHtml = `
+          <div style="font-family: monospace; background: #09090b; color: #f4f4f5; padding: 20px; border-radius: 12px; border: 1px solid #6366f1;">
+            <h2 style="color: #818cf8; margin-top: 0; font-size: 16px;">🧪 ONYX EDGE PIPELINE DIAGNOSTIC TEST</h2>
+            <p style="font-size: 12px; color: #a1a1aa;">This is an automated test dispatch verifying Workers AI Llama synthesis and EmailIt transport pipelines.</p>
+            <p style="font-size: 11px; color: #71717a;">Timestamp: ${new Date().toUTCString()}</p>
+          </div>
+        `;
+
+        const sent = await sendEmailItNotification(
+          "james.ellars@axim.us.com",
+          `🧪 [DIAGNOSTIC TEST] Edge Email Pipeline Health Check`,
+          testHtml,
+          env
+        );
+
+        const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
+        await supabase.from("events_ax2024").insert({
+          type: "test_briefing_dispatched",
+          payload: { recipient: "james.ellars@axim.us.com", success: sent, timestamp: new Date().toISOString() }
+        });
+
+        return new Response(JSON.stringify({ success: sent, recipient: "james.ellars@axim.us.com" }), {
+          status: sent ? 200 : 502,
+          headers: { "Content-Type": "application/json", ...getCorsHeaders(env, request) }
         });
       } catch (err: any) {
         return new Response(JSON.stringify({ error: err.message }), {
