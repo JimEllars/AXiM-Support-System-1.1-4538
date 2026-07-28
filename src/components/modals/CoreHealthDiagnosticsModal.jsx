@@ -1,0 +1,94 @@
+import React, { useState, useEffect } from 'react';
+import { FiActivity, FiClock, FiShield, FiX, FiRefreshCw, FiAlertCircle } from 'react-icons/fi';
+import { getEdgeWorkerUrl } from '../../lib/edgeWorkerUrl';
+
+export default function CoreHealthDiagnosticsModal({ isOpen, onClose }) {
+  const [data, setData] = useState(null);
+  const [isLoading, setIsLoading] = useState(false);
+
+  const fetchDiagnostics = async () => {
+    setIsLoading(true);
+    try {
+      const workerUrl = getEdgeWorkerUrl();
+      const res = await fetch(`${workerUrl}/api/v1/health/diagnostics`);
+      if (res.ok) {
+        const json = await res.json();
+        setData(json.diagnostics || null);
+      }
+    } catch (err) {
+      console.error("Failed to load health diagnostics:", err);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (isOpen) fetchDiagnostics();
+  }, [isOpen]);
+
+  if (!isOpen) return null;
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+      <div className="w-full max-w-xl rounded-3xl bg-zinc-950 border border-zinc-800 shadow-2xl p-6 space-y-4 font-mono text-xs">
+        <div className="flex items-center justify-between border-b border-zinc-900 pb-3">
+          <div className="flex items-center gap-2 font-bold text-indigo-400 uppercase tracking-wider">
+            <FiActivity className="text-sm animate-pulse"/>
+            <span>Cloudflare Edge Core Diagnostics</span>
+          </div>
+          <button onClick={onClose} className="p-1.5 rounded-lg text-zinc-500 hover:text-white bg-zinc-900 border border-zinc-800 transition-colors">
+            <FiX/>
+          </button>
+        </div>
+
+        {isLoading ? (
+          <div className="text-center py-8 text-zinc-500 flex items-center justify-center gap-2">
+            <FiRefreshCw className="animate-spin text-sm"/>
+            <span>Polling edge worker diagnostic telemetry...</span>
+          </div>
+        ) : data ? (
+          <div className="space-y-3">
+            {/* Edge Worker Grid */}
+            <div className="p-3.5 rounded-2xl bg-black/50 border border-zinc-800 space-y-1">
+              <div className="flex items-center justify-between font-bold text-zinc-300">
+                <span className="flex items-center gap-1.5 text-emerald-400"><FiActivity/> Edge Worker Engine</span>
+                <span className="text-[10px] bg-emerald-500/10 text-emerald-400 px-2 py-0.5 rounded border border-emerald-500/20 uppercase">{data.edge_worker?.status}</span>
+              </div>
+              <div className="text-[11px] text-zinc-500 font-sans">Runtime: {data.edge_worker?.runtime}</div>
+            </div>
+
+            {/* CRON Schedule Grid */}
+            <div className="p-3.5 rounded-2xl bg-black/50 border border-zinc-800 space-y-1">
+              <div className="flex items-center justify-between font-bold text-zinc-300">
+                <span className="flex items-center gap-1.5 text-sky-400"><FiClock/> CRON Trigger (08:00 UTC)</span>
+                <span className="text-[10px] bg-sky-500/10 text-sky-400 px-2 py-0.5 rounded border border-sky-500/20 uppercase">{data.cron_schedule?.status}</span>
+              </div>
+              <div className="text-[11px] text-zinc-500 font-sans">
+                Schedule: <code>{data.cron_schedule?.schedule}</code> | Last Run: {data.cron_schedule?.last_executed ? new Date(data.cron_schedule.last_executed).toLocaleString() : 'Pending'}
+              </div>
+            </div>
+
+            {/* Security Shield Grid */}
+            <div className="p-3.5 rounded-2xl bg-black/50 border border-zinc-800 space-y-1">
+              <div className="flex items-center justify-between font-bold text-zinc-300">
+                <span className="flex items-center gap-1.5 text-indigo-400"><FiShield/> Edge Security Shield</span>
+                <span className="text-[10px] bg-indigo-500/10 text-indigo-400 px-2 py-0.5 rounded border border-indigo-500/20 uppercase">Active Guard</span>
+              </div>
+              <div className="text-[11px] text-zinc-500 font-sans">
+                HMAC Verification: <strong className="text-zinc-300">{data.edge_shield?.hmac_verification}</strong> | Rate Limit: <strong className="text-zinc-300">{data.edge_shield?.rate_limit_cap}</strong> | 24h Blocks: <strong className="text-rose-400">{data.edge_shield?.rate_limit_blocks_24h}</strong>
+              </div>
+            </div>
+
+            {/* 24h Activity Summary */}
+            <div className="p-3.5 rounded-2xl bg-zinc-900/50 border border-zinc-800 flex items-center justify-between text-[11px]">
+              <span className="text-zinc-400 font-bold">24h Briefings Exported: <strong className="text-sky-300">{data.telemetry_summary_24h?.executive_briefings_exported}</strong></span>
+              <span className="text-zinc-400 font-bold">24h Stale Reminders Sent: <strong className="text-amber-300">{data.telemetry_summary_24h?.stale_hitl_reminders_sent}</strong></span>
+            </div>
+          </div>
+        ) : (
+          <div className="text-center py-6 text-zinc-600">Failed to load diagnostic telemetry data.</div>
+        )}
+      </div>
+    </div>
+  );
+}

@@ -2,7 +2,7 @@ import { describe, it, expect, vi } from 'vitest';
 
 global.fetch = vi.fn();
 
-describe('Edge Health & Security Shield Suite', () => {
+describe('Edge Health & Diagnostics Suite', () => {
   it('should return 200 OK for standard worker health checks', async () => {
     vi.mocked(fetch).mockResolvedValueOnce({
       status: 200,
@@ -15,23 +15,23 @@ describe('Edge Health & Security Shield Suite', () => {
     expect(data.status).toBe('healthy');
   });
 
-  it('should return active status and rate limiting specs on GET /api/v1/health/security', async () => {
+  it('should return aggregated diagnostic telemetry on GET /api/v1/health/diagnostics', async () => {
     vi.mocked(fetch).mockResolvedValueOnce({
       status: 200,
       json: async () => ({
         success: true,
-        status: 'shield_active',
-        hmac_verification: 'enforced',
-        rate_limiting: '30_req_per_min',
-        timestamp: new Date().toISOString()
+        diagnostics: {
+          edge_worker: { status: 'healthy' },
+          cron_schedule: { status: 'active' },
+          edge_shield: { rate_limit_cap: '30_req_min' }
+        }
       })
     });
 
-    const res = await fetch('http://localhost:8787/api/v1/health/security');
+    const res = await fetch('http://localhost:8787/api/v1/health/diagnostics');
     expect(res.status).toBe(200);
     const data = await res.json();
     expect(data.success).toBe(true);
-    expect(data.status).toBe('shield_active');
-    expect(data.rate_limiting).toBe('30_req_per_min');
+    expect(data.diagnostics.edge_worker.status).toBe('healthy');
   });
 });

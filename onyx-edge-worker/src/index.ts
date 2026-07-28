@@ -785,6 +785,70 @@ export default {
     }
 
 
+
+    // --- AGGREGATED EDGE HEALTH DIAGNOSTICS ENDPOINT ---
+    if (url.pathname === "/api/v1/health/diagnostics" && request.method === "GET") {
+      try {
+        const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
+        const past24h = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+
+        // Query 24h event counters
+        const { count: rateLimitBlocks } = await supabase
+          .from("events_ax2024")
+          .select("id", { count: "exact", head: true })
+          .gte("timestamp", past24h)
+          .eq("type", "rate_limit_exceeded");
+
+        const { count: briefingExports } = await supabase
+          .from("events_ax2024")
+          .select("id", { count: "exact", head: true })
+          .gte("timestamp", past24h)
+          .eq("type", "thread_executive_briefing_exported");
+
+        const { count: staleReminders } = await supabase
+          .from("events_ax2024")
+          .select("id", { count: "exact", head: true })
+          .gte("timestamp", past24h)
+          .eq("type", "stale_hitl_reminder_dispatched");
+
+        const { data: lastCron } = await supabase
+          .from("events_ax2024")
+          .select("payload, timestamp")
+          .eq("type", "cron_heartbeat")
+          .order("timestamp", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+
+        return new Response(JSON.stringify({
+          success: true,
+          diagnostics: {
+            edge_worker: { status: "healthy", runtime: "cloudflare_workers" },
+            cron_schedule: {
+              schedule: "0 8 * * *",
+              last_executed: lastCron?.timestamp || null,
+              status: lastCron ? "active" : "pending_initial_run"
+            },
+            edge_shield: {
+              hmac_verification: !!env.EMAILIT_WEBHOOK_SECRET ? "enforced" : "optional",
+              rate_limit_cap: "30_req_min",
+              rate_limit_blocks_24h: rateLimitBlocks || 0
+            },
+            telemetry_summary_24h: {
+              executive_briefings_exported: briefingExports || 0,
+              stale_hitl_reminders_sent: staleReminders || 0
+            }
+          },
+          timestamp: new Date().toISOString()
+        }), {
+          status: 200, headers: { "Content-Type": "application/json", ...getCorsHeaders(env, request) }
+        });
+      } catch (err: any) {
+        return new Response(JSON.stringify({ error: err.message }), {
+          status: 500, headers: getCorsHeaders(env, request)
+        });
+      }
+    }
+
     // --- EDGE SECURITY SHIELD HEALTH ENDPOINT ---
     if (url.pathname === "/api/v1/health/security" && request.method === "GET") {
       try {
