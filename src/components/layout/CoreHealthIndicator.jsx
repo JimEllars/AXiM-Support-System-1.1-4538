@@ -2,7 +2,6 @@ import React, { useState, useEffect } from 'react';
 import { FiActivity, FiClock, FiShield } from 'react-icons/fi';
 import { getEdgeWorkerUrl } from '../../lib/edgeWorkerUrl';
 import CoreHealthDiagnosticsModal from '../modals/CoreHealthDiagnosticsModal';
-import { onyxService } from '../../services/onyxService';
 
 export default function CoreHealthIndicator() {
   const [edgeStatus, setEdgeStatus] = useState('checking');
@@ -15,45 +14,26 @@ export default function CoreHealthIndicator() {
     try {
       const workerUrl = getEdgeWorkerUrl();
 
-      // Get all telemetry metrics at once
-      const diagData = await onyxService.getDiagnostics();
+      // 1. Edge Worker Health Check
+      const edgeRes = await fetch(`${workerUrl}/health`);
+      setEdgeStatus(edgeRes.ok ? 'healthy' : 'degraded');
 
-      if (diagData && diagData.success && diagData.diagnostics) {
-         setEdgeStatus(diagData.diagnostics.edge_worker?.status || 'degraded');
-
-         const cronData = diagData.diagnostics.cron_schedule;
-         setCronStatus(cronData?.status || 'degraded');
-         if (cronData?.last_executed) {
-            setLastCronRun(new Date(cronData.last_executed).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
-         }
-
-         const shield = diagData.diagnostics.edge_shield;
-         if (shield && shield.hmac_verification === "enforced") {
-             setShieldStatus('active');
-         } else {
-             setShieldStatus('degraded');
-         }
-      } else {
-          // Fallback legacy checks
-          const edgeRes = await fetch(`${workerUrl}/health`);
-          setEdgeStatus(edgeRes.ok ? 'healthy' : 'degraded');
-
-          const cronRes = await fetch(`${workerUrl}/api/v1/health/cron`);
-          if (cronRes.ok) {
-            const cronData = await cronRes.json();
-            setCronStatus(cronData.status || 'healthy');
-            if (cronData.last_cron_run) {
-              setLastCronRun(new Date(cronData.last_cron_run).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
-            }
-          }
-
-          const secRes = await fetch(`${workerUrl}/api/v1/health/security`);
-          if (secRes.ok) {
-            const secData = await secRes.json();
-            setShieldStatus(secData.status === 'shield_active' ? 'active' : 'degraded');
-          }
+      // 2. Scheduled CRON Health Check
+      const cronRes = await fetch(`${workerUrl}/api/v1/health/cron`);
+      if (cronRes.ok) {
+        const cronData = await cronRes.json();
+        setCronStatus(cronData.status || 'healthy');
+        if (cronData.last_cron_run) {
+          setLastCronRun(new Date(cronData.last_cron_run).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
+        }
       }
 
+      // 3. Edge Security Shield Check
+      const secRes = await fetch(`${workerUrl}/api/v1/health/security`);
+      if (secRes.ok) {
+        const secData = await secRes.json();
+        setShieldStatus(secData.status === 'shield_active' ? 'active' : 'degraded');
+      }
     } catch (err) {
       setEdgeStatus('degraded');
       setCronStatus('degraded');

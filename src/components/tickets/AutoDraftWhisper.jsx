@@ -29,10 +29,10 @@ function AutoDraftWhisperContent({ draftText, onApplyDraft }) {
   };
 
   return (
-    <div className="my-3 p-4 rounded-2xl border bg-indigo-950/20 border-indigo-500/30 relative overflow-hidden shadow-[0_0_20px_rgba(99,102,241,0.05)] transition-all duration-500 group ring-1 ring-indigo-500/0 hover:ring-indigo-500/20">
+    <div className="my-3 p-4 rounded-2xl border bg-indigo-950/20 border-indigo-500/30 relative overflow-hidden shadow-[0_0_20px_rgba(99,102,241,0.05)]">
       <div className="flex items-center justify-between mb-2">
         <div className="flex items-center gap-2">
-          <div className="relative flex h-3 w-3 items-center justify-center"><span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-indigo-400 opacity-75"></span><FiFeather className="relative text-indigo-400 text-[10px]"/></div>
+          <FiFeather className="text-indigo-400 text-xs animate-bounce"/>
           <span className="text-[10px] font-mono font-black uppercase text-indigo-300 tracking-wider">
             Onyx AI Suggested Whisper Reply
           </span>
