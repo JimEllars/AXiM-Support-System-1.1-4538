@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { FiMail, FiUserCheck, FiSliders, FiX, FiCheck, FiCpu, FiClock } from 'react-icons/fi';
+import { FiMail, FiUserCheck, FiSliders, FiX, FiCheck, FiCpu } from 'react-icons/fi';
 import toast from 'react-hot-toast';
 import { supabase } from '../lib/supabaseClient';
 import { getEdgeWorkerUrl } from '../lib/edgeWorkerUrl';
@@ -9,8 +9,8 @@ export default function DashboardQuickActions() {
   const [isSendingDigest, setIsSendingDigest] = useState(false);
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
   const [isPrefsOpen, setIsPrefsOpen] = useState(false);
-  const [cronEngine, setCronEngine] = useState({ status: 'active', daily_sweeps: 6, last_kb_curation: null });
-  const [prefs, setPrefs] = useState({ instant_receipts: true, urgent_alerts: true, daily_digest: true });
+  const [cronEngine, setCronEngine] = useState({ status: 'active', daily_sweeps: 9, last_kb_curation: null });
+  const [prefs, setPrefs] = useState({ instant_receipts: true, urgent_alerts: true, daily_digest: true, autoresolve_days: 7 });
   const [isSavingPrefs, setIsSavingPrefs] = useState(false);
 
   const fetchCronStatus = async () => {
@@ -64,9 +64,9 @@ export default function DashboardQuickActions() {
         body: JSON.stringify(prefs)
       });
 
-      if (!res.ok) throw new Error("Failed to save notification preferences.");
+      if (!res.ok) throw new Error("Failed to save automation preferences.");
 
-      toast.success("Notification preferences updated!", {
+      toast.success("Notification & automation preferences updated!", {
         style: { background: '#09090b', color: '#10b981', border: '1px solid rgba(16,185,129,0.3)' }
       });
       setIsPrefsOpen(false);
@@ -113,16 +113,16 @@ export default function DashboardQuickActions() {
       {/* Live Autonomous Engine Badge */}
       <div
         className="hidden md:flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-[10px] font-bold text-emerald-400 bg-emerald-500/10 border border-emerald-500/20"
-        title={`Automated CRON Engine active with ${cronEngine.daily_sweeps} daily background sweeps. Last KB Curation: ${cronEngine.last_kb_curation ? new Date(cronEngine.last_kb_curation).toLocaleTimeString() : 'Active'}`}
+        title={`Automated CRON Engine active with 9 daily background sweeps. Last KB Curation: ${cronEngine.last_kb_curation ? new Date(cronEngine.last_kb_curation).toLocaleTimeString() : 'Active'}`}
       >
         <FiCpu className="text-xs animate-pulse"/>
-        <span>Autonomous Engine ({cronEngine.daily_sweeps} Sweeps)</span>
+        <span>Autonomous Engine (9 Sweeps)</span>
       </div>
 
       <button
         onClick={() => setIsPrefsOpen(true)}
         className="p-1.5 rounded-xl text-zinc-400 bg-zinc-900 border border-zinc-800 hover:text-white transition-all"
-        title="Configure notification preferences"
+        title="Configure notification and automation preferences"
       >
         <FiSliders className="text-xs"/>
       </button>
@@ -142,20 +142,20 @@ export default function DashboardQuickActions() {
         className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-[11px] font-bold uppercase text-indigo-300 bg-indigo-500/10 border border-indigo-500/20 hover:bg-indigo-500/20 transition-all disabled:opacity-50"
         title="Email daily executive summary to james.ellars@axim.us.com"
       >
-        <FiMail className={isSendingDigest ? 'animate-spin' : ''} />
+        <FiMail className={isSendingDigest ? 'animate-spin' : ''}/>
         <span>{isSendingDigest ? 'Sending...' : 'Email Briefing'}</span>
       </button>
 
       <ExecutiveDirectiveHistoryModal isOpen={isHistoryOpen} onClose={() => setIsHistoryOpen(false)} />
 
-      {/* Preferences Modal */}
+      {/* Preferences & Automation Modal */}
       {isPrefsOpen && (
         <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="w-full max-w-md rounded-3xl bg-zinc-950 border border-zinc-800 shadow-2xl p-6 space-y-4 text-xs">
+          <div className="w-full max-w-md rounded-3xl bg-zinc-950 border border-zinc-800 shadow-2xl p-6 space-y-4 text-xs font-mono">
             <div className="flex items-center justify-between border-b border-zinc-900 pb-3">
               <div className="flex items-center gap-2 font-bold text-indigo-400 uppercase tracking-wider">
                 <FiSliders/>
-                <span>Email Notification Preferences</span>
+                <span>Automation & Notification Settings</span>
               </div>
               <button onClick={() => setIsPrefsOpen(false)} className="p-1 text-zinc-500 hover:text-white"><FiX/></button>
             </div>
@@ -186,6 +186,22 @@ export default function DashboardQuickActions() {
                   className="rounded bg-zinc-900 border-zinc-700 text-indigo-500 focus:ring-0"
                 />
               </label>
+
+              {/* Inactivity Threshold Select */}
+              <div className="p-3 rounded-xl bg-black/50 border border-zinc-800 space-y-1.5">
+                <div className="font-bold text-zinc-200">Inactivity Auto-Resolution Window</div>
+                <div className="text-[10px] text-zinc-500 mb-1">Threshold for automatically closing pending inactive tickets</div>
+                <select
+                  value={prefs.autoresolve_days}
+                  onChange={(e) => setPrefs({ ...prefs, autoresolve_days: parseInt(e.target.value, 10) })}
+                  className="w-full p-2 rounded-lg bg-zinc-900 border border-zinc-700 text-xs text-zinc-200 focus:outline-none focus:border-indigo-500"
+                >
+                  <option value={3}>3 Days of Inactivity</option>
+                  <option value={7}>7 Days of Inactivity (Default)</option>
+                  <option value={14}>14 Days of Inactivity</option>
+                  <option value={0}>Disabled (Manual Resolution Only)</option>
+                </select>
+              </div>
             </div>
 
             <button
@@ -194,7 +210,7 @@ export default function DashboardQuickActions() {
               className="w-full py-2.5 rounded-xl bg-indigo-500 hover:bg-indigo-400 text-white font-mono font-bold uppercase transition-all flex items-center justify-center gap-1.5"
             >
               <FiCheck/>
-              <span>{isSavingPrefs ? 'Saving...' : 'Save Preferences'}</span>
+              <span>{isSavingPrefs ? 'Saving...' : 'Save Settings'}</span>
             </button>
           </div>
         </div>

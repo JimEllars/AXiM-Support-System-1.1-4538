@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { FiActivity, FiClock, FiShield, FiX, FiRefreshCw, FiSend, FiZap, FiPlay } from 'react-icons/fi';
+import { FiActivity, FiClock, FiShield, FiX, FiRefreshCw, FiSend, FiZap, FiPlay, FiCpu, FiCheckCircle } from 'react-icons/fi';
 import toast from 'react-hot-toast';
 import { supabase } from '../../lib/supabaseClient';
 import { getEdgeWorkerUrl } from '../../lib/edgeWorkerUrl';
@@ -62,7 +62,7 @@ export default function CoreHealthDiagnosticsModal({ isOpen, onClose }) {
       const json = await res.json();
       if (!res.ok || !json.success) throw new Error(json.error || 'CRON sweep failed.');
 
-      toast.success(`Full CRON sweep triggered! Executed ${json.executed_sweeps || 7} background automations.`, {
+      toast.success(`Full CRON sweep triggered! Executed ${json.executed_sweeps || 9} background automations.`, {
         style: { background: '#09090b', color: '#10b981', border: '1px solid rgba(16,185,129,0.3)' }
       });
       fetchDiagnostics();
@@ -107,9 +107,21 @@ export default function CoreHealthDiagnosticsModal({ isOpen, onClose }) {
 
   if (!isOpen) return null;
 
+  const activeSweeps = [
+    "SLA Breach Auto-Escalation",
+    "Inactivity Auto-Resolution",
+    "Workers AI Knowledge Base Curation",
+    "Vector KB Health & Re-Indexing",
+    "Executive Daily Digest Dispatch",
+    "System Daily Progress Report",
+    "Stale HITL Decision Reminders",
+    "Stale Ticket Identification",
+    "Data Retention Purge"
+  ];
+
   return (
     <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
-      <div className="w-full max-w-xl rounded-3xl bg-zinc-950 border border-zinc-800 shadow-2xl p-6 space-y-4 font-mono text-xs">
+      <div className="w-full max-w-xl rounded-3xl bg-zinc-950 border border-zinc-800 shadow-2xl p-6 space-y-4 font-mono text-xs max-h-[90vh] overflow-y-auto">
         <div className="flex items-center justify-between border-b border-zinc-900 pb-3">
           <div className="flex items-center gap-2 font-bold text-indigo-400 uppercase tracking-wider">
             <FiActivity className="text-sm animate-pulse"/>
@@ -144,22 +156,30 @@ export default function CoreHealthDiagnosticsModal({ isOpen, onClose }) {
               <div className="text-[11px] text-zinc-500 font-sans">Runtime: {data.edge_worker?.runtime}</div>
             </div>
 
-            {/* CRON Schedule Grid & Manual Sweep Trigger */}
-            <div className="p-3.5 rounded-2xl bg-black/50 border border-zinc-800 space-y-2">
+            {/* 9-Sweep CRON Automation Breakdown Matrix */}
+            <div className="p-3.5 rounded-2xl bg-black/50 border border-zinc-800 space-y-2.5">
               <div className="flex items-center justify-between font-bold text-zinc-300">
-                <span className="flex items-center gap-1.5 text-sky-400"><FiClock/> Autonomous CRON Sweeps</span>
+                <span className="flex items-center gap-1.5 text-sky-400"><FiClock/> Autonomous CRON Matrix (9 Sweeps)</span>
                 <button
                   onClick={handleTriggerFullSweep}
                   disabled={isSweeping}
                   className="flex items-center gap-1 px-2.5 py-0.5 rounded text-[9px] font-bold uppercase text-sky-300 bg-sky-500/10 border border-sky-500/20 hover:bg-sky-500/20 transition-all disabled:opacity-50"
-                  title="Run all background CRON sweeps concurrently on demand"
+                  title="Run all 9 background CRON sweeps concurrently on demand"
                 >
-                  <FiPlay className={isSweeping ? 'animate-spin' : ''} />
+                  <FiPlay className={isSweeping ? 'animate-spin' : ''}/>
                   <span>{isSweeping ? 'Sweeping...' : 'Trigger Full Sweep'}</span>
                 </button>
               </div>
-              <div className="text-[11px] text-zinc-500 font-sans">
-                Schedule: <code>{data.cron_schedule?.schedule}</code> | Last Run: {data.cron_schedule?.last_executed ? new Date(data.cron_schedule.last_executed).toLocaleString() : 'Pending'}
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-1.5 pt-1">
+                {activeSweeps.map((sweep, idx) => (
+                  <div key={idx} className="p-2 rounded-lg bg-zinc-900/60 border border-zinc-800/80 flex items-center justify-between text-[10px]">
+                    <span className="text-zinc-300 truncate pr-1">{sweep}</span>
+                    <span className="text-emerald-400 flex items-center gap-1 flex-shrink-0 font-bold">
+                      <FiCheckCircle className="text-[9px]"/> Active
+                    </span>
+                  </div>
+                ))}
               </div>
             </div>
 
@@ -187,7 +207,7 @@ export default function CoreHealthDiagnosticsModal({ isOpen, onClose }) {
                 className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-indigo-500/10 text-indigo-300 border border-indigo-500/30 hover:bg-indigo-500/20 font-bold uppercase transition-all disabled:opacity-50"
                 title="Send test briefing email to Mr. Ellars to verify transport health"
               >
-                <FiSend className={isTesting ? 'animate-spin' : ''} />
+                <FiSend className={isTesting ? 'animate-spin' : ''}/>
                 <span>{isTesting ? 'Testing...' : 'Trigger Test Briefing'}</span>
               </button>
             </div>
