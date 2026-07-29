@@ -726,6 +726,110 @@ async function verifyEmailItWebhookSignature(rawBody: string, signature: string,
   }
 }
 
+
+// --- AUTONOMOUS INACTIVITY TICKET AUTO-RESOLUTION SWEEP ---
+async function handleStaleTicketAutoResolution(env: Env): Promise<number> {
+  const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
+  const sevenDaysAgo = new Date();
+  sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+  const sevenDaysAgoISO = sevenDaysAgo.toISOString();
+
+  // Fetch pending tickets inactive for >7 days
+  const { data: inactiveTickets } = await supabase
+    .from("support_tickets")
+    .select("id, subject")
+    .eq("status", "pending")
+    .lt("updated_at", sevenDaysAgoISO);
+
+  if (!inactiveTickets || inactiveTickets.length === 0) return 0;
+
+  let resolvedCount = 0;
+  for (const ticket of inactiveTickets) {
+    await supabase
+      .from("support_tickets")
+      .update({ status: "resolved", updated_at: new Date().toISOString() })
+      .eq("id", ticket.id);
+
+    await supabase.from("ticket_messages").insert({
+      ticket_id: ticket.id,
+      sender_id: "onyx_system",
+      message_body: "⚠️ **[AUTONOMOUS RESOLUTION]** Ticket automatically marked as **RESOLVED** after 7 days of inactivity following agent response.",
+      is_internal_note: true,
+      metadata: { source: "autonomous_inactivity_cron_sweep" }
+    });
+
+    await supabase.from("events_ax2024").insert({
+      type: "ticket_autoresolved_inactivity",
+      payload: { ticket_id: ticket.id, timestamp: new Date().toISOString() }
+    });
+
+    resolvedCount++;
+  }
+
+  return resolvedCount;
+}
+
+// --- DAILY AUTONOMOUS SYSTEM PROGRESS REPORT DISPATCH ---
+async function sendDailySystemProgressReport(env: Env): Promise<boolean> {
+  const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
+  const past24h = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+
+  // Query 24h operational achievements
+  const { count: autoEscalations } = await supabase
+    .from("events_ax2024")
+    .select("id", { count: "exact", head: true })
+    .gte("timestamp", past24h)
+    .eq("type", "sla_breach_auto_escalated");
+
+  const { count: autoKbEntries } = await supabase
+    .from("events_ax2024")
+    .select("id", { count: "exact", head: true })
+    .gte("timestamp", past24h)
+    .eq("type", "cron_kb_curation_executed");
+
+  const { count: autoResolutions } = await supabase
+    .from("events_ax2024")
+    .select("id", { count: "exact", head: true })
+    .gte("timestamp", past24h)
+    .eq("type", "ticket_autoresolved_inactivity");
+
+  const htmlBody = `
+    <div style="font-family: monospace; background: #09090b; color: #f4f4f5; padding: 24px; border-radius: 16px; border: 1px solid #10b981; max-width: 600px; margin: 0 auto;">
+      <h2 style="color: #10b981; margin-top: 0; font-size: 16px;">🤖 DAILY AUTONOMOUS SYSTEM PROGRESS REPORT</h2>
+      <p style="font-size: 12px; color: #a1a1aa;">Summary of background automation achievements over the past 24 hours:</p>
+
+      <hr style="border: 0; border-top: 1px solid #27272a; margin: 16px 0;" />
+
+      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; font-size: 12px;">
+        <div style="background: #18181b; padding: 12px; border-radius: 8px; border: 1px solid #27272a;">
+          <span style="color: #71717a; font-size: 10px; text-transform: uppercase;">SLA Auto-Escalations</span>
+          <strong style="display: block; color: #f43f5e; font-size: 18px; margin-top: 4px;">${autoEscalations || 0}</strong>
+        </div>
+        <div style="background: #18181b; padding: 12px; border-radius: 8px; border: 1px solid #27272a;">
+          <span style="color: #71717a; font-size: 10px; text-transform: uppercase;">Auto-Curated KB Entries</span>
+          <strong style="display: block; color: #38bdf8; font-size: 18px; margin-top: 4px;">${autoKbEntries || 0}</strong>
+        </div>
+        <div style="background: #18181b; padding: 12px; border-radius: 8px; border: 1px solid #27272a; grid-column: span 2;">
+          <span style="color: #71717a; font-size: 10px; text-transform: uppercase;">Inactivity Auto-Resolutions</span>
+          <strong style="display: block; color: #10b981; font-size: 18px; margin-top: 4px;">${autoResolutions || 0}</strong>
+        </div>
+      </div>
+
+      <hr style="border: 0; border-top: 1px solid #27272a; margin: 16px 0;" />
+      <p style="margin-bottom: 0; text-align: center;">
+        <a href="https://support.axim.us.com" style="color: #6366f1; font-weight: bold; text-decoration: none; font-size: 12px;">Open Support Workstation HUD &rarr;</a>
+      </p>
+    </div>
+  `;
+
+  return await sendEmailItNotification(
+    "james.ellars@axim.us.com",
+    `🤖 [AUTONOMOUS PROGRESS] Daily System Maintenance & Telemetry Summary`,
+    htmlBody,
+    env
+  );
+}
+
 export default {
   async scheduled(event: ScheduledEvent, env: Env, ctx: ExecutionContext): Promise<void> {
     ctx.waitUntil(generateAndSendDailyDigest(env));
@@ -735,6 +839,8 @@ export default {
     ctx.waitUntil(handleStaleTicketSweep(env));
     ctx.waitUntil(checkAndSendStaleHitlReminders(env));
     ctx.waitUntil(handleAutoKnowledgeCurationSweep(env));
+    ctx.waitUntil(handleStaleTicketAutoResolution(env));
+    ctx.waitUntil(sendDailySystemProgressReport(env));
 
     const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
     ctx.waitUntil(Promise.resolve(supabase.from("events_ax2024").insert({
@@ -749,7 +855,7 @@ export default {
     ctx.waitUntil(Promise.resolve(supabase.from("events_ax2024").insert({
       type: "cron_sweep_completed",
       payload: {
-        executed_sweeps: 7,
+        executed_sweeps: 8,
         trigger_source: "cloudflare_cron_trigger",
         timestamp: new Date().toISOString()
       }

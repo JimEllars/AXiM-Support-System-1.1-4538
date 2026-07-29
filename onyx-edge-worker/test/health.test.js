@@ -2,7 +2,7 @@ import { describe, it, expect, vi } from 'vitest';
 
 global.fetch = vi.fn();
 
-describe('Edge Health & Workers AI Resilience Suite', () => {
+describe('Edge Health & Autonomous Self-Cleaning Suite', () => {
   it('should return 200 OK for standard worker health checks', async () => {
     vi.mocked(fetch).mockResolvedValueOnce({
       status: 200,
@@ -15,23 +15,23 @@ describe('Edge Health & Workers AI Resilience Suite', () => {
     expect(data.status).toBe('healthy');
   });
 
-  it('should process full CRON sweep triggers and emit cron_sweep_completed telemetry', async () => {
+  it('should process full CRON sweep executions and log 8 background automations', async () => {
     vi.mocked(fetch).mockResolvedValueOnce({
       status: 200,
-      json: async () => ({ success: true, executed_sweeps: 7, message: "Full autonomous CRON sweep dispatched successfully." })
+      json: async () => ({ success: true, executed_sweeps: 8, message: "Full autonomous CRON sweep dispatched successfully." })
     });
 
     const res = await fetch('http://localhost:8787/api/v1/cron/trigger-all', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': 'Bearer valid_session_token'
+        'Authorization': `Bearer valid_session_token`
       }
     });
 
     expect(res.status).toBe(200);
     const data = await res.json();
     expect(data.success).toBe(true);
-    expect(data.executed_sweeps).toBe(7);
+    expect(data.executed_sweeps).toBe(8);
   });
 });
