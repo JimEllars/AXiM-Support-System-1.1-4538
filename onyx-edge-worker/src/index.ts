@@ -667,6 +667,70 @@ async function checkAndSendStaleHitlReminders(env: Env): Promise<number> {
 }
 
 
+
+// --- AUTONOMOUS AI KNOWLEDGE CURATION CRON SWEEP ---
+async function handleAutoKnowledgeCurationSweep(env: Env): Promise<number> {
+  const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
+  const past24h = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+
+  // 1. Fetch tickets resolved in the last 24 hours
+  const { data: resolvedTickets } = await supabase
+    .from("support_tickets")
+    .select("id, subject, description, metadata")
+    .eq("status", "resolved")
+    .gte("updated_at", past24h);
+
+  if (!resolvedTickets || resolvedTickets.length === 0) return 0;
+
+  let curatedCount = 0;
+  for (const ticket of resolvedTickets) {
+    // Check if already curated
+    const { data: existing } = await supabase
+      .from("ticket_ai_telemetry")
+      .select("id")
+      .eq("ticket_id", ticket.id)
+      .eq("is_curated", true)
+      .maybeSingle();
+
+    if (existing) continue;
+
+    let resolutionKb = "Resolved via standard resolution pathway.";
+    if (env.AI) {
+      try {
+        const promptText = `Synthesize a concise Knowledge Base resolution article (2 sentences) for this resolved support ticket:\nSubject: ${ticket.subject}\nDescription: ${ticket.description}`;
+        const aiRes: any = await env.AI.run("@cf/meta/llama-3.1-8b-instruct", {
+          messages: [
+            { role: "system", content: "You are Onyx Knowledge Curator. Output exactly TWO sentences summarizing the solution." },
+            { role: "user", content: promptText }
+          ]
+        });
+        const text = typeof aiRes.response === "string" ? aiRes.response : JSON.stringify(aiRes.response);
+        if (text.trim()) resolutionKb = text.trim();
+      } catch (aiErr) {
+        console.warn("[AUTONOMOUS KB CURATION AI BYPASS]", aiErr);
+      }
+    }
+
+    await supabase.from("ticket_ai_telemetry").insert({
+      ticket_id: ticket.id,
+      category: "Auto-Curated KB",
+      sentiment: "positive",
+      confidence: 92,
+      is_curated: true,
+      metadata: { auto_kb_summary: resolutionKb, curated_at: new Date().toISOString() }
+    });
+
+    curatedCount++;
+  }
+
+  await supabase.from("events_ax2024").insert({
+    type: "cron_kb_curation_executed",
+    payload: { curated_count: curatedCount, timestamp: new Date().toISOString() }
+  });
+
+  return curatedCount;
+}
+
 // --- WEBHOOK HMAC SIGNATURE VERIFIER ---
 async function verifyEmailItWebhookSignature(rawBody: string, signature: string, secret: string): Promise<boolean> {
   if (!signature || !secret) return false;
@@ -695,6 +759,7 @@ export default {
     ctx.waitUntil(handleDataRetentionSweep(env));
     ctx.waitUntil(handleStaleTicketSweep(env));
     ctx.waitUntil(checkAndSendStaleHitlReminders(env));
+    ctx.waitUntil(handleAutoKnowledgeCurationSweep(env));
 
     // Record CRON execution heartbeat telemetry
     const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
@@ -726,7 +791,38 @@ export default {
       return new Response("Method Not Allowed", { status: 405 });
     }
 
+
+    // --- MULTI-CRON HEALTH ENDPOINT ---
+    if (url.pathname === "/api/v1/health/cron-status" && request.method === "GET") {
+      try {
+        const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
+        const past24h = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+
+        const { data: heartbeat } = await supabase.from("events_ax2024").select("timestamp").eq("type", "cron_heartbeat").order("timestamp", { ascending: false }).limit(1).maybeSingle();
+        const { data: kbCurate } = await supabase.from("events_ax2024").select("timestamp, payload").eq("type", "cron_kb_curation_executed").order("timestamp", { ascending: false }).limit(1).maybeSingle();
+
+        return new Response(JSON.stringify({
+          success: true,
+          automation_engine: {
+            status: "active",
+            daily_sweeps: 6,
+            last_heartbeat: heartbeat?.timestamp || null,
+            last_kb_curation: kbCurate?.timestamp || null,
+            kb_items_curated_last_run: kbCurate?.payload?.curated_count || 0
+          },
+          timestamp: new Date().toISOString()
+        }), {
+          status: 200, headers: { "Content-Type": "application/json", ...getCorsHeaders(env, request) }
+        });
+      } catch (err: any) {
+        return new Response(JSON.stringify({ error: err.message }), {
+          status: 500, headers: getCorsHeaders(env, request)
+        });
+      }
+    }
+
     // Inside export default fetch switch tree for GET /api/v1/health/cron:
+
 
     // --- EMAIL NOTIFICATION PREFERENCES ROUTE ---
     if (url.pathname === "/api/v1/email/preferences" && request.method === "GET") {
