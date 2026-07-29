@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { FiActivity, FiClock, FiShield, FiX, FiRefreshCw, FiSend, FiZap } from 'react-icons/fi';
+import { FiActivity, FiClock, FiShield, FiX, FiRefreshCw, FiSend, FiZap, FiPlay } from 'react-icons/fi';
 import toast from 'react-hot-toast';
 import { supabase } from '../../lib/supabaseClient';
 import { getEdgeWorkerUrl } from '../../lib/edgeWorkerUrl';
@@ -9,6 +9,7 @@ export default function CoreHealthDiagnosticsModal({ isOpen, onClose }) {
   const [isCached, setIsCached] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [isTesting, setIsTesting] = useState(false);
+  const [isSweeping, setIsSweeping] = useState(false);
 
   const fetchDiagnostics = async () => {
     setIsLoading(true);
@@ -30,6 +31,38 @@ export default function CoreHealthDiagnosticsModal({ isOpen, onClose }) {
   useEffect(() => {
     if (isOpen) fetchDiagnostics();
   }, [isOpen]);
+
+  const handleTriggerFullSweep = async () => {
+    if (isSweeping) return;
+    setIsSweeping(true);
+
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const token = session?.access_token;
+      if (!token) throw new Error("Active operator session token required.");
+
+      const workerUrl = getEdgeWorkerUrl();
+      const res = await fetch(`${workerUrl}/api/v1/cron/trigger-all`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        }
+      });
+
+      const json = await res.json();
+      if (!res.ok || !json.success) throw new Error(json.error || 'CRON sweep failed.');
+
+      toast.success(`Full CRON sweep triggered! Executed ${json.executed_sweeps || 7} background automations.`, {
+        style: { background: '#09090b', color: '#10b981', border: '1px solid rgba(16,185,129,0.3)' }
+      });
+      fetchDiagnostics();
+    } catch (err) {
+      toast.error(`Sweep Error: ${err.message}`);
+    } finally {
+      setIsSweeping(false);
+    }
+  };
 
   const handleTestBriefing = async () => {
     if (isTesting) return;
@@ -102,11 +135,19 @@ export default function CoreHealthDiagnosticsModal({ isOpen, onClose }) {
               <div className="text-[11px] text-zinc-500 font-sans">Runtime: {data.edge_worker?.runtime}</div>
             </div>
 
-            {/* CRON Schedule Grid */}
-            <div className="p-3.5 rounded-2xl bg-black/50 border border-zinc-800 space-y-1">
+            {/* CRON Schedule Grid & Manual Sweep Trigger */}
+            <div className="p-3.5 rounded-2xl bg-black/50 border border-zinc-800 space-y-2">
               <div className="flex items-center justify-between font-bold text-zinc-300">
-                <span className="flex items-center gap-1.5 text-sky-400"><FiClock/> CRON Trigger (08:00 UTC)</span>
-                <span className="text-[10px] bg-sky-500/10 text-sky-400 px-2 py-0.5 rounded border border-sky-500/20 uppercase">{data.cron_schedule?.status}</span>
+                <span className="flex items-center gap-1.5 text-sky-400"><FiClock/> Autonomous CRON Sweeps</span>
+                <button
+                  onClick={handleTriggerFullSweep}
+                  disabled={isSweeping}
+                  className="flex items-center gap-1 px-2.5 py-0.5 rounded text-[9px] font-bold uppercase text-sky-300 bg-sky-500/10 border border-sky-500/20 hover:bg-sky-500/20 transition-all disabled:opacity-50"
+                  title="Run all background CRON sweeps concurrently on demand"
+                >
+                  <FiPlay className={isSweeping ? 'animate-spin' : ''} />
+                  <span>{isSweeping ? 'Sweeping...' : 'Trigger Full Sweep'}</span>
+                </button>
               </div>
               <div className="text-[11px] text-zinc-500 font-sans">
                 Schedule: <code>{data.cron_schedule?.schedule}</code> | Last Run: {data.cron_schedule?.last_executed ? new Date(data.cron_schedule.last_executed).toLocaleString() : 'Pending'}

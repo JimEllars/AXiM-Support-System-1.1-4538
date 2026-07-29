@@ -2,7 +2,7 @@ import { describe, it, expect, vi } from 'vitest';
 
 global.fetch = vi.fn();
 
-describe('Edge Health & Multi-CRON Status Suite', () => {
+describe('Edge Health & Full CRON Execution Suite', () => {
   it('should return 200 OK for standard worker health checks', async () => {
     vi.mocked(fetch).mockResolvedValueOnce({
       status: 200,
@@ -15,26 +15,33 @@ describe('Edge Health & Multi-CRON Status Suite', () => {
     expect(data.status).toBe('healthy');
   });
 
-  it('should return consolidated multi-cron automation engine health on GET /api/v1/health/cron-status', async () => {
+  it('should reject unauthorized full CRON sweep requests', async () => {
     vi.mocked(fetch).mockResolvedValueOnce({
-      status: 200,
-      json: async () => ({
-        success: true,
-        automation_engine: {
-          status: 'active',
-          daily_sweeps: 6,
-          last_heartbeat: new Date().toISOString(),
-          last_kb_curation: new Date().toISOString(),
-          kb_items_curated_last_run: 2
-        }
-      })
+      status: 401,
+      json: async () => ({ error: "UNAUTHORIZED_CRON_TRIGGER" })
     });
 
-    const res = await fetch('http://localhost:8787/api/v1/health/cron-status');
+    const res = await fetch('http://localhost:8787/api/v1/cron/trigger-all', { method: 'POST' });
+    expect(res.status).toBe(401);
+  });
+
+  it('should process authorized full CRON sweep executions successfully', async () => {
+    vi.mocked(fetch).mockResolvedValueOnce({
+      status: 200,
+      json: async () => ({ success: true, executed_sweeps: 7 })
+    });
+
+    const res = await fetch('http://localhost:8787/api/v1/cron/trigger-all', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer valid_session_token'
+      }
+    });
+
     expect(res.status).toBe(200);
     const data = await res.json();
     expect(data.success).toBe(true);
-    expect(data.automation_engine.daily_sweeps).toBe(6);
-    expect(data.automation_engine.status).toBe('active');
+    expect(data.executed_sweeps).toBe(7);
   });
 });

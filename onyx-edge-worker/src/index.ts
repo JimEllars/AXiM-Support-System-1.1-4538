@@ -315,63 +315,38 @@ async function handleSLASweep(env: Env) {
 
     const { data: breachedTickets, error: fetchError } = await supabase
       .from("support_tickets")
-      .select("id")
+      .select("id, subject")
       .in("status", ["open", "pending"])
       .lt("sla_breach_at", now);
 
-    if (fetchError) {
-      console.error("[handleSLASweep] Error fetching breached tickets:", fetchError);
-      return;
-    }
-
-    if (!breachedTickets || breachedTickets.length === 0) {
-      console.log("[handleSLASweep] No breached tickets found.");
-      return;
-    }
-
-    console.log(`[handleSLASweep] Found ${breachedTickets.length} breached tickets. Escalating...`);
+    if (fetchError || !breachedTickets || breachedTickets.length === 0) return;
 
     for (const ticket of breachedTickets) {
-      // Escalate priority
-      const { error: updateError } = await supabase
+      // Autonomous Auto-Reassignment & Escalation
+      await supabase
         .from("support_tickets")
-        .update({ priority: "urgent" })
+        .update({
+          priority: "urgent",
+          assigned_department: "urgent-escalations",
+          updated_at: now
+        })
         .eq("id", ticket.id);
 
-      if (updateError) {
-        console.error(`[handleSLASweep] Error updating ticket ${ticket.id}:`, updateError);
-        continue;
-      }
+      await supabase.from("ticket_messages").insert({
+        ticket_id: ticket.id,
+        sender_id: "onyx_system",
+        message_body: "⚠️ **[AUTONOMOUS SLA ESCALATION]** Ticket breached resolution deadline. Priority automatically upgraded to **URGENT** and reassigned to **Urgent Escalations**.",
+        is_internal_note: true,
+        metadata: { source: "autonomous_sla_cron_sweep" }
+      });
 
-      // CRITICAL FIX: Synchronize timeline properties to map against valid relational table parameters
-      const { error: messageError } = await supabase
-        .from("ticket_messages")
-        .insert({
-          ticket_id: ticket.id,
-          sender_id: "system",
-          message_body: "SYSTEM ALERT: SLA Breached. Ticket automatically escalated to URGENT priority.",
-          is_internal_note: true
-        });
-
-      if (messageError) {
-        console.error(`[handleSLASweweep] Error inserting message for ticket ${ticket.id}:`, messageError);
-      }
+      await supabase.from("events_ax2024").insert({
+        type: "sla_breach_auto_escalated",
+        payload: { ticket_id: ticket.id, timestamp: now }
+      });
     }
-
-    // Record system chronology telemetry data parameters
-    const { error: cronSlaTelemetryErr } = await supabase.from("events_ax2024").insert({
-      type: "chrono_automation_metric",
-      payload: {
-        routine: "handleSLASweep",
-        processed_records_count: breachedTickets.length,
-        timestamp: new Date().toISOString()
-      }
-    });
-    if (cronSlaTelemetryErr) console.error("Chrono telemetry frame desynchronized:", cronSlaTelemetryErr.message);
-
-    console.log("[handleSLASweep] SLA sweep completed successfully.");
-  } catch (error) {
-    console.error("[handleSLASweep] Unhandled exception in SLA sweep:", error);
+  } catch (err) {
+    console.error("[SLA SWEEP ERROR]", err);
   }
 }
 
@@ -791,6 +766,47 @@ export default {
       return new Response("Method Not Allowed", { status: 405 });
     }
 
+
+    // --- FULL CRON TRIGGER ENDPOINT ---
+    if (url.pathname === "/api/v1/cron/trigger-all" && request.method === "POST") {
+      const authHeader = request.headers.get("Authorization") || "";
+      const token = authHeader.replace("Bearer ", "").trim();
+      if (!token) {
+        return new Response(JSON.stringify({ error: "UNAUTHORIZED_CRON_TRIGGER" }), {
+          status: 401, headers: getCorsHeaders(env, request)
+        });
+      }
+
+      try {
+        // Execute all background automation sweeps concurrently
+        ctx.waitUntil(generateAndSendDailyDigest(env));
+        ctx.waitUntil(generateAndSendExecutiveDigest(env));
+        ctx.waitUntil(handleSLASweep(env));
+        ctx.waitUntil(handleDataRetentionSweep(env));
+        ctx.waitUntil(handleStaleTicketSweep(env));
+        ctx.waitUntil(checkAndSendStaleHitlReminders(env));
+        ctx.waitUntil(handleAutoKnowledgeCurationSweep(env));
+
+        const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
+        await supabase.from("events_ax2024").insert({
+          type: "manual_full_cron_sweep_executed",
+          payload: { executed_by: "administrator", timestamp: new Date().toISOString() }
+        });
+
+        return new Response(JSON.stringify({
+          success: true,
+          message: "Full autonomous CRON sweep dispatched successfully.",
+          executed_sweeps: 7,
+          timestamp: new Date().toISOString()
+        }), {
+          status: 200, headers: { "Content-Type": "application/json", ...getCorsHeaders(env, request) }
+        });
+      } catch (err: any) {
+        return new Response(JSON.stringify({ error: err.message }), {
+          status: 500, headers: getCorsHeaders(env, request)
+        });
+      }
+    }
 
     // --- MULTI-CRON HEALTH ENDPOINT ---
     if (url.pathname === "/api/v1/health/cron-status" && request.method === "GET") {
