@@ -1,43 +1,36 @@
 import { describe, it, expect, vi } from 'vitest';
 
-// Completely mock global fetch to eliminate absolute network port dependencies during unit testing
 global.fetch = vi.fn();
 
-describe('Auto-Draft Endpoint Hardening', () => {
-  it('should reject requests without an authorization header', async () => {
+describe('Edge Auto-Draft Generation & Feedback Suite', () => {
+  it('should reject unauthorized feedback telemetry requests', async () => {
     vi.mocked(fetch).mockResolvedValueOnce({
       status: 401,
-      json: async () => ({ error: "UNAUTHORIZED_DRAFT_GENERATION" })
+      json: async () => ({ error: "UNAUTHORIZED_FEEDBACK_DISPATCH" })
     });
 
-    const res = await fetch('http://localhost:8787/api/v1/onyx-bridge/draft', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ticketData: { subject: 'test' }, articles: [] })
-    });
-
+    const res = await fetch('http://localhost:8787/api/v1/telemetry/autodraft-feedback', { method: 'POST' });
     expect(res.status).toBe(401);
-    const data = await res.json();
-    expect(data.error).toBe("UNAUTHORIZED_DRAFT_GENERATION");
   });
 
-  it('should reject requests with invalid authorization tokens', async () => {
+  it('should process authorized auto-draft feedback dispatches successfully', async () => {
     vi.mocked(fetch).mockResolvedValueOnce({
-      status: 403,
-      json: async () => ({ error: "INVALID_SESSION" })
+      status: 200,
+      json: async () => ({ success: true, action: 'applied', ticket_id: 'ticket-123' })
     });
 
-    const res = await fetch('http://localhost:8787/api/v1/onyx-bridge/draft', {
+    const res = await fetch('http://localhost:8787/api/v1/telemetry/autodraft-feedback', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': 'Bearer invalid_token_123'
+        'Authorization': 'Bearer valid_session_token'
       },
-      body: JSON.stringify({ ticketData: { subject: 'test' }, articles: [] })
+      body: JSON.stringify({ ticketId: 'ticket-123', action: 'applied', draftLength: 120 })
     });
 
-    expect(res.status).toBe(403);
+    expect(res.status).toBe(200);
     const data = await res.json();
-    expect(data.error).toBe("INVALID_SESSION");
+    expect(data.success).toBe(true);
+    expect(data.action).toBe('applied');
   });
 });

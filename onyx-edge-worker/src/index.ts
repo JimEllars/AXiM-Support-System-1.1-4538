@@ -1796,6 +1796,47 @@ export default {
       return await handleTelemetryIngress(anomalyPayload, env, ctx, request);
     }
 
+    // --- AI AUTO-DRAFT FEEDBACK TELEMETRY ENDPOINT ---
+    if (url.pathname === "/api/v1/telemetry/autodraft-feedback" && request.method === "POST") {
+      const authHeader = request.headers.get("Authorization") || "";
+      const token = authHeader.replace("Bearer ", "").trim();
+      if (!token) {
+        return new Response(JSON.stringify({ error: "UNAUTHORIZED_FEEDBACK_DISPATCH" }), {
+          status: 401, headers: getCorsHeaders(env, request)
+        });
+      }
+
+      try {
+        const payload: any = await request.json();
+        const { ticketId, action, draftLength } = payload;
+
+        if (!ticketId || !action || !["applied", "dismissed"].includes(action)) {
+          return new Response(JSON.stringify({ error: "INVALID_FEEDBACK_PAYLOAD" }), {
+            status: 400, headers: getCorsHeaders(env, request)
+          });
+        }
+
+        const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
+        await supabase.from("events_ax2024").insert({
+          type: "autodraft_feedback_received",
+          payload: {
+            ticket_id: ticketId,
+            action,
+            draft_length: draftLength || 0,
+            timestamp: new Date().toISOString()
+          }
+        });
+
+        return new Response(JSON.stringify({ success: true, action, ticket_id: ticketId }), {
+          status: 200, headers: { "Content-Type": "application/json", ...getCorsHeaders(env, request) }
+        });
+      } catch (err: any) {
+        return new Response(JSON.stringify({ error: err.message }), {
+          status: 500, headers: getCorsHeaders(env, request)
+        });
+      }
+    }
+
     if (url.pathname === "/api/v1/onyx-bridge/draft") {
       return handleAutoDraft(request, env, ctx);
     }

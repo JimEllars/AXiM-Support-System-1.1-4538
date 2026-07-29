@@ -1,72 +1,87 @@
 import React, { useState } from 'react';
-import { FiFeather, FiCopy, FiCheck, FiCornerDownLeft } from 'react-icons/fi';
+import { FiCpu, FiCheck, FiX } from 'react-icons/fi';
 import toast from 'react-hot-toast';
-import { ErrorBoundary } from '../layout/ErrorBoundary';
+import { supabase } from '../../lib/supabaseClient';
+import { getEdgeWorkerUrl } from '../../lib/edgeWorkerUrl';
 
-function AutoDraftWhisperContent({ draftText, onApplyDraft }) {
-  const [copied, setCopied] = useState(false);
+export default function AutoDraftWhisper({ draftText, onApplyDraft, ticketId }) {
+  const [isDismissed, setIsDismissed] = useState(false);
 
-  if (!draftText) return null;
+  if (!draftText || isDismissed) return null;
 
-  const handleCopy = () => {
-    navigator.clipboard.writeText(draftText);
-    setCopied(true);
-    toast.success("AI draft copied to clipboard!", {
-      style: { background: '#09090b', color: '#10b981', border: '1px solid rgba(16,185,129,0.3)' }
-    });
-    setTimeout(() => setCopied(false), 2000);
-  };
+  const sendFeedbackTelemetry = async (action) => {
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const token = session?.access_token;
+      if (!token) return;
 
-  const handleApply = () => {
-    if (onApplyDraft) {
-      onApplyDraft(draftText);
-      toast.success("AI draft inserted into composer!", {
-        style: { background: '#09090b', color: '#10b981', border: '1px solid rgba(16,185,129,0.3)' }
-      });
-    } else {
-      handleCopy();
+      const workerUrl = getEdgeWorkerUrl();
+      fetch(`${workerUrl}/api/v1/telemetry/autodraft-feedback`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          ticketId: ticketId || 'unknown',
+          action,
+          draftLength: draftText.length
+        })
+      }).catch((e) => console.warn('[FEEDBACK TELEMETRY BYPASS]', e));
+    } catch (err) {
+      console.warn('[FEEDBACK SESSION ERROR]', err);
     }
   };
 
+  const handleApply = () => {
+    sendFeedbackTelemetry('applied');
+    if (onApplyDraft) onApplyDraft(draftText);
+    toast.success("AI draft whisper applied to composer!", {
+      style: { background: '#09090b', color: '#10b981', border: '1px solid rgba(16,185,129,0.3)' }
+    });
+  };
+
+  const handleDismiss = () => {
+    sendFeedbackTelemetry('dismissed');
+    setIsDismissed(true);
+  };
+
   return (
-    <div className="my-3 p-4 rounded-2xl border bg-indigo-950/20 border-indigo-500/30 relative overflow-hidden shadow-[0_0_20px_rgba(99,102,241,0.05)]">
-      <div className="flex items-center justify-between mb-2">
-        <div className="flex items-center gap-2">
-          <FiFeather className="text-indigo-400 text-xs animate-bounce"/>
-          <span className="text-[10px] font-mono font-black uppercase text-indigo-300 tracking-wider">
-            Onyx AI Suggested Whisper Reply
-          </span>
+    <div className="p-4 rounded-2xl bg-indigo-950/30 border border-indigo-500/30 backdrop-blur-md space-y-3 font-mono text-xs shadow-lg">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2 text-indigo-300 font-bold uppercase tracking-wider text-[11px]">
+          <FiCpu className="text-indigo-400 animate-pulse"/>
+          <span>Onyx AI Response Whisper</span>
         </div>
-        <div className="flex items-center gap-1.5">
-          <button
-            onClick={handleCopy}
-            className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-[10px] font-mono bg-zinc-900 hover:bg-zinc-800 text-zinc-300 border border-zinc-800 transition-all"
-            title="Copy draft text"
-          >
-            {copied ? <FiCheck className="text-emerald-400"/> : <FiCopy/>}
-            <span>{copied ? 'Copied' : 'Copy'}</span>
-          </button>
-          <button
-            onClick={handleApply}
-            className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-[10px] font-mono font-bold uppercase bg-indigo-500 hover:bg-indigo-400 text-white border border-indigo-400/20 transition-all shadow-sm"
-          >
-            <FiCornerDownLeft/>
-            <span>Apply to Composer</span>
-          </button>
-        </div>
+
+        <button
+          onClick={handleDismiss}
+          className="p-1 rounded-lg text-zinc-500 hover:text-zinc-300 transition-colors"
+          title="Dismiss AI Suggestion"
+        >
+          <FiX className="text-xs"/>
+        </button>
       </div>
 
-      <p className="text-xs text-zinc-300 font-sans leading-relaxed whitespace-pre-wrap bg-black/40 p-3 rounded-xl border border-indigo-500/10">
+      <p className="text-zinc-300 font-sans leading-relaxed text-xs whitespace-pre-wrap bg-black/40 p-3 rounded-xl border border-indigo-500/10">
         {draftText}
       </p>
-    </div>
-  );
-}
 
-export default function AutoDraftWhisper(props) {
-  return (
-    <ErrorBoundary inline={true}>
-      <AutoDraftWhisperContent {...props} />
-    </ErrorBoundary>
+      <div className="flex items-center justify-end gap-2">
+        <button
+          onClick={handleDismiss}
+          className="px-3 py-1 rounded-lg text-[10px] font-bold uppercase text-zinc-400 hover:text-zinc-200 transition-colors"
+        >
+          Dismiss
+        </button>
+        <button
+          onClick={handleApply}
+          className="flex items-center gap-1.5 px-3 py-1 rounded-xl bg-indigo-500 hover:bg-indigo-400 text-white font-bold uppercase text-[10px] transition-all shadow-md"
+        >
+          <FiCheck className="text-xs"/>
+          <span>Apply to Composer</span>
+        </button>
+      </div>
+    </div>
   );
 }
