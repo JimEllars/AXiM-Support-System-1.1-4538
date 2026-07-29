@@ -29,7 +29,16 @@ export default function CoreHealthDiagnosticsModal({ isOpen, onClose }) {
   };
 
   useEffect(() => {
-    if (isOpen) fetchDiagnostics();
+    if (isOpen) {
+      fetchDiagnostics();
+
+      const handleLiveSweepCompletion = () => {
+        fetchDiagnostics();
+      };
+
+      window.addEventListener('axim:cron_sweep_completed', handleLiveSweepCompletion);
+      return () => window.removeEventListener('axim:cron_sweep_completed', handleLiveSweepCompletion);
+    }
   }, [isOpen]);
 
   const handleTriggerFullSweep = async () => {
