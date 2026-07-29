@@ -63,11 +63,18 @@ export const useTicketStore = create((set, get) => ({
         { event: 'INSERT', schema: 'public', table: 'events_ax2024' },
         (payload) => {
           const { new: newEvent } = payload;
-          if (newEvent?.type === 'thread_executive_briefing_exported') {
+                    if (newEvent?.type === 'thread_executive_briefing_exported') {
             window.dispatchEvent(new CustomEvent('axim:briefing_exported', { detail: newEvent }));
             import('react-hot-toast').then(({ default: toast }) => {
                 toast("📋 Executive Briefing Dispatched", {
                   style: { background: '#09090b', color: '#38bdf8', border: '1px solid rgba(56,189,248,0.3)' }
+                });
+            }).catch(() => console.warn('toast not found'));
+          } else if (newEvent?.type === 'cron_sweep_completed') {
+            window.dispatchEvent(new CustomEvent('axim:cron_sweep_completed', { detail: newEvent }));
+            import('react-hot-toast').then(({ default: toast }) => {
+                toast("⚡ Autonomous CRON Sweep Completed", {
+                  style: { background: '#09090b', color: '#10b981', border: '1px solid rgba(16,185,129,0.3)' }
                 });
             }).catch(() => console.warn('toast not found'));
           }

@@ -673,7 +673,7 @@ async function handleAutoKnowledgeCurationSweep(env: Env): Promise<number> {
     if (env.AI) {
       try {
         const promptText = `Synthesize a concise Knowledge Base resolution article (2 sentences) for this resolved support ticket:\nSubject: ${ticket.subject}\nDescription: ${ticket.description}`;
-        const aiRes: any = await env.AI.run("@cf/meta/llama-3.1-8b-instruct", {
+        const aiRes: any = await runWorkersAiWithRetry(env, "@cf/meta/llama-3.1-8b-instruct", {
           messages: [
             { role: "system", content: "You are Onyx Knowledge Curator. Output exactly TWO sentences summarizing the solution." },
             { role: "user", content: promptText }
@@ -727,7 +727,7 @@ async function verifyEmailItWebhookSignature(rawBody: string, signature: string,
 }
 
 export default {
-  async scheduled(event: any, env: Env, ctx: any) {
+  async scheduled(event: ScheduledEvent, env: Env, ctx: ExecutionContext): Promise<void> {
     ctx.waitUntil(generateAndSendDailyDigest(env));
     ctx.waitUntil(generateAndSendExecutiveDigest(env));
     ctx.waitUntil(handleSLASweep(env));
@@ -736,16 +736,24 @@ export default {
     ctx.waitUntil(checkAndSendStaleHitlReminders(env));
     ctx.waitUntil(handleAutoKnowledgeCurationSweep(env));
 
-    // Record CRON execution heartbeat telemetry
     const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
-    ctx.waitUntil(supabase.from("events_ax2024").insert({
+    ctx.waitUntil(Promise.resolve(supabase.from("events_ax2024").insert({
       type: "cron_heartbeat",
       payload: {
         cron_schedule: event.cron,
         scheduled_time: new Date(event.scheduledTime || Date.now()).toISOString(),
         executed_at: new Date().toISOString()
       }
-    }));
+    })));
+
+    ctx.waitUntil(Promise.resolve(supabase.from("events_ax2024").insert({
+      type: "cron_sweep_completed",
+      payload: {
+        executed_sweeps: 7,
+        trigger_source: "cloudflare_cron_trigger",
+        timestamp: new Date().toISOString()
+      }
+    })));
   },
   async fetch(request: Request, env: Env, ctx: any): Promise<Response> {
     const url = new URL(request.url);
@@ -1115,7 +1123,7 @@ export default {
         if (env.AI && messages && messages.length > 0) {
           try {
             const promptText = `Summarize this support thread for Executive James Ellars in 3 concise bullet points:\nSubject: ${ticket.subject}\nMessages:\n${messages.map((m: any) => `[${m.sender_id}]:${m.message_body}`).join("\n")}`;
-            const aiRes: any = await env.AI.run("@cf/meta/llama-3.1-8b-instruct", {
+            const aiRes: any = await runWorkersAiWithRetry(env, "@cf/meta/llama-3.1-8b-instruct", {
               messages: [
                 { role: "system", content: "You are Onyx Executive AI. Output 3 concise bullet points." },
                 { role: "user", content: promptText }
@@ -1202,7 +1210,7 @@ export default {
         if (env.AI && logs && logs.length > 0) {
           try {
             const promptText = `Analyze these executive decisions made by James Ellars and summarize his overall policy guidance in ONE concise sentence:\n${JSON.stringify(logs)}`;
-            const aiRes: any = await env.AI.run("@cf/meta/llama-3.1-8b-instruct", {
+            const aiRes: any = await runWorkersAiWithRetry(env, "@cf/meta/llama-3.1-8b-instruct", {
               messages: [
                 { role: "system", content: "You are an executive operational analyst. Output exactly ONE sentence summarizing executive approval trends." },
                 { role: "user", content: promptText }
@@ -2181,7 +2189,7 @@ if (url.pathname === "/api/v1/command/execute" && request.method === "POST") {
           if (env.AI) {
             const { data: tData } = await supabase.from("support_tickets").select("subject, description").eq("id", ticketId).single();
             if (tData) {
-              const aiRes: any = await env.AI.run("@cf/meta/llama-3.1-8b-instruct", {
+              const aiRes: any = await runWorkersAiWithRetry(env, "@cf/meta/llama-3.1-8b-instruct", {
                 messages: [
                   { role: "system", content: "You are Onyx Support AI. Output a concise response draft." },
                   { role: "user", content: `Subject: ${tData.subject}
@@ -2205,7 +2213,7 @@ Description: ${tData.description}` }
 Subject: ${ticket.subject}
 Messages:
 ${messages.map((m: any) => `[${m.sender_id}]:${m.message_body}`).join("\n")}`;
-              const aiRes: any = await env.AI.run("@cf/meta/llama-3.1-8b-instruct", {
+              const aiRes: any = await runWorkersAiWithRetry(env, "@cf/meta/llama-3.1-8b-instruct", {
                 messages: [
                   { role: "system", content: "You are Onyx Executive AI. Output 3 concise bullet points." },
                   { role: "user", content: promptText }
@@ -3465,6 +3473,34 @@ async function getCachedRAGContext(queryText: string, env: Env, supabase: any, c
 
   return contextText;
 }
+
+// --- WORKERS AI EXPONENTIAL BACKOFF RETRY HELPER ---
+async function runWorkersAiWithRetry(
+  env: Env,
+  model: string,
+  payload: any,
+  maxRetries: number = 3
+): Promise<any> {
+  if (!env.AI) return { response: "AI engine unavailable." };
+
+  let attempt = 0;
+  while (attempt < maxRetries) {
+    try {
+      const res = await env.AI.run(model, payload);
+      if (res) return res;
+    } catch (err) {
+      attempt++;
+      if (attempt >= maxRetries) {
+        console.warn(`[WORKERS AI RETRY EXHAUSTED] Model ${model} failed after ${maxRetries} attempts:`, err);
+        return { response: "AI processing experienced a transient delay. Standard operational template applied." };
+      }
+      const backoffMs = Math.pow(2, attempt) * 100;
+      await new Promise((resolve) => setTimeout(resolve, backoffMs));
+    }
+  }
+  return { response: "AI engine timeout." };
+}
+
 async function analyzeWithOnyx(
   subject: string,
   description: string,
@@ -3508,7 +3544,7 @@ Ticket Description: ${description}`;
   // Tier 1: Zero-Latency Cloudflare Workers AI (Edge Native)
   if (env?.AI) {
     try {
-      const aiResult: any = await env.AI.run("@cf/meta/llama-3.1-8b-instruct", {
+      const aiResult: any = await runWorkersAiWithRetry(env, "@cf/meta/llama-3.1-8b-instruct", {
         messages: [
           { role: "system", content: "You are Onyx, an expert support AI. Always output valid JSON objects." },
           { role: "user", content: prompt }

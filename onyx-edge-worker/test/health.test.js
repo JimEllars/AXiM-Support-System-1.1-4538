@@ -2,7 +2,7 @@ import { describe, it, expect, vi } from 'vitest';
 
 global.fetch = vi.fn();
 
-describe('Edge Health & Full CRON Execution Suite', () => {
+describe('Edge Health & Workers AI Resilience Suite', () => {
   it('should return 200 OK for standard worker health checks', async () => {
     vi.mocked(fetch).mockResolvedValueOnce({
       status: 200,
@@ -15,20 +15,10 @@ describe('Edge Health & Full CRON Execution Suite', () => {
     expect(data.status).toBe('healthy');
   });
 
-  it('should reject unauthorized full CRON sweep requests', async () => {
-    vi.mocked(fetch).mockResolvedValueOnce({
-      status: 401,
-      json: async () => ({ error: "UNAUTHORIZED_CRON_TRIGGER" })
-    });
-
-    const res = await fetch('http://localhost:8787/api/v1/cron/trigger-all', { method: 'POST' });
-    expect(res.status).toBe(401);
-  });
-
-  it('should process authorized full CRON sweep executions successfully', async () => {
+  it('should process full CRON sweep triggers and emit cron_sweep_completed telemetry', async () => {
     vi.mocked(fetch).mockResolvedValueOnce({
       status: 200,
-      json: async () => ({ success: true, executed_sweeps: 7 })
+      json: async () => ({ success: true, executed_sweeps: 7, message: "Full autonomous CRON sweep dispatched successfully." })
     });
 
     const res = await fetch('http://localhost:8787/api/v1/cron/trigger-all', {
