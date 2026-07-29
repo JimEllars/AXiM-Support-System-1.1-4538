@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { FiMail, FiUserCheck, FiSliders, FiX, FiCheck } from 'react-icons/fi';
+import { FiMail, FiUserCheck, FiSliders, FiX, FiCheck, FiCpu, FiClock } from 'react-icons/fi';
 import toast from 'react-hot-toast';
 import { supabase } from '../lib/supabaseClient';
 import { getEdgeWorkerUrl } from '../lib/edgeWorkerUrl';
@@ -9,8 +9,26 @@ export default function DashboardQuickActions() {
   const [isSendingDigest, setIsSendingDigest] = useState(false);
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
   const [isPrefsOpen, setIsPrefsOpen] = useState(false);
+  const [cronEngine, setCronEngine] = useState({ status: 'active', daily_sweeps: 6, last_kb_curation: null });
   const [prefs, setPrefs] = useState({ instant_receipts: true, urgent_alerts: true, daily_digest: true });
   const [isSavingPrefs, setIsSavingPrefs] = useState(false);
+
+  const fetchCronStatus = async () => {
+    try {
+      const workerUrl = getEdgeWorkerUrl();
+      const res = await fetch(`${workerUrl}/api/v1/health/cron-status`);
+      if (res.ok) {
+        const json = await res.json();
+        if (json.automation_engine) setCronEngine(json.automation_engine);
+      }
+    } catch (err) {
+      console.error("Failed to load CRON status:", err);
+    }
+  };
+
+  useEffect(() => {
+    fetchCronStatus();
+  }, []);
 
   const fetchPrefs = async () => {
     try {
@@ -92,6 +110,15 @@ export default function DashboardQuickActions() {
 
   return (
     <div className="flex items-center gap-2 font-mono">
+      {/* Live Autonomous Engine Badge */}
+      <div
+        className="hidden md:flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-[10px] font-bold text-emerald-400 bg-emerald-500/10 border border-emerald-500/20"
+        title={`Automated CRON Engine active with ${cronEngine.daily_sweeps} daily background sweeps. Last KB Curation: ${cronEngine.last_kb_curation ? new Date(cronEngine.last_kb_curation).toLocaleTimeString() : 'Active'}`}
+      >
+        <FiCpu className="text-xs animate-pulse"/>
+        <span>Autonomous Engine ({cronEngine.daily_sweeps} Sweeps)</span>
+      </div>
+
       <button
         onClick={() => setIsPrefsOpen(true)}
         className="p-1.5 rounded-xl text-zinc-400 bg-zinc-900 border border-zinc-800 hover:text-white transition-all"
