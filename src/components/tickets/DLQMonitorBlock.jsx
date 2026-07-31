@@ -1,3 +1,4 @@
+import { onyxService } from "../../services/onyxService";
 import React, { useState, useEffect } from 'react';
 import { FiAlertTriangle, FiRefreshCw, FiCheckCircle2, FiShield, FiZap } from 'react-icons/fi';
 import { supabase } from '../../lib/supabaseClient';
@@ -53,16 +54,10 @@ export default function DLQMonitorBlock() {
       if (!token) throw new Error("Session token required.");
 
       const workerUrl = getEdgeWorkerUrl();
-      const res = await fetch(`${workerUrl}/api/v1/dlq/flush`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
-        }
-      });
+      const res = await onyxService.fetchWithTimeout(`${workerUrl}/api/v1/dlq/flush`, { method: 'POST', headers: { 'Authorization': `Bearer ${token}` } });
 
-      const data = await res.json();
-      if (!res.ok || !data.success) throw new Error(data.error || "Batch DLQ flush failed.");
+      if (!res.success || !res.data?.success) throw new Error(res.error || res.data?.error || 'Batch DLQ flush failed.');
+      const data = res.data;
 
       toast.success(`DLQ batch flush completed! Re-queued ${data.flushed_count || 0} payloads.`, {
         style: { background: '#09090b', color: '#10b981', border: '1px solid rgba(16,185,129,0.3)' }
@@ -83,16 +78,9 @@ export default function DLQMonitorBlock() {
       if (!token) throw new Error("Session token required.");
 
       const workerUrl = getEdgeWorkerUrl();
-      const res = await fetch(`${workerUrl}/api/v1/dlq/retry`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
-        },
-        body: JSON.stringify({ payload })
-      });
+      const res = await onyxService.fetchWithTimeout(`${workerUrl}/api/v1/dlq/retry`, { method: 'POST', headers: { 'Authorization': `Bearer ${token}` }, body: JSON.stringify({ payload }) });
 
-      if (!res.ok) throw new Error("DLQ payload re-ingestion failed.");
+      if (!res.success) throw new Error(res.error || 'DLQ payload re-ingestion failed.');
 
       toast.success("DLQ payload successfully re-queued!", {
         style: { background: '#09090b', color: '#10b981', border: '1px solid rgba(16,185,129,0.3)' }
@@ -106,7 +94,7 @@ export default function DLQMonitorBlock() {
   };
 
   return (
-    <div className="p-5 rounded-3xl bg-zinc-950/60 border border-zinc-800/80 backdrop-blur-md space-y-4 font-mono">
+    <div className="p-5 rounded-3xl bg-zinc-950/60 border border-slate-800/60 backdrop-blur-md space-y-4 font-mono">
       <div className="flex items-center justify-between border-b border-zinc-900 pb-3">
         <div className="flex items-center gap-2 text-rose-400 text-xs font-bold">
           <FiAlertTriangle className="text-sm animate-pulse"/>
@@ -137,8 +125,16 @@ export default function DLQMonitorBlock() {
 
       <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
         {isLoading ? (
-          <div className="text-center py-4 text-xs text-zinc-500 animate-pulse">
-            Scanning edge dead-letter queues...
+          <div className="space-y-2">
+            {[1, 2, 3].map(i => (
+              <div key={i} className="p-3 rounded-xl bg-black/30 border border-zinc-900 flex items-center justify-between">
+                 <div className="space-y-2 flex-1">
+                   <div className="h-3 w-1/4 bg-zinc-800 rounded animate-pulse"></div>
+                   <div className="h-2 w-1/2 bg-zinc-800 rounded animate-pulse"></div>
+                 </div>
+                 <div className="w-16 h-6 bg-zinc-900 rounded animate-pulse"></div>
+              </div>
+            ))}
           </div>
         ) : dlqItems.length > 0 ? (
           dlqItems.map((item) => (

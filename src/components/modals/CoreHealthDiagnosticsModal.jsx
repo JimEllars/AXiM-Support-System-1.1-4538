@@ -1,3 +1,4 @@
+import { onyxService } from "../../services/onyxService";
 import React, { useState, useEffect } from 'react';
 import { FiActivity, FiX, FiRefreshCw, FiClock, FiShield, FiTrash2, FiDatabase } from 'react-icons/fi';
 import toast from 'react-hot-toast';
@@ -18,14 +19,14 @@ export default function CoreHealthDiagnosticsModal({ isOpen, onClose }) {
       const workerUrl = getEdgeWorkerUrl();
 
       const [edgeRes, cronRes, secRes] = await Promise.all([
-        fetch(`${workerUrl}/health`),
-        fetch(`${workerUrl}/api/v1/health/cron`),
-        fetch(`${workerUrl}/api/v1/health/security`)
+        onyxService.fetchWithTimeout(`${workerUrl}/health`),
+        onyxService.fetchWithTimeout(`${workerUrl}/api/v1/health/cron`),
+        onyxService.fetchWithTimeout(`${workerUrl}/api/v1/health/security`)
       ]);
 
-      if (edgeRes.ok) setEdgeHealth(await edgeRes.json());
-      if (cronRes.ok) setCronHealth(await cronRes.json());
-      if (secRes.ok) setSecHealth(await secRes.json());
+      if (edgeRes.success) setEdgeHealth(edgeRes.data);
+      if (cronRes.success) setCronHealth(cronRes.data);
+      if (secRes.success) setSecHealth(secRes.data);
 
       // Fetch last KV purge event telemetry from events_ax2024
       const { data: purgeEvent } = await supabase
@@ -53,6 +54,11 @@ export default function CoreHealthDiagnosticsModal({ isOpen, onClose }) {
 
   useEffect(() => {
     if (isOpen) fetchDiagnostics();
+    const handleEsc = (e) => {
+      if (e.key === 'Escape' && isOpen) onClose();
+    };
+    window.addEventListener('keydown', handleEsc);
+    return () => window.removeEventListener('keydown', handleEsc);
   }, [isOpen]);
 
   const handlePurgeKv = async () => {
@@ -65,16 +71,10 @@ export default function CoreHealthDiagnosticsModal({ isOpen, onClose }) {
       if (!token) throw new Error("Operator session token required.");
 
       const workerUrl = getEdgeWorkerUrl();
-      const res = await fetch(`${workerUrl}/api/v1/admin/kv-purge`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
-        }
-      });
+      const res = await onyxService.fetchWithTimeout(`${workerUrl}/api/v1/admin/kv-purge`, { method: 'POST', headers: { 'Authorization': `Bearer ${token}` } });
 
-      const data = await res.json();
-      if (!res.ok || !data.success) throw new Error(data.error || "KV purge failed.");
+      if (!res.success || !res.data?.success) throw new Error(res.error || res.data?.error || 'KV purge failed.');
+      const data = res.data;
 
       toast.success(`Cloudflare KV Cache Purged! (${data.purged_keys?.length || 0} keys cleared)`, {
         style: { background: '#09090b', color: '#10b981', border: '1px solid rgba(16,185,129,0.3)' }

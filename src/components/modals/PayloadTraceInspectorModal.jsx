@@ -1,12 +1,31 @@
 import React, { useEffect, useState } from 'react';
 import { useTicketStore } from '../../store/useTicketStore';
 import { supabase } from '../../lib/supabaseClient';
-import { FiX, FiCpu, FiTerminal } from 'react-icons/fi';
+import { FiX, FiCpu, FiTerminal, FiCopy, FiCheck } from 'react-icons/fi';
 
 export default function PayloadTraceInspectorModal() {
   const { activeInspectionTraceId, isInspectionModalOpen, triggerDeepTraceInspection } = useTicketStore();
   const [traceData, setTraceData] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = () => {
+    if (activeInspectionTraceId) {
+      navigator.clipboard.writeText(activeInspectionTraceId);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    }
+  };
+
+  useEffect(() => {
+    const handleEsc = (e) => {
+      if (e.key === 'Escape' && isInspectionModalOpen) {
+        triggerDeepTraceInspection(null);
+      }
+    };
+    window.addEventListener('keydown', handleEsc);
+    return () => window.removeEventListener('keydown', handleEsc);
+  }, [isInspectionModalOpen, triggerDeepTraceInspection]);
 
   useEffect(() => {
     if (!activeInspectionTraceId || !isInspectionModalOpen) return;
@@ -65,7 +84,16 @@ export default function PayloadTraceInspectorModal() {
 
           <div className="bg-black/50 p-4 rounded-xl border border-zinc-800/50 flex flex-col gap-1">
             <span className="text-zinc-600 font-bold uppercase tracking-widest text-[10px]">Trace Identifier</span>
-            <span className="text-cyan-400">{activeInspectionTraceId}</span>
+            <div className="flex items-center gap-2">
+              <span className="text-cyan-400">{activeInspectionTraceId}</span>
+              <button
+                onClick={handleCopy}
+                className="text-zinc-500 hover:text-white transition-colors relative"
+                title="Copy Trace ID"
+              >
+                {copied ? <FiCheck className="text-emerald-400" /> : <FiCopy />}
+              </button>
+            </div>
           </div>
 
           <div className="bg-black/50 p-4 rounded-xl border border-zinc-800/50">

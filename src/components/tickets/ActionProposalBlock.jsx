@@ -1,3 +1,4 @@
+import { onyxService } from '../../services/onyxService';
 import React, { useState } from 'react';
 import { FiShield, FiAlertTriangle, FiCheckCircle, FiPlay, FiLoader, FiXCircle } from 'react-icons/fi';
 import toast from 'react-hot-toast';
@@ -33,8 +34,8 @@ export default function ActionProposalBlock({ proposalData, ticketId, onActionEx
         })
       });
 
-      const outcome = await res.json();
-      if (!res.ok) throw new Error(outcome.error || 'Upstream vault network handshake declined.');
+      if (!res.success) throw new Error(res.error || res.data?.error || 'Upstream vault network handshake declined.');
+      const outcome = res.data;
 
       if (targetDisposition === 'rejected') {
         setExecutionState('rejected');
@@ -61,7 +62,7 @@ export default function ActionProposalBlock({ proposalData, ticketId, onActionEx
   return (
     <div className={`border rounded-2xl p-5 mb-4 relative overflow-hidden transition-all duration-300 ${
       executionState === 'success' ? 'bg-emerald-950/10 border-emerald-500/30' :
-      executionState === 'failed' ? 'bg-rose-950/10 border-rose-500/30' : 'bg-zinc-950/60 border-zinc-800'
+      executionState === 'failed' ? 'bg-rose-950/10 border-rose-500/30' : 'bg-zinc-950/60 border-slate-800/60'
     }`}>
       <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4">
         <div className="flex gap-3">
@@ -83,7 +84,7 @@ export default function ActionProposalBlock({ proposalData, ticketId, onActionEx
           {executionState === 'idle' && (
             <button
               onClick={() => processRemedyDisposition('rejected')}
-              className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest bg-zinc-900 hover:bg-zinc-800 text-rose-400 border border-zinc-800 transition-all duration-200"
+              className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest bg-zinc-900 hover:bg-zinc-800 text-rose-400 border border-slate-800/60 transition-all duration-200"
             >
               <FiXCircle /> Dismiss
             </button>
@@ -94,7 +95,7 @@ export default function ActionProposalBlock({ proposalData, ticketId, onActionEx
             disabled={executionState === 'executing' || executionState === 'success'}
             className={`flex items-center gap-2 px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest border transition-all ${
               executionState === 'success' ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20 cursor-not-allowed' :
-              executionState === 'executing' ? 'bg-zinc-900 text-zinc-500 border-zinc-800 cursor-wait' :
+              executionState === 'executing' ? 'bg-zinc-900 text-zinc-500 border-slate-800/60 cursor-wait' :
               'bg-amber-500 hover:bg-amber-400 text-black border-amber-400/20 font-black shadow-[0_0_20px_rgba(245,158,11,0.15)]'
             }`}
           >

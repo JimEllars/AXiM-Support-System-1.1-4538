@@ -45,9 +45,9 @@ export const useAuthStore = create((set) => ({
 
     const currentState = useAuthStore.getState();
     // Prevent unneeded re-fetches or clearing of activeOrganization on minor token refresh
-    if (currentState.user?.id === session.user.id && currentState.activeOrganization) {
+    if (currentState.user?.id === session.user.id) {
+       // Only update session without touching user/org to prevent flashing UI elements
        set({
-         user: session.user,
          session: session,
          isAuthenticated: true
        });

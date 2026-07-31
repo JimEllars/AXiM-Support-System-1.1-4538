@@ -8,41 +8,93 @@ import { getEdgeWorkerUrl } from '../lib/edgeWorkerUrl';
 const ONYX_WORKER_URL = getEdgeWorkerUrl();
 const ONYX_SECRET = import.meta.env.VITE_ONYX_SECURE_KEY;
 
+// Safe fetch wrapper with 3000ms timeout and standardized error handling
+async function fetchWithTimeout(url, options = {}) {
+  const timeoutMs = options.timeout || 3000;
+  const controller = new AbortController();
+  const id = setTimeout(() => controller.abort(), timeoutMs);
+
+  const traceId = crypto.randomUUID();
+  const headers = {
+    'Content-Type': 'application/json',
+    'Authorization': `Bearer ${ONYX_SECRET}`,
+    'X-Onyx-Trace-ID': traceId,
+    ...(options.headers || {})
+  };
+
+  try {
+    const response = await fetch(url, {
+      ...options,
+      headers,
+      signal: controller.signal
+    });
+    clearTimeout(id);
+
+    if (!response.ok) {
+      let errorMsg = `HTTP Error: ${response.status}`;
+      try {
+        const errorData = await response.json();
+        errorMsg = errorData.error || errorMsg;
+      } catch (e) {
+         // ignore
+      }
+      return { success: false, data: null, error: errorMsg, traceId };
+    }
+
+    const data = await response.json();
+    return { success: true, data, error: null, traceId };
+  } catch (err) {
+    clearTimeout(id);
+    if (err.name === 'AbortError') {
+      return { success: false, data: null, error: 'Edge Request Timeout', traceId };
+    }
+    return { success: false, data: null, error: err.message, traceId };
+  }
+}
+
 export const onyxService = {
+  async fetchWithTimeout(url, options = {}) {
+    return fetchWithTimeout(url, options);
+  },
+
   async createTicket(ticketData) {
     if (import.meta.env.VITE_MOCK_LLM_ENABLED === 'true') {
       return { success: true, ticket_id: crypto.randomUUID() };
     }
-    const response = await fetch(ONYX_WORKER_URL, {
+    const result = await fetchWithTimeout(ONYX_WORKER_URL, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${ONYX_SECRET}` },
       body: JSON.stringify(ticketData)
     });
-    return response.json();
+
+    if (result.success) {
+      return result.data;
+    }
+    return result; // contains { success: false, error: ... }
   },
 
   async generateAutoDraft(ticketId, ticketData, messages = []) {
     try {
         // AI Privacy Guardrails & Context Windowing
-        // 1. Strictly filter out any internal notes
         const publicMessages = messages.filter(msg => msg.is_internal_note !== true);
 
-        // 2. Implement a rolling context window (last 5 public messages) and map to string
         const recentContext = publicMessages.slice(-5).map(msg => {
             const senderType = msg.sender_id === ticketData.customer_id ? 'Customer' : 'Agent';
             return `[${senderType}]: ${msg.message_body}`;
         });
 
-        const response = await fetch(`${ONYX_WORKER_URL}/api/v1/onyx/generate-suggestion`, {
+        const result = await fetchWithTimeout(`${ONYX_WORKER_URL}/api/v1/onyx/generate-suggestion`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${ONYX_SECRET}` },
             body: JSON.stringify({
                 subject: ticketData.subject,
                 description: ticketData.description,
                 context_messages: recentContext
             })
         });
-        return await response.json();
+
+        if (result.success) {
+            return result.data;
+        }
+        return { draft: "Failed to generate draft. " + result.error };
     } catch (e) {
         return { draft: "Failed to generate draft." };
     }
@@ -58,16 +110,15 @@ export const onyxService = {
         ];
     }
 
-    try {
-        const response = await fetch(`${ONYX_WORKER_URL}/vector-search`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${ONYX_SECRET}` },
-            body: JSON.stringify({ query: `${subject} ${description}` })
-        });
-        return response.json();
-    } catch (e) {
-        return [];
+    const result = await fetchWithTimeout(`${ONYX_WORKER_URL}/vector-search`, {
+        method: 'POST',
+        body: JSON.stringify({ query: `${subject} ${description}` })
+    });
+
+    if (result.success) {
+        return result.data;
     }
+    return [];
   },
 
   async executeBatchTriage(ticketIds) {
@@ -76,16 +127,17 @@ export const onyxService = {
           return { success: true, processed: ticketIds.length };
       }
 
-      const response = await fetch(`${ONYX_WORKER_URL}/batch-triage`, {
+      const result = await fetchWithTimeout(`${ONYX_WORKER_URL}/batch-triage`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${ONYX_SECRET}` },
           body: JSON.stringify({ ticketIds })
       });
-      return response.json();
+      if (result.success) {
+        return result.data;
+      }
+      return result;
   },
 
   async syncTelemetryToCore(metrics) {
-      // Sync metrics to core events table (simulated edge logic)
       try {
           const { supabase } = await import('../lib/supabaseClient');
           const { error } = await supabase.from('events_ax2024').insert({
@@ -93,25 +145,22 @@ export const onyxService = {
               payload: metrics
           });
           if (error) throw error;
-          return { success: true };
+          return { success: true, error: null };
       } catch (e) {
-          return { success: false, error: e };
+          return { success: false, error: e.message || 'Telemetry Sync Failed' };
       }
   },
 
   async parseCommand(query, ticketId = null) {
     if (ticketId && (query.toLowerCase().includes('refund') || query.toLowerCase().includes('password') || query.toLowerCase().includes('beta'))) {
-        try {
-            const response = await fetch(`${ONYX_WORKER_URL}/tool-command`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${ONYX_SECRET}` },
-                body: JSON.stringify({ command: query, ticketId })
-            });
-            const data = await response.json();
-            if (data.action_proposed) {
-                 return { intent: 'TOOL_PROPOSAL', success: true };
-            }
-        } catch (e) { /* silent catch */ }
+        const result = await fetchWithTimeout(`${ONYX_WORKER_URL}/tool-command`, {
+            method: 'POST',
+            body: JSON.stringify({ command: query, ticketId })
+        });
+
+        if (result.success && result.data?.action_proposed) {
+             return { intent: 'TOOL_PROPOSAL', success: true };
+        }
     }
     const q = query.toLowerCase();
     return new Promise(resolve => {

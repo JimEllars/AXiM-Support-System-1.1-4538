@@ -56,14 +56,23 @@ export default function OnyxInvestigationPanel({ ticketId }) {
 
   if (isLoading) {
     return (
-      <div className="p-5 rounded-3xl bg-zinc-950/60 border border-zinc-800/80 font-mono text-xs text-zinc-500 animate-pulse">
-        Analyzing neural telemetry & investigation vectors...
+      <div className="p-5 rounded-3xl bg-zinc-950/60 border border-slate-800/60 font-mono text-xs text-zinc-500 animate-pulse flex flex-col gap-3 backdrop-blur-md">
+        <div className="flex items-center gap-2">
+          <div className="w-4 h-4 rounded-full bg-zinc-800 animate-pulse"></div>
+          <div className="h-3 w-48 bg-zinc-800 rounded animate-pulse"></div>
+        </div>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          <div className="h-16 rounded-xl bg-zinc-900/50 animate-pulse"></div>
+          <div className="h-16 rounded-xl bg-zinc-900/50 animate-pulse"></div>
+          <div className="h-16 rounded-xl bg-zinc-900/50 animate-pulse"></div>
+          <div className="h-16 rounded-xl bg-zinc-900/50 animate-pulse"></div>
+        </div>
       </div>
     );
   }
 
   return (
-    <div className="p-5 rounded-3xl bg-zinc-950/60 border border-zinc-800/80 backdrop-blur-md space-y-4 font-mono">
+    <div className="p-5 rounded-3xl bg-zinc-950/60 border border-slate-800/60 backdrop-blur-md space-y-4 font-mono">
       <div className="flex items-center justify-between border-b border-zinc-900 pb-3">
         <div className="flex items-center gap-2 text-indigo-400 text-xs font-bold">
           <FiCpu className="text-sm animate-pulse"/>
