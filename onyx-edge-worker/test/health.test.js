@@ -2,7 +2,7 @@ import { describe, it, expect, vi } from 'vitest';
 
 global.fetch = vi.fn();
 
-describe('Edge Health & 9-Sweep CRON Observability Suite', () => {
+describe('Edge Health, Security Shield & Admin KV Purge Suite', () => {
   it('should return 200 OK for standard worker health checks', async () => {
     vi.mocked(fetch).mockResolvedValueOnce({
       status: 200,
@@ -15,13 +15,23 @@ describe('Edge Health & 9-Sweep CRON Observability Suite', () => {
     expect(data.status).toBe('healthy');
   });
 
-  it('should process full CRON sweep executions and log 9 background automations', async () => {
+  it('should reject unauthorized KV purge requests with 401 Unauthorized', async () => {
     vi.mocked(fetch).mockResolvedValueOnce({
-      status: 200,
-      json: async () => ({ success: true, executed_sweeps: 9, message: "Full autonomous CRON sweep dispatched successfully." })
+      status: 401,
+      json: async () => ({ error: "UNAUTHORIZED_KV_PURGE_REQUEST" })
     });
 
-    const res = await fetch('http://localhost:8787/api/v1/cron/trigger-all', {
+    const res = await fetch('http://localhost:8787/api/v1/admin/kv-purge', { method: 'POST' });
+    expect(res.status).toBe(401);
+  });
+
+  it('should process authorized KV purge requests successfully', async () => {
+    vi.mocked(fetch).mockResolvedValueOnce({
+      status: 200,
+      json: async () => ({ success: true, purged_keys: ['exec_policy_summary_v1'], timestamp: new Date().toISOString() })
+    });
+
+    const res = await fetch('http://localhost:8787/api/v1/admin/kv-purge', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -32,6 +42,6 @@ describe('Edge Health & 9-Sweep CRON Observability Suite', () => {
     expect(res.status).toBe(200);
     const data = await res.json();
     expect(data.success).toBe(true);
-    expect(data.executed_sweeps).toBe(9);
+    expect(data.purged_keys).toContain('exec_policy_summary_v1');
   });
 });

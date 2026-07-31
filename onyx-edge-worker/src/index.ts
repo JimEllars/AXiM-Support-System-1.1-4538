@@ -918,6 +918,59 @@ export default {
     }
 
 
+
+    // --- AUTHENTICATED EDGE KV CACHE PURGE ROUTE ---
+    if (url.pathname === "/api/v1/admin/kv-purge" && request.method === "POST") {
+      const authHeader = request.headers.get("Authorization") || "";
+      const token = authHeader.replace("Bearer ", "").trim();
+      if (!token) {
+        return new Response(JSON.stringify({ error: "UNAUTHORIZED_KV_PURGE_REQUEST" }), {
+          status: 401, headers: getCorsHeaders(env, request)
+        });
+      }
+
+      const supabaseAuth = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY, {
+        global: { headers: { Authorization: `Bearer ${token}` } }
+      });
+      const { data: { user }, error: authError } = await supabaseAuth.auth.getUser();
+      if (authError || !user) {
+        return new Response(JSON.stringify({ error: "INVALID_OPERATOR_SESSION" }), {
+          status: 403, headers: getCorsHeaders(env, request)
+        });
+      }
+
+      try {
+        const purgedKeys: string[] = [];
+
+        if (env.STATUS_KV) {
+          // Purge cached executive policy summary
+          await env.STATUS_KV.delete("exec_policy_summary_v1");
+          purgedKeys.push("exec_policy_summary_v1");
+
+          // List and clear rate-limit keys if supported
+          const list = await env.STATUS_KV.list({ prefix: "rate_inbound_" });
+          for (const key of list.keys) {
+            await env.STATUS_KV.delete(key.name);
+            purgedKeys.push(key.name);
+          }
+        }
+
+        const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
+        await supabase.from("events_ax2024").insert({
+          type: "kv_cache_purged_by_admin",
+          payload: { purged_keys: purgedKeys, operator: user.email, timestamp: new Date().toISOString() }
+        });
+
+        return new Response(JSON.stringify({ success: true, purged_keys: purgedKeys, timestamp: new Date().toISOString() }), {
+          status: 200, headers: { "Content-Type": "application/json", ...getCorsHeaders(env, request) }
+        });
+      } catch (err: any) {
+        return new Response(JSON.stringify({ error: err.message }), {
+          status: 500, headers: getCorsHeaders(env, request)
+        });
+      }
+    }
+
     // --- FULL CRON TRIGGER ENDPOINT ---
     if (url.pathname === "/api/v1/cron/trigger-all" && request.method === "POST") {
       const authHeader = request.headers.get("Authorization") || "";
