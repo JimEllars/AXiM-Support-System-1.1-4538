@@ -22,7 +22,7 @@ SUPABASE_URL = "https://your-supabase-project.supabase.co"
 
 # Wake the worker at 8:00 AM UTC (2:00 AM CST) daily
 [triggers]
-crons = ["0 0 * * *", "*/15 * * * *"] # Daily digest and 15-minute SLA sweeps
+crons = ["0 0 * * *", "*/15 * * * *", "0 10 * * *"] # Daily digest and 15-minute SLA sweeps
 
 # --- KV NAMESPACE BINDINGS ---
 
