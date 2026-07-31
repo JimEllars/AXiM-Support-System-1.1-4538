@@ -889,6 +889,34 @@ export default {
       }
     })));
 
+        // Execute 30-Day Log Rotation Sweep on events_ax2024
+    ctx.waitUntil((async () => {
+      try {
+        const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+
+        // Execute 30-Day Log Rotation Sweep on events_ax2024
+        const { count, error } = await supabase
+          .from("events_ax2024")
+          .delete({ count: "exact" })
+          .lt("timestamp", thirtyDaysAgo);
+
+        if (!error && count !== null && count > 0) {
+          await supabase.from("events_ax2024").insert({
+            type: "telemetry_log_rotation_executed",
+            payload: {
+              records_purged: count,
+              cutoff_date: thirtyDaysAgo,
+              operator: "system_cron",
+              timestamp: new Date().toISOString()
+            }
+          });
+          console.log(`[MAINTENANCE] Log rotation cleared ${count} stale telemetry events.`);
+        }
+      } catch (rotationErr) {
+        console.error("[MAINTENANCE FAULT] Log rotation failed:", rotationErr);
+      }
+    })());
+
     // Automated KV Maintenance Engine
     let autoPurge = true;
     if (env.STATUS_KV) {
