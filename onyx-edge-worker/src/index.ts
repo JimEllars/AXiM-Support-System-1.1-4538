@@ -183,6 +183,7 @@ async function logToEvents(
 }
 
 export interface Env {
+  TELEMETRY_ARCHIVE?: R2Bucket;
   EMAILIT_WEBHOOK_SECRET?: string;
   AXIM_TELEMETRY_SECRET: string;
   TURNSTILE_SECRET_KEY: string;
@@ -981,28 +982,48 @@ export default {
       }
     })));
 
-        // Execute 30-Day Log Rotation Sweep on events_ax2024
+    // Execute 30-Day Log Rotation Sweep on events_ax2024
     ctx.waitUntil((async () => {
       try {
         const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+        const datePrefix = new Date().toISOString().split("T")[0];
 
-        // Execute 30-Day Log Rotation Sweep on events_ax2024
-        const { count, error } = await supabase
+        // 1. Fetch stale records
+        const { data: staleRecords, error: fetchErr } = await supabase
           .from("events_ax2024")
-          .delete({ count: "exact" })
+          .select("*")
           .lt("timestamp", thirtyDaysAgo);
 
-        if (!error && count !== null && count > 0) {
-          await supabase.from("events_ax2024").insert({
-            type: "telemetry_log_rotation_executed",
-            payload: {
-              records_purged: count,
-              cutoff_date: thirtyDaysAgo,
-              operator: "system_cron",
-              timestamp: new Date().toISOString()
+        if (!fetchErr && staleRecords && staleRecords.length > 0) {
+          let archived = false;
+
+          // 2. Backup to Cloudflare R2
+          if (env.TELEMETRY_ARCHIVE) {
+            const fileName = `axim_telemetry_archive_${datePrefix}_batch.json`;
+            await env.TELEMETRY_ARCHIVE.put(fileName, JSON.stringify(staleRecords));
+            archived = true;
+          }
+
+          // 3. Purge from Postgres ONLY if safely archived (or if R2 is not configured but we must rotate)
+          if (archived || !env.TELEMETRY_ARCHIVE) {
+            const { count, error: delErr } = await supabase
+              .from("events_ax2024")
+              .delete({ count: "exact" })
+              .lt("timestamp", thirtyDaysAgo);
+
+            if (!delErr && count !== null) {
+              await supabase.from("events_ax2024").insert({
+                type: "telemetry_log_rotation_executed",
+                payload: {
+                  records_purged: count,
+                  archived_to_r2: archived,
+                  cutoff_date: thirtyDaysAgo,
+                  operator: "system_cron",
+                  timestamp: new Date().toISOString()
+                }
+              });
             }
-          });
-          console.log(`[MAINTENANCE] Log rotation cleared ${count} stale telemetry events.`);
+          }
         }
       } catch (rotationErr) {
         console.error("[MAINTENANCE FAULT] Log rotation failed:", rotationErr);
@@ -1183,6 +1204,33 @@ export default {
 
     // Inside export default fetch switch tree for GET /api/v1/health/cron:
 
+
+    if (url.pathname === "/api/v1/health/archive" && request.method === "GET") {
+      try {
+        let objectCount = 0;
+        let isConfigured = false;
+
+        if (env.TELEMETRY_ARCHIVE) {
+          isConfigured = true;
+          const listed = await env.TELEMETRY_ARCHIVE.list({ limit: 1000 });
+          objectCount = listed.objects.length;
+        }
+
+        return new Response(JSON.stringify({
+          success: true,
+          r2_configured: isConfigured,
+          archive_objects: objectCount,
+          status: isConfigured ? "active" : "pending_configuration",
+          timestamp: new Date().toISOString()
+        }), {
+          status: 200, headers: { "Content-Type": "application/json", ...getCorsHeaders(env, request) }
+        });
+      } catch (err: any) {
+        return new Response(JSON.stringify({ error: err.message }), {
+          status: 500, headers: getCorsHeaders(env, request)
+        });
+      }
+    }
 
     // --- EMAIL NOTIFICATION PREFERENCES ROUTE ---
     if (url.pathname === "/api/v1/email/preferences" && request.method === "GET") {

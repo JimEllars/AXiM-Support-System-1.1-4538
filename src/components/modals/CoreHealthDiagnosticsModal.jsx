@@ -8,6 +8,7 @@ export default function CoreHealthDiagnosticsModal({ isOpen, onClose }) {
   const [edgeHealth, setEdgeHealth] = useState(null);
   const [cronHealth, setCronHealth] = useState(null);
   const [secHealth, setSecHealth] = useState(null);
+  const [archiveHealth, setArchiveHealth] = useState(null);
   const [lastKvPurge, setLastKvPurge] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
   const [isPurging, setIsPurging] = useState(false);
@@ -18,15 +19,17 @@ export default function CoreHealthDiagnosticsModal({ isOpen, onClose }) {
     try {
       const workerUrl = getEdgeWorkerUrl();
 
-      const [edgeRes, cronRes, secRes] = await Promise.all([
+      const [edgeRes, cronRes, secRes, archiveRes] = await Promise.all([
         fetch(`${workerUrl}/health`),
         fetch(`${workerUrl}/api/v1/health/cron`),
-        fetch(`${workerUrl}/api/v1/health/security`)
+        fetch(`${workerUrl}/api/v1/health/security`),
+        fetch(`${workerUrl}/api/v1/health/archive`)
       ]);
 
       if (edgeRes.ok) setEdgeHealth(await edgeRes.json());
       if (cronRes.ok) setCronHealth(await cronRes.json());
       if (secRes.ok) setSecHealth(await secRes.json());
+      if (archiveRes.ok) setArchiveHealth(await archiveRes.json());
 
       const { data: purgeEvent } = await supabase
         .from('events_ax2024')
@@ -172,6 +175,14 @@ export default function CoreHealthDiagnosticsModal({ isOpen, onClose }) {
                   <span>{lastKvPurge.time} ({lastKvPurge.operator})</span>
                 </div>
               )}
+            </div>
+
+            <div className="p-3.5 rounded-2xl bg-black/50 border border-zinc-800/80 space-y-1">
+              <div className="flex items-center justify-between text-xs font-mono font-bold text-zinc-200">
+                <span className="flex items-center gap-1.5"><FiDatabase className="text-purple-400"/> R2 Cold-Storage Archive</span>
+                <span className="text-purple-400 uppercase font-mono text-[10px]">{archiveHealth?.status || 'Pending Configuration'}</span>
+              </div>
+              <p className="text-[11px] text-zinc-400 font-mono">Archived Objects: <code>{archiveHealth?.archive_objects || 0}</code></p>
             </div>
           </div>
         )}
