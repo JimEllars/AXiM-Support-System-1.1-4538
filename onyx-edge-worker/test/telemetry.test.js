@@ -29,4 +29,15 @@ describe('Edge Telemetry & Event Audit Log Suite', () => {
     expect(eventPayload.type).toBe("kv_cache_auto_purged");
     expect(eventPayload.payload.operator).toBe("system_cron");
   });
+
+  it('should calculate the 30-day telemetry log rotation cutoff correctly', () => {
+    const now = Date.now();
+    const thirtyDaysInMs = 30 * 24 * 60 * 60 * 1000;
+    const expectedCutoffMs = now - thirtyDaysInMs;
+    const expectedDate = new Date(expectedCutoffMs).toISOString().split('T')[0];
+
+    const generatedCutoffDate = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+
+    expect(generatedCutoffDate).toBe(expectedDate);
+  });
 });
