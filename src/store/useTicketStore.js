@@ -137,6 +137,12 @@ export const useTicketStore = create((set, get) => ({
             toast("📋 Executive Briefing Dispatched", {
               style: { background: '#09090b', color: '#38bdf8', border: '1px solid rgba(56,189,248,0.3)' }
             });
+          } else if (newEvent?.type === 'kv_cache_auto_purged') {
+            toast(`🧹 Automated Maintenance: Edge KV Cache Purged`, {
+              icon: '⚙️',
+              style: { background: '#09090b', color: '#a1a1aa', border: '1px solid rgba(161,161,170,0.3)' },
+              duration: 3500
+            });
           } else if (newEvent?.type === 'kv_cache_purged_by_admin') {
             toast(`⚡ Cloudflare KV Cache Purged by ${newEvent.payload?.operator || 'Administrator'}`, {
               icon: '🧹',
