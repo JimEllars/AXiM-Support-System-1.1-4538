@@ -866,8 +866,100 @@ async function sendDailySystemProgressReport(env: Env): Promise<boolean> {
   );
 }
 
+
+async function sendExecutiveSummary(data: any, env: Env): Promise<boolean> {
+  const htmlContent = `
+    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; background: #09090b; color: #f4f4f5; padding: 24px; border-radius: 16px; border: 1px solid #27272a;">
+      <h2 style="color: #6366f1;">AXiM Daily Executive Summary</h2>
+
+      <h3 style="color: #fbbf24; font-size: 14px;">Pending HITL Decisions</h3>
+      <ul>
+        ${data.pendingHitl.map((item: any) => `<li style="font-size: 12px; margin-bottom: 4px;">Ticket #${item.support_ticket_id?.slice(0, 8)}: ${item.tool_type} (${new Date(item.created_at).toLocaleDateString()})</li>`).join('') || '<li style="font-size: 12px; color: #a1a1aa;">None</li>'}
+      </ul>
+
+      <h3 style="color: #f43f5e; font-size: 14px;">Urgent SLAs / Priority Tickets</h3>
+      <ul>
+        ${data.urgentTickets.map((t: any) => `<li style="font-size: 12px; margin-bottom: 4px;">Ticket #${t.id?.slice(0, 8)}: ${t.subject}</li>`).join('') || '<li style="font-size: 12px; color: #a1a1aa;">None</li>'}
+      </ul>
+
+      <h3 style="color: #38bdf8; font-size: 14px;">24h Triage & Anomaly Count</h3>
+      <p style="font-size: 12px;">Total actions/anomalies in the last 24 hours: <strong>${data.triageCount}</strong></p>
+    </div>
+  `;
+
+  const apiKey = env.EMAILIT_API_KEY || (env as any).EMAIL_IT_API_KEY;
+  if (!apiKey) {
+    console.error("Missing EMAILIT_API_KEY");
+    return false;
+  }
+
+  try {
+    const res = await fetch("https://api.emailit.com/v1/emails", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${apiKey}`
+      },
+      body: JSON.stringify({
+        from: "system@axim.us.com",
+        to: "james.ellars@axim.us.com",
+        subject: "AXiM Daily Executive Summary",
+        html: htmlContent
+      })
+    });
+    return res.ok;
+  } catch (error) {
+    console.error("EmailIt dispatch failed", error);
+    return false;
+  }
+}
+
+
 export default {
+
   async scheduled(event: ScheduledEvent, env: Env, ctx: ExecutionContext): Promise<void> {
+    if (event.cron === "0 10 * * *") {
+      ctx.waitUntil((async () => {
+        const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
+
+        // 1. Pending HITL
+        const { data: pendingHitl } = await supabase
+          .from("hitl_audit_logs")
+          .select("id, tool_type, support_ticket_id, created_at")
+          .eq("status", "pending")
+          .order("created_at", { ascending: false });
+
+        // 2. Urgent / SLA Breached Tickets
+        const { data: urgentTickets } = await supabase
+          .from("support_tickets")
+          .select("id, subject, priority, sla_breach_at")
+          .or('priority.eq.urgent,sla_breach_at.lt.' + new Date().toISOString())
+          .eq("status", "open");
+
+        // 3. 24h Triage Count
+        const past24HoursISO = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+        const { count: triageCount } = await supabase
+          .from("events_ax2024")
+          .select("id", { count: "exact", head: true })
+          .gte("created_at", past24HoursISO)
+          .in("type", ["rca_generated", "ticket_autoresolved_inactivity", "dlq_retry_executed"]);
+
+        const data = {
+          pendingHitl: pendingHitl || [],
+          urgentTickets: urgentTickets || [],
+          triageCount: triageCount || 0
+        };
+
+        const success = await sendExecutiveSummary(data, env);
+        if (success) {
+          await supabase.from("events_ax2024").insert({
+            type: "executive_summary_dispatched",
+            payload: { recipient: "james.ellars@axim.us.com", timestamp: new Date().toISOString() }
+          });
+        }
+      })());
+    }
+
     ctx.waitUntil(generateAndSendDailyDigest(env));
     ctx.waitUntil(generateAndSendExecutiveDigest(env));
     ctx.waitUntil(handleSLASweep(env));
