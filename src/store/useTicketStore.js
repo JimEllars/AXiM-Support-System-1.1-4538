@@ -1,8 +1,8 @@
 import { create } from 'zustand';
 import { supabase } from '../lib/supabaseClient';
+import toast from 'react-hot-toast';
 
 export const useTicketStore = create((set, get) => ({
-  // --- REQUIRED BY NEW CODE ---
   tickets: [],
   activeTicket: null,
   activeThreadMessages: [],
@@ -10,7 +10,6 @@ export const useTicketStore = create((set, get) => ({
   error: null,
   realtimeStatus: 'DISCONNECTED', // 'SUBSCRIBED' | 'CONNECTING' | 'DISCONNECTED' | 'ERROR'
 
-  // Fetch initial ticket list
   fetchTickets: async () => {
     set({ isLoading: true, error: null });
     try {
@@ -26,7 +25,6 @@ export const useTicketStore = create((set, get) => ({
     }
   },
 
-  // Select active ticket and fetch thread messages
   selectTicket: async (ticketId) => {
     set({ isLoading: true, error: null });
     try {
@@ -52,35 +50,8 @@ export const useTicketStore = create((set, get) => ({
     }
   },
 
-  // Initialize Realtime Replication Subscriptions
   subscribeToRealtime: () => {
     set({ realtimeStatus: 'CONNECTING' });
-
-    const eventsChannel = supabase
-      .channel('public:events_ax2024')
-      .on(
-        'postgres_changes',
-        { event: 'INSERT', schema: 'public', table: 'events_ax2024' },
-        (payload) => {
-          const { new: newEvent } = payload;
-                    if (newEvent?.type === 'thread_executive_briefing_exported') {
-            window.dispatchEvent(new CustomEvent('axim:briefing_exported', { detail: newEvent }));
-            import('react-hot-toast').then(({ default: toast }) => {
-                toast("📋 Executive Briefing Dispatched", {
-                  style: { background: '#09090b', color: '#38bdf8', border: '1px solid rgba(56,189,248,0.3)' }
-                });
-            }).catch(() => console.warn('toast not found'));
-          } else if (newEvent?.type === 'cron_sweep_completed') {
-            window.dispatchEvent(new CustomEvent('axim:cron_sweep_completed', { detail: newEvent }));
-            import('react-hot-toast').then(({ default: toast }) => {
-                toast("⚡ Autonomous CRON Sweep Completed", {
-                  style: { background: '#09090b', color: '#10b981', border: '1px solid rgba(16,185,129,0.3)' }
-                });
-            }).catch(() => console.warn('toast not found'));
-          }
-        }
-      )
-      .subscribe();
 
     const ticketChannel = supabase
       .channel('public:support_tickets')
@@ -108,12 +79,8 @@ export const useTicketStore = create((set, get) => ({
         }
       )
       .subscribe((status) => {
-        if (status === 'SUBSCRIBED') {
-          set({ realtimeStatus: 'SUBSCRIBED', realtimeSocketStatus: 'SUBSCRIBED' });
-        }
-        if (status === 'CHANNEL_ERROR') {
-          set({ realtimeStatus: 'ERROR', realtimeSocketStatus: 'ERROR' });
-        }
+        if (status === 'SUBSCRIBED') set({ realtimeStatus: 'SUBSCRIBED' });
+        if (status === 'CHANNEL_ERROR') set({ realtimeStatus: 'ERROR' });
       });
 
     const messageChannel = supabase
@@ -126,7 +93,6 @@ export const useTicketStore = create((set, get) => ({
           const { activeTicket, activeThreadMessages } = get();
 
           if (activeTicket && newMsg.ticket_id === activeTicket.id) {
-            // Deduplicate incoming realtime messages
             if (!activeThreadMessages.some((m) => m.id === newMsg.id)) {
               set({ activeThreadMessages: [...activeThreadMessages, newMsg] });
             }
@@ -135,117 +101,59 @@ export const useTicketStore = create((set, get) => ({
       )
       .subscribe();
 
+    const hitlChannel = supabase
+      .channel('public:hitl_audit_logs')
+      .on(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'hitl_audit_logs' },
+        (payload) => {
+          const { new: hitlRecord } = payload;
+          if (hitlRecord?.metadata?.executive_responder) {
+            const statusUpper = hitlRecord.status?.toUpperCase() || 'UPDATED';
+            toast(`👤 Executive Directive: ${statusUpper} for ${hitlRecord.tool_type || 'Action'}`, {
+              icon: hitlRecord.status === 'approved' ? '⚡' : '🚫',
+              style: {
+                background: '#09090b',
+                color: hitlRecord.status === 'approved' ? '#10b981' : '#f43f5e',
+                border: `1px solid ${hitlRecord.status === 'approved' ? 'rgba(16,185,129,0.4)' : 'rgba(244,63,94,0.4)'}`
+              },
+              duration: 5000
+            });
+            get().fetchTickets();
+          }
+        }
+      )
+      .subscribe();
+
+    const eventsChannel = supabase
+      .channel('public:events_ax2024')
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'events_ax2024' },
+        (payload) => {
+          const { new: newEvent } = payload;
+          if (newEvent?.type === 'thread_executive_briefing_exported') {
+            window.dispatchEvent(new CustomEvent('axim:briefing_exported', { detail: newEvent }));
+            toast("📋 Executive Briefing Dispatched", {
+              style: { background: '#09090b', color: '#38bdf8', border: '1px solid rgba(56,189,248,0.3)' }
+            });
+          } else if (newEvent?.type === 'kv_cache_purged_by_admin') {
+            toast(`⚡ Cloudflare KV Cache Purged by ${newEvent.payload?.operator || 'Administrator'}`, {
+              icon: '🧹',
+              style: { background: '#09090b', color: '#fbbf24', border: '1px solid rgba(251,191,36,0.3)' },
+              duration: 4000
+            });
+          }
+        }
+      )
+      .subscribe();
+
     return () => {
       supabase.removeChannel(ticketChannel);
       supabase.removeChannel(messageChannel);
+      supabase.removeChannel(hitlChannel);
       supabase.removeChannel(eventsChannel);
-      set({ realtimeStatus: 'DISCONNECTED', realtimeSocketStatus: 'DISCONNECTED' });
+      set({ realtimeStatus: 'DISCONNECTED' });
     };
-  },
-
-
-  // --- EXISTING CODE TO NOT BREAK THE BUILD ---
-  currentTicket: null,
-  filters: { status: 'all', priority: 'all', search: '' },
-  isCoreOnline: true,
-  realtimeSocketStatus: 'INITIALIZING', // CRITICAL FIX: Track live multiplayer socket states
-
-  // --- TELEMETRY & TRACE DEEP CONTROL STATES ---
-  dlqEvents: [],
-  clearDLQEvents: () => set({ dlqEvents: [] }),
-  activeInspectionTraceId: null,
-  isInspectionModalOpen: false,
-  isTerminalStreamPaused: false,
-
-  setFilters: (newFilters) => set((state) => ({ filters: { ...state.filters, ...newFilters } })),
-  setDlqEvents: (events) => set({ dlqEvents: events }),
-  toggleTerminalStream: () => set((state) => ({ isTerminalStreamPaused: !state.isTerminalStreamPaused })),
-
-  // --- COLLABORATIVE PRESENCE STATE ---
-  activeAgents: [],
-  activePresenceChannel: null,
-
-  joinTicketPresence: (ticketId, agentData) => {
-    const channel = supabase.channel(`ticket-presence:${ticketId}`);
-
-    channel
-      .on('presence', { event: 'sync' }, () => {
-        const state = channel.presenceState();
-        const agents = Object.values(state).flat();
-        set({ activeAgents: agents });
-      })
-      .subscribe(async (status) => {
-        if (status === 'SUBSCRIBED') {
-          await channel.track({ ...agentData, isTyping: false });
-        }
-      });
-
-    set({ activePresenceChannel: channel });
-  },
-
-  leaveTicketPresence: async () => {
-    const { activePresenceChannel } = get();
-    if (activePresenceChannel) {
-      activePresenceChannel.untrack().catch(() => {});
-      supabase.removeChannel(activePresenceChannel);
-    }
-    set({ activeAgents: [], activePresenceChannel: null });
-  },
-
-  updateTypingStatus: async (isTyping, agentData) => {
-    const { activePresenceChannel } = get();
-    if (activePresenceChannel) {
-      await activePresenceChannel.track({ ...agentData, isTyping });
-    }
-  },
-
-  fetchLiveDLQData: async () => {
-    const { data, error } = await supabase
-      .from('events_ax2024')
-      .select('*')
-      .eq('type', 'dlq_payload')
-      .order('created_at', { ascending: false })
-      .limit(10);
-    if (!error && data) set({ dlqEvents: data });
-  },
-
-  subscribeToDLQChanges: () => {
-    const channel = supabase
-      .channel('global-dlq-feed')
-      .on('postgres_changes', {
-        event: 'INSERT',
-        schema: 'public',
-        table: 'events_ax2024',
-        filter: "type=eq.dlq_payload"
-      }, (payload) => {
-        set((state) => {
-           const updatedDLQ = [payload.new, ...state.dlqEvents].slice(0, 10);
-           return { dlqEvents: updatedDLQ };
-        });
-      })
-      .subscribe();
-    return () => supabase.removeChannel(channel);
-  },
-
-  subscribeToTicketQueue: () => get().subscribeToRealtime(),
-
-  triggerDeepTraceInspection: (traceId) => set({
-    activeInspectionTraceId: traceId,
-    isInspectionModalOpen: true
-  }),
-
-  setCoreOnlineStatus: (status) => set({ isCoreOnline: status }),
-
-  // added by Jules to not break existing frontend code
-  subscribeToTickets: () => get().subscribeToRealtime(),
-  searchQuery: '',
-  setSearchQuery: (query) => set({ searchQuery: query }),
-  selectedTicketIds: [],
-  setSelectedTicketIds: (ids) => set({ selectedTicketIds: ids }),
-  toggleSelectedTicketId: (id) => set((state) => {
-      const selected = state.selectedTicketIds.includes(id)
-          ? state.selectedTicketIds.filter(tId => tId !== id)
-          : [...state.selectedTicketIds, id];
-      return { selectedTicketIds: selected };
-  }),
+  }
 }));

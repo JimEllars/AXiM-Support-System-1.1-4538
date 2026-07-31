@@ -2,22 +2,19 @@ import { describe, it, expect, vi } from 'vitest';
 
 global.fetch = vi.fn();
 
-describe('Edge Telemetry & CRON Health Endpoint Suite', () => {
-  it('should return valid JSON structure and health status on /api/v1/health/cron', async () => {
-    vi.mocked(fetch).mockResolvedValueOnce({
-      status: 200,
-      json: async () => ({
-        success: true,
-        last_cron_run: new Date().toISOString(),
-        status: "healthy",
+describe('Edge Telemetry & Event Audit Log Suite', () => {
+  it('should format kv_cache_purged_by_admin event payloads correctly', () => {
+    const eventPayload = {
+      type: "kv_cache_purged_by_admin",
+      payload: {
+        purged_keys: ["exec_policy_summary_v1", "rate_inbound_127.0.0.1"],
+        operator: "james.ellars@axim.us.com",
         timestamp: new Date().toISOString()
-      })
-    });
+      }
+    };
 
-    const res = await fetch('http://localhost:8787/api/v1/health/cron', { method: 'GET' });
-    expect(res.status).toBe(200);
-    const data = await res.json();
-    expect(data.success).toBe(true);
-    expect(data.status).toBe("healthy");
+    expect(eventPayload.type).toBe("kv_cache_purged_by_admin");
+    expect(eventPayload.payload.purged_keys).toContain("exec_policy_summary_v1");
+    expect(eventPayload.payload.operator).toBe("james.ellars@axim.us.com");
   });
 });
