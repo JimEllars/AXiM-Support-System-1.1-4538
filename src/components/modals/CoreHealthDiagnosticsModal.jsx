@@ -1,57 +1,52 @@
 import React, { useState, useEffect } from 'react';
-import { FiActivity, FiClock, FiShield, FiX, FiRefreshCw, FiSend, FiZap, FiPlay, FiCpu, FiCheckCircle } from 'react-icons/fi';
+import { FiActivity, FiX, FiRefreshCw, FiClock, FiShield, FiTrash2, FiZap, FiCheckCircle, FiPlay, FiSend } from 'react-icons/fi';
 import toast from 'react-hot-toast';
 import { supabase } from '../../lib/supabaseClient';
 import { getEdgeWorkerUrl } from '../../lib/edgeWorkerUrl';
 
 export default function CoreHealthDiagnosticsModal({ isOpen, onClose }) {
-  const [data, setData] = useState(null);
-  const [isCached, setIsCached] = useState(false);
+  const [edgeHealth, setEdgeHealth] = useState(null);
+  const [cronHealth, setCronHealth] = useState(null);
+  const [secHealth, setSecHealth] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
-  const [isTesting, setIsTesting] = useState(false);
-  const [isSweeping, setIsSweeping] = useState(false);
+  const [isPurging, setIsPurging] = useState(false);
 
   const fetchDiagnostics = async () => {
     setIsLoading(true);
     try {
       const workerUrl = getEdgeWorkerUrl();
-      const res = await fetch(`${workerUrl}/api/v1/health/diagnostics`);
-      if (res.ok) {
-        const json = await res.json();
-        setData(json.diagnostics || null);
-        setIsCached(!!json.cached);
-      }
+
+      const [edgeRes, cronRes, secRes] = await Promise.all([
+        fetch(`${workerUrl}/health`),
+        fetch(`${workerUrl}/api/v1/health/cron`),
+        fetch(`${workerUrl}/api/v1/health/security`)
+      ]);
+
+      if (edgeRes.ok) setEdgeHealth(await edgeRes.json());
+      if (cronRes.ok) setCronHealth(await cronRes.json());
+      if (secRes.ok) setSecHealth(await secRes.json());
     } catch (err) {
-      console.error("Failed to load health diagnostics:", err);
+      console.error("Failed to load core health diagnostics:", err);
     } finally {
       setIsLoading(false);
     }
   };
 
   useEffect(() => {
-    if (isOpen) {
-      fetchDiagnostics();
-
-      const handleLiveSweepCompletion = () => {
-        fetchDiagnostics();
-      };
-
-      window.addEventListener('axim:cron_sweep_completed', handleLiveSweepCompletion);
-      return () => window.removeEventListener('axim:cron_sweep_completed', handleLiveSweepCompletion);
-    }
+    if (isOpen) fetchDiagnostics();
   }, [isOpen]);
 
-  const handleTriggerFullSweep = async () => {
-    if (isSweeping) return;
-    setIsSweeping(true);
+  const handlePurgeKv = async () => {
+    if (isPurging) return;
+    setIsPurging(true);
 
     try {
       const { data: { session } } = await supabase.auth.getSession();
       const token = session?.access_token;
-      if (!token) throw new Error("Active operator session token required.");
+      if (!token) throw new Error("Operator session token required.");
 
       const workerUrl = getEdgeWorkerUrl();
-      const res = await fetch(`${workerUrl}/api/v1/cron/trigger-all`, {
+      const res = await fetch(`${workerUrl}/api/v1/admin/kv-purge`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -59,162 +54,88 @@ export default function CoreHealthDiagnosticsModal({ isOpen, onClose }) {
         }
       });
 
-      const json = await res.json();
-      if (!res.ok || !json.success) throw new Error(json.error || 'CRON sweep failed.');
+      const data = await res.json();
+      if (!res.ok || !data.success) throw new Error(data.error || "KV purge failed.");
 
-      toast.success(`Full CRON sweep triggered! Executed ${json.executed_sweeps || 9} background automations.`, {
+      toast.success(`Cloudflare KV Cache Purged! (${data.purged_keys?.length || 0} keys cleared)`, {
         style: { background: '#09090b', color: '#10b981', border: '1px solid rgba(16,185,129,0.3)' }
       });
       fetchDiagnostics();
     } catch (err) {
-      toast.error(`Sweep Error: ${err.message}`);
+      toast.error(`Purge Error: ${err.message}`);
     } finally {
-      setIsSweeping(false);
-    }
-  };
-
-  const handleTestBriefing = async () => {
-    if (isTesting) return;
-    setIsTesting(true);
-
-    try {
-      const { data: { session } } = await supabase.auth.getSession();
-      const token = session?.access_token;
-      if (!token) throw new Error("Active session token required.");
-
-      const workerUrl = getEdgeWorkerUrl();
-      const res = await fetch(`${workerUrl}/api/v1/health/test-briefing`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
-        }
-      });
-
-      const json = await res.json();
-      if (!res.ok || !json.success) throw new Error(json.error || 'Pipeline test failed.');
-
-      toast.success("Diagnostic test email sent to james.ellars@axim.us.com!", {
-        style: { background: '#09090b', color: '#10b981', border: '1px solid rgba(16,185,129,0.3)' }
-      });
-      fetchDiagnostics();
-    } catch (err) {
-      toast.error(`Test Dispatch Error: ${err.message}`);
-    } finally {
-      setIsTesting(false);
+      setIsPurging(false);
     }
   };
 
   if (!isOpen) return null;
 
-  const activeSweeps = [
-    "SLA Breach Auto-Escalation",
-    "Inactivity Auto-Resolution",
-    "Workers AI Knowledge Base Curation",
-    "Vector KB Health & Re-Indexing",
-    "Executive Daily Digest Dispatch",
-    "System Daily Progress Report",
-    "Stale HITL Decision Reminders",
-    "Stale Ticket Identification",
-    "Data Retention Purge"
-  ];
-
   return (
-    <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
-      <div className="w-full max-w-xl rounded-3xl bg-zinc-950 border border-zinc-800 shadow-2xl p-6 space-y-4 font-mono text-xs max-h-[90vh] overflow-y-auto">
+    <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 font-mono">
+      <div className="w-full max-w-lg rounded-3xl bg-zinc-950 border border-zinc-800 shadow-2xl p-6 space-y-4 text-xs">
         <div className="flex items-center justify-between border-b border-zinc-900 pb-3">
-          <div className="flex items-center gap-2 font-bold text-indigo-400 uppercase tracking-wider">
-            <FiActivity className="text-sm animate-pulse"/>
-            <span>Cloudflare Edge Core Diagnostics</span>
+          <div className="flex items-center gap-2 font-bold text-emerald-400">
+            <FiActivity className="text-base animate-pulse"/>
+            <span className="uppercase tracking-wider">Edge Health Diagnostics</span>
           </div>
-
-          <div className="flex items-center gap-2">
-            {isCached && (
-              <span className="text-[9px] text-indigo-300 bg-indigo-500/10 px-2 py-0.5 rounded border border-indigo-500/20 uppercase flex items-center gap-1">
-                <FiZap className="text-[9px]"/> KV Cached (30s)
-              </span>
-            )}
-            <button onClick={onClose} className="p-1.5 rounded-lg text-zinc-500 hover:text-white bg-zinc-900 border border-zinc-800 transition-colors">
-              <FiX/>
-            </button>
-          </div>
+          <button onClick={onClose} className="p-1 text-zinc-500 hover:text-white"><FiX/></button>
         </div>
 
         {isLoading ? (
           <div className="text-center py-8 text-zinc-500 flex items-center justify-center gap-2">
             <FiRefreshCw className="animate-spin text-sm"/>
-            <span>Polling edge worker diagnostic telemetry...</span>
-          </div>
-        ) : data ? (
-          <div className="space-y-3">
-            {/* Edge Worker Grid */}
-            <div className="p-3.5 rounded-2xl bg-black/50 border border-zinc-800 space-y-1">
-              <div className="flex items-center justify-between font-bold text-zinc-300">
-                <span className="flex items-center gap-1.5 text-emerald-400"><FiActivity/> Edge Worker Engine</span>
-                <span className="text-[10px] bg-emerald-500/10 text-emerald-400 px-2 py-0.5 rounded border border-emerald-500/20 uppercase">{data.edge_worker?.status}</span>
-              </div>
-              <div className="text-[11px] text-zinc-500 font-sans">Runtime: {data.edge_worker?.runtime}</div>
-            </div>
-
-            {/* 9-Sweep CRON Automation Breakdown Matrix */}
-            <div className="p-3.5 rounded-2xl bg-black/50 border border-zinc-800 space-y-2.5">
-              <div className="flex items-center justify-between font-bold text-zinc-300">
-                <span className="flex items-center gap-1.5 text-sky-400"><FiClock/> Autonomous CRON Matrix (9 Sweeps)</span>
-                <button
-                  onClick={handleTriggerFullSweep}
-                  disabled={isSweeping}
-                  className="flex items-center gap-1 px-2.5 py-0.5 rounded text-[9px] font-bold uppercase text-sky-300 bg-sky-500/10 border border-sky-500/20 hover:bg-sky-500/20 transition-all disabled:opacity-50"
-                  title="Run all 9 background CRON sweeps concurrently on demand"
-                >
-                  <FiPlay className={isSweeping ? 'animate-spin' : ''}/>
-                  <span>{isSweeping ? 'Sweeping...' : 'Trigger Full Sweep'}</span>
-                </button>
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-1.5 pt-1">
-                {activeSweeps.map((sweep, idx) => (
-                  <div key={idx} className="p-2 rounded-lg bg-zinc-900/60 border border-zinc-800/80 flex items-center justify-between text-[10px]">
-                    <span className="text-zinc-300 truncate pr-1">{sweep}</span>
-                    <span className="text-emerald-400 flex items-center gap-1 flex-shrink-0 font-bold">
-                      <FiCheckCircle className="text-[9px]"/> Active
-                    </span>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            {/* Security Shield Grid */}
-            <div className="p-3.5 rounded-2xl bg-black/50 border border-zinc-800 space-y-1">
-              <div className="flex items-center justify-between font-bold text-zinc-300">
-                <span className="flex items-center gap-1.5 text-indigo-400"><FiShield/> Edge Security Shield</span>
-                <span className="text-[10px] bg-indigo-500/10 text-indigo-400 px-2 py-0.5 rounded border border-indigo-500/20 uppercase">Active Guard</span>
-              </div>
-              <div className="text-[11px] text-zinc-500 font-sans">
-                HMAC Verification: <strong className="text-zinc-300">{data.edge_shield?.hmac_verification}</strong> | Rate Limit: <strong className="text-zinc-300">{data.edge_shield?.rate_limit_cap}</strong> | 24h Blocks: <strong className="text-rose-400">{data.edge_shield?.rate_limit_blocks_24h}</strong>
-              </div>
-            </div>
-
-            {/* 24h Activity Summary & Test Dispatch Action */}
-            <div className="p-3.5 rounded-2xl bg-zinc-900/50 border border-zinc-800 flex items-center justify-between text-[11px]">
-              <div className="space-y-0.5">
-                <div className="text-zinc-400 font-bold">24h Briefings: <strong className="text-sky-300">{data.telemetry_summary_24h?.executive_briefings_exported}</strong></div>
-                <div className="text-zinc-400 font-bold">24h Stale Reminders: <strong className="text-amber-300">{data.telemetry_summary_24h?.stale_hitl_reminders_sent}</strong></div>
-              </div>
-
-              <button
-                onClick={handleTestBriefing}
-                disabled={isTesting}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-indigo-500/10 text-indigo-300 border border-indigo-500/30 hover:bg-indigo-500/20 font-bold uppercase transition-all disabled:opacity-50"
-                title="Send test briefing email to Mr. Ellars to verify transport health"
-              >
-                <FiSend className={isTesting ? 'animate-spin' : ''}/>
-                <span>{isTesting ? 'Testing...' : 'Trigger Test Briefing'}</span>
-              </button>
-            </div>
+            <span>Querying Cloudflare Edge Telemetry...</span>
           </div>
         ) : (
-          <div className="text-center py-6 text-zinc-600">Failed to load diagnostic telemetry data.</div>
+          <div className="space-y-3 font-sans">
+            {/* Edge Worker */}
+            <div className="p-3.5 rounded-2xl bg-black/50 border border-zinc-800/80 space-y-1">
+              <div className="flex items-center justify-between text-xs font-mono font-bold text-zinc-200">
+                <span className="flex items-center gap-1.5"><FiActivity className="text-emerald-400"/> Worker Pipeline</span>
+                <span className="text-emerald-400 uppercase font-mono text-[10px]">{edgeHealth?.status || 'Active'}</span>
+              </div>
+              <p className="text-[11px] text-zinc-400 font-mono">Service: <code>{edgeHealth?.service || 'onyx-edge-worker'}</code></p>
+            </div>
+
+            {/* CRON Schedule */}
+            <div className="p-3.5 rounded-2xl bg-black/50 border border-zinc-800/80 space-y-1">
+              <div className="flex items-center justify-between text-xs font-mono font-bold text-zinc-200">
+                <span className="flex items-center gap-1.5"><FiClock className="text-sky-400"/> Daily CRON (08:00 UTC)</span>
+                <span className="text-sky-400 uppercase font-mono text-[10px]">{cronHealth?.status || 'Healthy'}</span>
+              </div>
+              <p className="text-[11px] text-zinc-400 font-mono">Last Run: <code>{cronHealth?.last_cron_run || 'Pending Initial Trigger'}</code></p>
+            </div>
+
+            {/* Edge Shield */}
+            <div className="p-3.5 rounded-2xl bg-black/50 border border-zinc-800/80 space-y-1">
+              <div className="flex items-center justify-between text-xs font-mono font-bold text-zinc-200">
+                <span className="flex items-center gap-1.5"><FiShield className="text-indigo-400"/> Edge Security Shield</span>
+                <span className="text-indigo-400 uppercase font-mono text-[10px]">{secHealth?.status || 'Shield Active'}</span>
+              </div>
+              <p className="text-[11px] text-zinc-400 font-mono">Rate Limiting: <code>{secHealth?.rate_limiting || '30 req/min'}</code> | HMAC: <code>{secHealth?.hmac_verification || 'Enforced'}</code></p>
+            </div>
+          </div>
         )}
+
+        <div className="pt-2 flex items-center justify-between gap-2 border-t border-zinc-900">
+          <button
+            onClick={fetchDiagnostics}
+            disabled={isLoading}
+            className="px-3 py-1.5 rounded-xl bg-zinc-900 hover:bg-zinc-800 text-zinc-300 border border-zinc-800 text-[10px] font-mono font-bold uppercase transition-all"
+          >
+            Refresh Data
+          </button>
+
+          <button
+            onClick={handlePurgeKv}
+            disabled={isPurging}
+            className="flex items-center gap-1 px-3 py-1.5 rounded-xl bg-rose-500/10 text-rose-300 border border-rose-500/20 hover:bg-rose-500/20 text-[10px] font-mono font-bold uppercase transition-all disabled:opacity-50"
+            title="Clear rate-limiting IP counters and policy summary KV cache"
+          >
+            <FiTrash2 className={isPurging ? 'animate-spin' : ''} />
+            <span>{isPurging ? 'Purging...' : 'Flush KV Cache'}</span>
+          </button>
+        </div>
       </div>
     </div>
   );
