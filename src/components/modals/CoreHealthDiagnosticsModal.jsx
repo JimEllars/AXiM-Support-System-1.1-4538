@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { FiActivity, FiX, FiRefreshCw, FiClock, FiShield, FiTrash2, FiZap, FiCheckCircle, FiPlay, FiSend } from 'react-icons/fi';
+import { FiActivity, FiX, FiRefreshCw, FiClock, FiShield, FiTrash2, FiDatabase } from 'react-icons/fi';
 import toast from 'react-hot-toast';
 import { supabase } from '../../lib/supabaseClient';
 import { getEdgeWorkerUrl } from '../../lib/edgeWorkerUrl';
@@ -8,6 +8,7 @@ export default function CoreHealthDiagnosticsModal({ isOpen, onClose }) {
   const [edgeHealth, setEdgeHealth] = useState(null);
   const [cronHealth, setCronHealth] = useState(null);
   const [secHealth, setSecHealth] = useState(null);
+  const [lastKvPurge, setLastKvPurge] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
   const [isPurging, setIsPurging] = useState(false);
 
@@ -25,6 +26,24 @@ export default function CoreHealthDiagnosticsModal({ isOpen, onClose }) {
       if (edgeRes.ok) setEdgeHealth(await edgeRes.json());
       if (cronRes.ok) setCronHealth(await cronRes.json());
       if (secRes.ok) setSecHealth(await secRes.json());
+
+      // Fetch last KV purge event telemetry from events_ax2024
+      const { data: purgeEvent } = await supabase
+        .from('events_ax2024')
+        .select('*')
+        .eq('type', 'kv_cache_purged_by_admin')
+        .order('timestamp', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (purgeEvent) {
+        setLastKvPurge({
+          time: new Date(purgeEvent.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          operator: purgeEvent.payload?.operator || 'Administrator'
+        });
+      } else {
+        setLastKvPurge(null);
+      }
     } catch (err) {
       console.error("Failed to load core health diagnostics:", err);
     } finally {
@@ -106,13 +125,20 @@ export default function CoreHealthDiagnosticsModal({ isOpen, onClose }) {
               <p className="text-[11px] text-zinc-400 font-mono">Last Run: <code>{cronHealth?.last_cron_run || 'Pending Initial Trigger'}</code></p>
             </div>
 
-            {/* Edge Shield */}
-            <div className="p-3.5 rounded-2xl bg-black/50 border border-zinc-800/80 space-y-1">
+            {/* Edge Shield & KV Cache State */}
+            <div className="p-3.5 rounded-2xl bg-black/50 border border-zinc-800/80 space-y-2">
               <div className="flex items-center justify-between text-xs font-mono font-bold text-zinc-200">
                 <span className="flex items-center gap-1.5"><FiShield className="text-indigo-400"/> Edge Security Shield</span>
                 <span className="text-indigo-400 uppercase font-mono text-[10px]">{secHealth?.status || 'Shield Active'}</span>
               </div>
               <p className="text-[11px] text-zinc-400 font-mono">Rate Limiting: <code>{secHealth?.rate_limiting || '30 req/min'}</code> | HMAC: <code>{secHealth?.hmac_verification || 'Enforced'}</code></p>
+
+              {lastKvPurge && (
+                <div className="pt-2 border-t border-zinc-900/80 flex items-center justify-between text-[10px] font-mono text-amber-300">
+                  <span className="flex items-center gap-1"><FiDatabase className="text-amber-400"/> Last KV Purge:</span>
+                  <span>{lastKvPurge.time} ({lastKvPurge.operator})</span>
+                </div>
+              )}
             </div>
           </div>
         )}
@@ -129,7 +155,7 @@ export default function CoreHealthDiagnosticsModal({ isOpen, onClose }) {
           <button
             onClick={handlePurgeKv}
             disabled={isPurging}
-            className="flex items-center gap-1 px-3 py-1.5 rounded-xl bg-rose-500/10 text-rose-300 border border-rose-500/20 hover:bg-rose-500/20 text-[10px] font-mono font-bold uppercase transition-all disabled:opacity-50"
+            className={`flex items-center gap-1 px-3 py-1.5 rounded-xl bg-rose-500/10 text-rose-300 border border-rose-500/20 hover:bg-rose-500/20 text-[10px] font-mono font-bold uppercase transition-all disabled:opacity-50 ${isPurging ? 'animate-spin' : ''}`}
             title="Clear rate-limiting IP counters and policy summary KV cache"
           >
             <FiTrash2 className={isPurging ? 'animate-spin' : ''} />
