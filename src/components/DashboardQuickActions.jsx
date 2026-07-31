@@ -10,7 +10,7 @@ export default function DashboardQuickActions() {
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
   const [isPrefsOpen, setIsPrefsOpen] = useState(false);
   const [cronEngine, setCronEngine] = useState({ status: 'active', daily_sweeps: 9, last_kb_curation: null });
-  const [prefs, setPrefs] = useState({ instant_receipts: true, urgent_alerts: true, daily_digest: true, autoresolve_days: 7 });
+  const [prefs, setPrefs] = useState({ instant_receipts: true, urgent_alerts: true, daily_digest: true, autoresolve_days: 7, auto_purge_kv: true });
   const [isSavingPrefs, setIsSavingPrefs] = useState(false);
 
   const fetchCronStatus = async () => {
@@ -36,7 +36,7 @@ export default function DashboardQuickActions() {
       const res = await fetch(`${workerUrl}/api/v1/email/preferences`);
       if (res.ok) {
         const data = await res.json();
-        if (data.preferences) setPrefs(data.preferences);
+        if (data.preferences) setPrefs({ auto_purge_kv: true, ...data.preferences });
       }
     } catch (err) {
       console.error("Failed to load email preferences:", err);
@@ -183,6 +183,19 @@ export default function DashboardQuickActions() {
                   type="checkbox"
                   checked={prefs.urgent_alerts}
                   onChange={(e) => setPrefs({ ...prefs, urgent_alerts: e.target.checked })}
+                  className="rounded bg-zinc-900 border-zinc-700 text-indigo-500 focus:ring-0"
+                />
+              </label>
+
+              <label className="flex items-center justify-between p-3 rounded-xl bg-black/50 border border-zinc-800 cursor-pointer">
+                <div>
+                  <div className="font-bold text-zinc-200">Automated KV Maintenance</div>
+                  <div className="text-[10px] text-zinc-500">Clear rate limit keys & caches every 24h via CRON</div>
+                </div>
+                <input
+                  type="checkbox"
+                  checked={prefs.auto_purge_kv}
+                  onChange={(e) => setPrefs({ ...prefs, auto_purge_kv: e.target.checked })}
                   className="rounded bg-zinc-900 border-zinc-700 text-indigo-500 focus:ring-0"
                 />
               </label>

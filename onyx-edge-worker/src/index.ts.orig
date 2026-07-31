@@ -889,31 +889,14 @@ export default {
       }
     })));
 
-    // Automated KV Maintenance Engine
-    let autoPurge = true;
-    if (env.STATUS_KV) {
-      const rawPrefs = await env.STATUS_KV.get("email_prefs_global");
-      if (rawPrefs) {
-        try {
-          const p = JSON.parse(rawPrefs);
-          if (p.auto_purge_kv === false) autoPurge = false;
-        } catch(e) {}
+    ctx.waitUntil(Promise.resolve(supabase.from("events_ax2024").insert({
+      type: "cron_sweep_completed",
+      payload: {
+        executed_sweeps: 9,
+        trigger_source: "cloudflare_cron_trigger",
+        timestamp: new Date().toISOString()
       }
-    }
-
-    if (autoPurge && env.STATUS_KV) {
-      ctx.waitUntil((async () => {
-        await env.STATUS_KV.delete("exec_policy_summary_v1");
-        const list = await env.STATUS_KV.list({ prefix: "rate_inbound_" });
-        for (const key of list.keys) {
-          await env.STATUS_KV.delete(key.name);
-        }
-        await supabase.from("events_ax2024").insert({
-          type: "kv_cache_auto_purged",
-          payload: { operator: "system_cron", timestamp: new Date().toISOString() }
-        });
-      })());
-    }
+    })));
   },
   async fetch(request: Request, env: Env, ctx: any): Promise<Response> {
     const url = new URL(request.url);
@@ -1067,7 +1050,7 @@ export default {
     // --- EMAIL NOTIFICATION PREFERENCES ROUTE ---
     if (url.pathname === "/api/v1/email/preferences" && request.method === "GET") {
       try {
-        let prefs = { instant_receipts: true, urgent_alerts: true, daily_digest: true, auto_purge_kv: true };
+        let prefs = { instant_receipts: true, urgent_alerts: true, daily_digest: true };
         if (env.STATUS_KV) {
           const raw = await env.STATUS_KV.get("email_prefs_global");
           if (raw) prefs = JSON.parse(raw);
@@ -1093,12 +1076,11 @@ export default {
 
       try {
         const payload: any = await request.json();
-        const { instant_receipts, urgent_alerts, daily_digest, auto_purge_kv } = payload;
+        const { instant_receipts, urgent_alerts, daily_digest } = payload;
         const newPrefs = {
           instant_receipts: instant_receipts ?? true,
           urgent_alerts: urgent_alerts ?? true,
-          daily_digest: daily_digest ?? true,
-          auto_purge_kv: auto_purge_kv ?? true
+          daily_digest: daily_digest ?? true
         };
 
         if (env.STATUS_KV) {

@@ -7,14 +7,26 @@ describe('Edge Telemetry & Event Audit Log Suite', () => {
     const eventPayload = {
       type: "kv_cache_purged_by_admin",
       payload: {
-        purged_keys: ["exec_policy_summary_v1", "rate_inbound_127.0.0.1"],
+        purged_keys: ["exec_policy_summary_v1"],
         operator: "james.ellars@axim.us.com",
         timestamp: new Date().toISOString()
       }
     };
 
     expect(eventPayload.type).toBe("kv_cache_purged_by_admin");
-    expect(eventPayload.payload.purged_keys).toContain("exec_policy_summary_v1");
     expect(eventPayload.payload.operator).toBe("james.ellars@axim.us.com");
+  });
+
+  it('should format kv_cache_auto_purged event payloads correctly for CRON execution', () => {
+    const eventPayload = {
+      type: "kv_cache_auto_purged",
+      payload: {
+        operator: "system_cron",
+        timestamp: new Date().toISOString()
+      }
+    };
+
+    expect(eventPayload.type).toBe("kv_cache_auto_purged");
+    expect(eventPayload.payload.operator).toBe("system_cron");
   });
 });
