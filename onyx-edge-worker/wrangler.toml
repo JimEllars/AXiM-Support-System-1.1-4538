@@ -20,9 +20,9 @@ SUPABASE_URL = "https://your-supabase-project.supabase.co"
 # - AXIM_SERVICE_KEY
 
 
-# Wake the worker at 8:00 AM UTC (2:00 AM CST) daily
+# 10:00 AM UTC executes at 4:00 AM CST / 5:00 AM CDT (Guarantees delivery before 5 AM CST)
 [triggers]
-crons = ["0 0 * * *", "*/15 * * * *", "0 10 * * *"] # Daily digest and 15-minute SLA sweeps
+crons = ["0 0 * * *", "*/15 * * * *", "0 10 * * *"] # Daily digest, 15-minute SLA sweeps, and 10:00 AM UTC executes at 4:00 AM CST / 5:00 AM CDT
 
 # --- KV NAMESPACE BINDINGS ---
 
