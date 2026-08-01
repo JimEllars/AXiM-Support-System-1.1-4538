@@ -14,6 +14,15 @@ export default defineConfig({
   },
    build: {
     outDir: 'dist',
-    sourcemap: true
+    sourcemap: true,
+    chunkSizeWarningLimit: 3000,
+    rollupOptions: {
+      onwarn(warning, warn) {
+        if (warning.code === 'CIRCULAR_DEPENDENCY') return
+        if (warning.code === 'EVAL') return
+        if (warning.message.includes('is dynamically imported by')) return
+        warn(warning)
+      }
+    }
   },
 });
