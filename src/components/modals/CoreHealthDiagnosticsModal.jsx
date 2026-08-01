@@ -10,6 +10,7 @@ export default function CoreHealthDiagnosticsModal({ isOpen, onClose }) {
   const [secHealth, setSecHealth] = useState(null);
   const [archiveHealth, setArchiveHealth] = useState(null);
   const [archiveFiles, setArchiveFiles] = useState([]);
+  const [telemetryStats, setTelemetryStats] = useState(null);
   const [lastKvPurge, setLastKvPurge] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
   const [isPurging, setIsPurging] = useState(false);
@@ -22,11 +23,12 @@ export default function CoreHealthDiagnosticsModal({ isOpen, onClose }) {
       const { data: { session } } = await supabase.auth.getSession();
       const token = session?.access_token || '';
 
-      const [edgeRes, cronRes, secRes, archiveRes, filesRes] = await Promise.all([
+      const [edgeRes, cronRes, secRes, archiveRes, filesRes, telemetryRes] = await Promise.all([
         fetch(`${workerUrl}/health`),
         fetch(`${workerUrl}/api/v1/health/cron`),
         fetch(`${workerUrl}/api/v1/health/security`),
         fetch(`${workerUrl}/api/v1/health/archive`),
+        fetch(`${workerUrl}/api/v1/telemetry/health`),
         fetch(`${workerUrl}/api/v1/admin/archives`, { headers: { 'Authorization': `Bearer ${token}` } })
       ]);
 
@@ -34,6 +36,7 @@ export default function CoreHealthDiagnosticsModal({ isOpen, onClose }) {
       if (cronRes.ok) setCronHealth(await cronRes.json());
       if (secRes.ok) setSecHealth(await secRes.json());
       if (archiveRes.ok) setArchiveHealth(await archiveRes.json());
+      if (telemetryRes && telemetryRes.ok) setTelemetryStats(await telemetryRes.json());
       if (filesRes.ok) {
         const fileData = await filesRes.json();
         setArchiveFiles(fileData.archives || []);
@@ -163,6 +166,16 @@ export default function CoreHealthDiagnosticsModal({ isOpen, onClose }) {
                 <span className="text-emerald-400 uppercase font-mono text-[10px]">{edgeHealth?.status || 'Active'}</span>
               </div>
               <p className="text-[10px] text-zinc-400 font-mono mt-1">Service: <code>{edgeHealth?.service || 'onyx-worker'}</code></p>
+              {telemetryStats && (
+                <div className="flex gap-2 text-[9px] font-mono mt-1">
+                  {telemetryStats.EDGE_HEARTBEAT_INTERCEPTS > 0 && (
+                    <span className="text-amber-400 bg-amber-500/10 px-1 rounded border border-amber-500/20">Sessions: EDGE-CACHED ({telemetryStats.EDGE_HEARTBEAT_INTERCEPTS})</span>
+                  )}
+                  {telemetryStats.D1_TIMEOUT_COUNT > 0 && (
+                    <span className="text-rose-400 bg-rose-500/10 px-1 rounded border border-rose-500/20">DB: DEGRADED ({telemetryStats.D1_TIMEOUT_COUNT})</span>
+                  )}
+                </div>
+              )}
             </div>
 
             <div className="p-3.5 rounded-2xl bg-black/50 border border-zinc-800/80 space-y-1">

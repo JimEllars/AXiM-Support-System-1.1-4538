@@ -27,6 +27,10 @@ export default function CoreHealthIndicator() {
         setEdgeStatus('healthy');
         setLatency(Math.round(endTime - startTime));
         setFailures(0);
+      } else if (edgeRes.synthetic) {
+        setEdgeStatus('degraded (edge-cached)');
+        setLatency(Math.round(endTime - startTime));
+        setFailures(f => f + 1);
       } else {
         setEdgeStatus('degraded');
         setFailures(f => f + 1);
