@@ -40,4 +40,34 @@ describe('Edge Telemetry & Event Audit Log Suite', () => {
 
     expect(generatedCutoffDate).toBe(expectedDate);
   });
+
+  it('should reject unauthorized access to /api/v1/admin/archives', async () => {
+    vi.mocked(fetch).mockResolvedValueOnce({
+      status: 401,
+      json: async () => ({ error: 'UNAUTHORIZED' })
+    });
+
+    const res = await fetch('http://localhost:8787/api/v1/admin/archives', { method: 'GET' });
+    expect(res.status).toBe(401);
+  });
+
+  it('should list R2 archives on GET /api/v1/admin/archives with valid token', async () => {
+    vi.mocked(fetch).mockResolvedValueOnce({
+      status: 200,
+      json: async () => ({
+        success: true,
+        archives: [{ key: 'axim_telemetry_archive_2026-08-01_batch.json' }]
+      })
+    });
+
+    const res = await fetch('http://localhost:8787/api/v1/admin/archives', {
+      method: 'GET',
+      headers: { 'Authorization': 'Bearer test_token' }
+    });
+
+    expect(res.status).toBe(200);
+    const data = await res.json();
+    expect(data.success).toBe(true);
+    expect(data.archives[0].key).toContain('axim_telemetry_archive');
+  });
 });

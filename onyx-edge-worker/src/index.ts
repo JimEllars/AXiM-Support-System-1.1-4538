@@ -1953,6 +1953,51 @@ export default {
       }
     }
 
+    // --- R2 COLD STORAGE ARCHIVE LIST ROUTE ---
+    if (url.pathname === "/api/v1/admin/archives" && request.method === "GET") {
+      const authHeader = request.headers.get("Authorization") || "";
+      const token = authHeader.replace("Bearer ", "").trim();
+      if (!token) return new Response(JSON.stringify({ error: "UNAUTHORIZED" }), { status: 401, headers: getCorsHeaders(env, request) });
+
+      try {
+        if (!env.TELEMETRY_ARCHIVE) throw new Error("R2 Cold Storage not configured");
+        const listed = await env.TELEMETRY_ARCHIVE.list({ limit: 5 });
+        return new Response(JSON.stringify({ success: true, archives: listed.objects }), {
+          status: 200, headers: { "Content-Type": "application/json", ...getCorsHeaders(env, request) }
+        });
+      } catch (err: any) {
+        return new Response(JSON.stringify({ error: err.message }), { status: 500, headers: getCorsHeaders(env, request) });
+      }
+    }
+
+    // --- R2 COLD STORAGE DOWNLOAD ROUTE ---
+    if (url.pathname === "/api/v1/admin/archives/download" && request.method === "GET") {
+      const authHeader = request.headers.get("Authorization") || "";
+      const token = authHeader.replace("Bearer ", "").trim();
+      if (!token) return new Response(JSON.stringify({ error: "UNAUTHORIZED" }), { status: 401, headers: getCorsHeaders(env, request) });
+
+      try {
+        const fileKey = url.searchParams.get("file");
+        if (!fileKey || !env.TELEMETRY_ARCHIVE) throw new Error("Invalid request or R2 not configured");
+
+        const object = await env.TELEMETRY_ARCHIVE.get(fileKey);
+        if (!object) throw new Error("Archive not found");
+
+        const headers = new Headers();
+        object.writeHttpMetadata(headers);
+        headers.set("etag", object.httpEtag);
+        headers.set("Content-Type", "application/json");
+        headers.set("Content-Disposition", `attachment; filename="${fileKey}"`);
+        // Attach CORS headers so frontend fetch works
+        const cors = getCorsHeaders(env, request);
+        for (const [k, v] of Object.entries(cors)) headers.set(k, v);
+
+        return new Response(object.body, { status: 200, headers });
+      } catch (err: any) {
+        return new Response(JSON.stringify({ error: err.message }), { status: 500, headers: getCorsHeaders(env, request) });
+      }
+    }
+
     // --- EDGE HEALTH & SYSTEM TELEMETRY ENDPOINT ---
     if (url.pathname === "/api/v1/health" && request.method === "GET") {
       const pingStart = performance.now();
