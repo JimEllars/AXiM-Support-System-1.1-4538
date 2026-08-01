@@ -1,4 +1,5 @@
 import { getEdgeWorkerUrl } from '../lib/edgeWorkerUrl';
+import toast from 'react-hot-toast';
 
 /**
  * Onyx AI Frontend Service - Enhanced
@@ -94,7 +95,7 @@ export const onyxService = {
             return `[${senderType}]: ${msg.message_body}`;
         });
 
-        const result = await fetchWithTimeout(`${ONYX_WORKER_URL}/api/v1/onyx/generate-suggestion`, {
+                const result = await fetchWithTimeout(`${ONYX_WORKER_URL}/api/v1/onyx/generate-suggestion`, {
             method: 'POST',
             body: JSON.stringify({
                 subject: ticketData.subject,
@@ -103,8 +104,16 @@ export const onyxService = {
             })
         });
 
-        if (result.success) {
-            return result.data;
+        if (result.success || result.synthetic) {
+            let data = result.data || {};
+            if (result.synthetic || result.isDegraded) {
+                data.requires_hitl = true;
+                data.auto_executable = false;
+                toast.error("Onyx core is operating in degraded mode. Autonomous action suspended for human review.", {
+                   style: { background: '#09090b', color: '#f43f5e', border: '1px solid rgba(244,63,94,0.4)' }
+                });
+            }
+            return data;
         }
         return { draft: "Failed to generate draft. " + result.error };
     } catch (e) {
@@ -139,12 +148,17 @@ export const onyxService = {
           return { success: true, processed: ticketIds.length };
       }
 
-      const health = await this.checkOnyxHealth();
-      if (health.isDegraded) {
+            const health = await this.checkOnyxHealth();
+      if (health.isDegraded || health.synthetic) {
+          toast.error("Onyx core is operating in degraded mode. Autonomous action suspended for human review.", {
+              style: { background: '#09090b', color: '#f43f5e', border: '1px solid rgba(244,63,94,0.4)' }
+          });
           return {
               success: false,
               error: "Automated resolution aborted due to degraded state. Flagged for manual HITL review.",
-              flaggedForHITL: true
+              flaggedForHITL: true,
+              requires_hitl: true,
+              auto_executable: false
           };
       }
 
@@ -173,14 +187,22 @@ export const onyxService = {
   },
 
   async parseCommand(query, ticketId = null) {
-    if (ticketId && (query.toLowerCase().includes('refund') || query.toLowerCase().includes('password') || query.toLowerCase().includes('beta'))) {
+        if (ticketId && (query.toLowerCase().includes('refund') || query.toLowerCase().includes('password') || query.toLowerCase().includes('beta'))) {
         const result = await fetchWithTimeout(`${ONYX_WORKER_URL}/tool-command`, {
             method: 'POST',
             body: JSON.stringify({ command: query, ticketId })
         });
 
-        if (result.success && result.data?.action_proposed) {
-             return { intent: 'TOOL_PROPOSAL', success: true };
+        if ((result.success || result.synthetic) && result.data?.action_proposed) {
+             let data = result.data;
+             if (result.synthetic) {
+                data.requires_hitl = true;
+                data.auto_executable = false;
+                toast.error("Onyx core is operating in degraded mode. Autonomous action suspended for human review.", {
+                   style: { background: '#09090b', color: '#f43f5e', border: '1px solid rgba(244,63,94,0.4)' }
+                });
+             }
+             return { intent: 'TOOL_PROPOSAL', success: true, ...data };
         }
     }
     const q = query.toLowerCase();

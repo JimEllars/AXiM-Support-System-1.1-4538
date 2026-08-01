@@ -250,10 +250,21 @@ async function handleHealthCheck(env: Env, request: Request, ctx: any): Promise<
 
   const allHealthy = Object.values(checks).every(Boolean);
 
+  if (!allHealthy) {
+     const metricPayload = {
+        endpoint: "/health",
+        intercept_counter: checks.coreApi ? 0 : 1,
+        d1_timeout_count: checks.database ? 0 : 1,
+        timestamp: new Date().toISOString()
+     };
+     ctx.waitUntil(logToEvents(supabase, logCtx, "onyx_core_degraded_intercept", "Health degraded", metricPayload).catch(() => {}));
+  }
+
   logEnd(supabase, logCtx, startTime, ctx);
   return new Response(
     JSON.stringify({
       status: allHealthy ? "healthy" : "degraded",
+      synthetic: !allHealthy,
       checks,
       timestamp: new Date().toISOString(),
     }),

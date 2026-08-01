@@ -32,6 +32,33 @@ describe('Onyx Service Layer', () => {
 
     expect(result.success).toBe(false);
     expect(result.flaggedForHITL).toBe(true);
+    expect(result.requires_hitl).toBe(true);
+    expect(result.auto_executable).toBe(false);
     expect(result.error).toContain('Automated resolution aborted due to degraded state');
+  });
+
+  it('should enforce HITL fallback guard for synthetic Onyx responses in generateAutoDraft', async () => {
+    global.fetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ synthetic: true, data: { draft: "test" } }),
+    });
+
+    const result = await onyxService.generateAutoDraft('123', {subject: "s", description: "d"});
+
+    expect(result.requires_hitl).toBe(true);
+    expect(result.auto_executable).toBe(false);
+  });
+
+  it('should enforce HITL fallback guard for synthetic Onyx responses in parseCommand', async () => {
+    global.fetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ synthetic: true, action_proposed: true }),
+    });
+
+    const result = await onyxService.parseCommand('refund', '123');
+
+    expect(result.success).toBe(true);
+    expect(result.requires_hitl).toBe(true);
+    expect(result.auto_executable).toBe(false);
   });
 });

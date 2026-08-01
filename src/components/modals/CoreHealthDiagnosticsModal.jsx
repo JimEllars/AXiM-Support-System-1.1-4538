@@ -160,6 +160,7 @@ export default function CoreHealthDiagnosticsModal({ isOpen, onClose }) {
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3 font-sans">
+
             <div className="p-3.5 rounded-2xl bg-black/50 border border-zinc-800/80 space-y-1">
               <div className="flex items-center justify-between text-xs font-mono font-bold text-zinc-200">
                 <span className="flex items-center gap-1.5"><FiActivity className="text-emerald-400"/> Edge Pipeline</span>
@@ -177,6 +178,21 @@ export default function CoreHealthDiagnosticsModal({ isOpen, onClose }) {
                 </div>
               )}
             </div>
+
+            {/* Onyx Core Status */}
+            <div className="p-3.5 rounded-2xl bg-black/50 border border-zinc-800/80 space-y-1">
+              <div className="flex items-center justify-between text-xs font-mono font-bold text-zinc-200">
+                <span className="flex items-center gap-1.5"><FiActivity className="text-purple-400"/> Onyx Core</span>
+                <span className={`uppercase font-mono text-[10px] ${telemetryStats?.EDGE_HEARTBEAT_INTERCEPTS > 0 || telemetryStats?.D1_TIMEOUT_COUNT > 0 ? 'text-amber-400' : 'text-purple-400'}`}>
+                  {telemetryStats?.EDGE_HEARTBEAT_INTERCEPTS > 0 || telemetryStats?.D1_TIMEOUT_COUNT > 0 ? 'DEGRADED' : 'HEALTHY'}
+                </span>
+              </div>
+              <p className="text-[10px] text-zinc-400 font-mono mt-1 flex gap-2">
+                <span>Intercepts: <code>{telemetryStats?.EDGE_HEARTBEAT_INTERCEPTS || 0}</code></span>
+                <span>Timeouts: <code>{telemetryStats?.D1_TIMEOUT_COUNT || 0}</code></span>
+              </p>
+            </div>
+
 
             <div className="p-3.5 rounded-2xl bg-black/50 border border-zinc-800/80 space-y-1">
               <div className="flex items-center justify-between text-xs font-mono font-bold text-zinc-200">
