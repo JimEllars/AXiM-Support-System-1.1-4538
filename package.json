@@ -12,7 +12,8 @@
     "dev:worker": "npm --prefix onyx-edge-worker run dev",
     "build:worker": "npm --prefix onyx-edge-worker run build",
     "test:worker": "npm --prefix onyx-edge-worker run test -- --run",
-    "deploy:worker": "npm --prefix onyx-edge-worker run deploy"
+    "deploy:worker": "npm --prefix onyx-edge-worker run deploy",
+    "test": "vitest run"
   },
   "dependencies": {
     "@marsidev/react-turnstile": "^1.5.3",
@@ -49,10 +50,12 @@
     "eslint-plugin-react-hooks": "^5.2.0",
     "eslint-plugin-react-refresh": "^0.4.26",
     "globals": "^15.15.0",
+    "happy-dom": "^20.11.1",
     "postcss": "^8.4.49",
     "tailwindcss": "^3.4.17",
     "typescript": "^6.0.3",
     "vite": "^5.4.21",
+    "vitest": "^4.1.10",
     "yaml": "^2.9.0"
   }
 }
