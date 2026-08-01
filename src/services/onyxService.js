@@ -42,6 +42,10 @@ async function fetchWithTimeout(url, options = {}) {
     }
 
     const data = await response.json();
+
+    if (data && data.synthetic) {
+      return { success: false, data, error: "Synthetic response (edge-cached), core unreachable", traceId, synthetic: true };
+    }
     return { success: true, data, error: null, traceId };
   } catch (err) {
     clearTimeout(id);
