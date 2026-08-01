@@ -18,11 +18,16 @@ export default defineConfig({
     chunkSizeWarningLimit: 3000,
     rollupOptions: {
       onwarn(warning, warn) {
-        if (warning.code === 'CIRCULAR_DEPENDENCY') return
-        if (warning.code === 'EVAL') return
-        if (warning.message.includes('is dynamically imported by')) return
-        warn(warning)
+        if (warning.code === 'CIRCULAR_DEPENDENCY') return;
+        if (warning.code === 'EVAL') return;
+        if (warning.message.includes('is dynamically imported by')) return;
+        warn(warning);
       }
     }
   },
+  css: {
+    postcss: {
+      plugins: []
+    }
+  }
 });
