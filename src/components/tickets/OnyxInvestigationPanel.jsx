@@ -1,11 +1,12 @@
 import React, { useState, useEffect } from 'react';
-import { FiCpu, FiClock, FiCheckCircle, FiMail } from 'react-icons/fi';
+import { FiCpu, FiClock, FiCheckCircle, FiMail, FiAlertTriangle } from 'react-icons/fi';
 import { supabase } from '../../lib/supabaseClient';
 
 export default function OnyxInvestigationPanel({ ticketId }) {
   const [telemetry, setTelemetry] = useState(null);
   const [lastBriefedAt, setLastBriefedAt] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [isDegraded, setIsDegraded] = useState(false);
 
   const fetchInvestigationData = async () => {
     if (!ticketId) return;
@@ -18,6 +19,12 @@ export default function OnyxInvestigationPanel({ ticketId }) {
         .maybeSingle();
 
       setTelemetry(telemetryData || null);
+
+      if (telemetryData && telemetryData.synthetic) {
+          setIsDegraded(true);
+      } else {
+          setIsDegraded(false);
+      }
 
       const { data: briefingEvent } = await supabase
         .from('events_ax2024')
@@ -71,15 +78,29 @@ export default function OnyxInvestigationPanel({ ticketId }) {
     );
   }
 
+  const edgeHeartbeats = telemetry?.EDGE_HEARTBEAT_INTERCEPTS || 0;
+  const d1Timeouts = telemetry?.D1_TIMEOUT_COUNT || 0;
+  const showDegradedSecondary = edgeHeartbeats > 0 || d1Timeouts > 0;
+
   return (
     <div className="p-5 rounded-3xl bg-zinc-950/60 border border-slate-800/60 backdrop-blur-md space-y-4 font-mono">
       <div className="flex items-center justify-between border-b border-zinc-900 pb-3">
         <div className="flex items-center gap-2 text-indigo-400 text-xs font-bold">
           <FiCpu className="text-sm animate-pulse"/>
           <span className="uppercase tracking-wider">Onyx Edge Neural Investigation</span>
+          {isDegraded && (
+              <span className="ml-2 text-[10px] text-amber-500 bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/20 flex items-center gap-1 uppercase">
+                  <FiAlertTriangle className="text-[10px]" /> [Degraded (Edge-Cached)]
+              </span>
+          )}
         </div>
 
         <div className="flex items-center gap-2">
+          {showDegradedSecondary && (
+               <span className="text-[9px] text-orange-400 bg-orange-500/10 px-2 py-0.5 rounded border border-orange-500/20 flex items-center gap-1 font-bold">
+                  {d1Timeouts > 0 ? '[DB: DEGRADED]' : '[Sessions: EDGE-CACHED]'}
+               </span>
+          )}
           {lastBriefedAt && (
             <span className="text-[9px] text-sky-300 bg-sky-500/10 px-2 py-0.5 rounded border border-sky-500/20 flex items-center gap-1">
               <FiMail className="text-[9px]"/> Briefed: {lastBriefedAt}

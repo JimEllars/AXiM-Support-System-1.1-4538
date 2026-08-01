@@ -61,6 +61,14 @@ export const onyxService = {
     return fetchWithTimeout(url, options);
   },
 
+  async checkOnyxHealth() {
+    const result = await fetchWithTimeout(`${ONYX_WORKER_URL}/api/v1/health`);
+    if (result.synthetic || (result.data && result.data.synthetic)) {
+      return { isHealthy: true, isDegraded: true, source: "edge-cache" };
+    }
+    return { isHealthy: true, isDegraded: false };
+  },
+
   async createTicket(ticketData) {
     if (import.meta.env.VITE_MOCK_LLM_ENABLED === 'true') {
       return { success: true, ticket_id: crypto.randomUUID() };
@@ -129,6 +137,15 @@ export const onyxService = {
       if (import.meta.env.VITE_MOCK_LLM_ENABLED === 'true') {
           await new Promise(resolve => setTimeout(resolve, 2000));
           return { success: true, processed: ticketIds.length };
+      }
+
+      const health = await this.checkOnyxHealth();
+      if (health.isDegraded) {
+          return {
+              success: false,
+              error: "Automated resolution aborted due to degraded state. Flagged for manual HITL review.",
+              flaggedForHITL: true
+          };
       }
 
       const result = await fetchWithTimeout(`${ONYX_WORKER_URL}/batch-triage`, {
