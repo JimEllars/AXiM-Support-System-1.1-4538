@@ -8,6 +8,7 @@ export default function CoreHealthIndicator() {
   const [edgeStatus, setEdgeStatus] = useState('checking');
   const [cronStatus, setCronStatus] = useState('checking');
   const [shieldStatus, setShieldStatus] = useState('checking');
+  const [onyxStatus, setOnyxStatus] = useState('checking');
   const [lastCronRun, setLastCronRun] = useState(null);
   const [isDiagOpen, setIsDiagOpen] = useState(false);
   const [latency, setLatency] = useState(null);
@@ -47,17 +48,30 @@ export default function CoreHealthIndicator() {
          setCronStatus('degraded');
       }
 
+
       const secRes = await onyxService.fetchWithTimeout(`${workerUrl}/api/v1/health/security`);
       if (secRes.success) {
         const secData = secRes.data;
         setShieldStatus(secData.status === 'shield_active' ? 'active' : 'degraded');
       } else {
          setShieldStatus('degraded');
+      setOnyxStatus('degraded');
       }
+
+      const onyxRes = await onyxService.checkOnyxHealth();
+      if (onyxRes.isDegraded) {
+          setOnyxStatus('degraded (edge-cached)');
+      } else if (onyxRes.isHealthy) {
+          setOnyxStatus('healthy');
+      } else {
+          setOnyxStatus('degraded');
+      }
+
     } catch (err) {
       setEdgeStatus('degraded');
       setCronStatus('degraded');
       setShieldStatus('degraded');
+      setOnyxStatus('degraded');
       setFailures(f => f + 1);
     }
   };
@@ -122,6 +136,15 @@ export default function CoreHealthIndicator() {
           <span className="font-bold uppercase tracking-wider">Edge Shield</span>
           <span className={`px-1 rounded text-[9px] uppercase ${shieldStatus === 'active' ? 'bg-indigo-500/10 text-indigo-400' : 'bg-amber-500/10 text-amber-400'}`}>
             {shieldStatus === 'active' ? 'Active' : 'Degraded'}
+          </span>
+        </div>
+
+        {/* Onyx Health Indicator */}
+        <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-zinc-900 border border-zinc-800 text-zinc-300">
+          <FiActivity className={`text-xs ${onyxStatus === 'healthy' ? 'text-purple-400' : 'text-amber-400'}`} />
+          <span className="font-bold uppercase tracking-wider">Onyx Core</span>
+          <span className={`px-1 rounded text-[9px] uppercase ${onyxStatus === 'healthy' ? 'bg-purple-500/10 text-purple-400' : 'bg-amber-500/10 text-amber-400'}`}>
+            {onyxStatus === 'degraded (edge-cached)' ? 'DEGRADED (EDGE-CACHED)' : onyxStatus}
           </span>
         </div>
       </div>
