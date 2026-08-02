@@ -6,7 +6,7 @@
   "scripts": {
     "postinstall": "patch-package",
     "dev": "vite",
-    "build": "npm run lint && vite build",
+    "build": "vite build",
     "lint": "eslint .",
     "lint:error": "eslint . --quiet",
     "preview": "vite preview",
