@@ -320,26 +320,29 @@ async function handleStaleTicketSweep(env: Env) {
   }
 }
 
-async function handleSLASweep(env: Env) {
+async function handleSLASweep(env: Env, ctx?: ExecutionContext) {
   try {
     const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
     const now = new Date().toISOString();
 
     const { data: breachedTickets, error: fetchError } = await supabase
       .from("support_tickets")
-      .select("id, subject")
-      .in("status", ["open", "pending"])
+      .select("id, subject, metadata")
+      .in("status", ["open", "in_progress", "pending"])
       .lt("sla_breach_at", now);
 
     if (fetchError || !breachedTickets || breachedTickets.length === 0) return;
 
     for (const ticket of breachedTickets) {
       // Autonomous Auto-Reassignment & Escalation
+      const newMetadata = { ...(ticket.metadata || {}), sla_breached: true };
+
       await supabase
         .from("support_tickets")
         .update({
           priority: "urgent",
           assigned_department: "urgent-escalations",
+          metadata: newMetadata,
           updated_at: now
         })
         .eq("id", ticket.id);
@@ -353,9 +356,26 @@ async function handleSLASweep(env: Env) {
       });
 
       await supabase.from("events_ax2024").insert({
-        type: "sla_breach_auto_escalated",
+        type: "sla_breach_escalated",
         payload: { ticket_id: ticket.id, timestamp: now }
       });
+
+      const emailPromise = sendEmailItNotification(
+        "james.ellars@axim.us.com",
+        `🚨 [SLA BREACH ESCALATION] Ticket #${ticket.id.slice(0, 8)}`,
+        `<div style="font-family: sans-serif; padding: 20px;">
+          <h2 style="color: #ef4444;">SLA Breach Detected</h2>
+          <p>Ticket <strong>${ticket.subject}</strong> has breached its SLA and has been escalated to URGENT.</p>
+          <p style="color: #a1a1aa; font-size: 12px;">Automated by AXiM Edge Support Matrix</p>
+        </div>`,
+        env
+      );
+      if (ctx) {
+        ctx.waitUntil(emailPromise);
+      } else {
+        await emailPromise;
+      }
+
     }
   } catch (err) {
     console.error("[SLA SWEEP ERROR]", err);
@@ -905,7 +925,7 @@ export default {
     }
 
     ctx.waitUntil(generateAndSendDailyDigest(env));
-    ctx.waitUntil(handleSLASweep(env));
+    ctx.waitUntil(handleSLASweep(env, ctx));
     ctx.waitUntil(handleDataRetentionSweep(env));
     ctx.waitUntil(handleStaleTicketSweep(env));
     ctx.waitUntil(checkAndSendStaleHitlReminders(env));
@@ -1071,6 +1091,84 @@ export default {
       }
     }
 
+
+    // --- SLA ESCALATION ROUTE ---
+    if (url.pathname === "/api/v1/sla/escalate" && request.method === "POST") {
+      const authHeader = request.headers.get("Authorization") || "";
+      const token = authHeader.replace("Bearer ", "").trim();
+      if (!token) {
+        return new Response(JSON.stringify({ error: "UNAUTHORIZED_SLA_ESCALATE" }), {
+          status: 401, headers: getCorsHeaders(env, request)
+        });
+      }
+
+      try {
+        const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
+        const now = new Date().toISOString();
+
+        const { data: breachedTickets, error: fetchError } = await supabase
+          .from("support_tickets")
+          .select("id, subject, metadata")
+          .in("status", ["open", "in_progress", "pending"])
+          .lt("sla_breach_at", now);
+
+        if (fetchError) throw fetchError;
+
+        let escalatedCount = 0;
+
+        if (breachedTickets && breachedTickets.length > 0) {
+          for (const ticket of breachedTickets) {
+            // Autonomous Auto-Reassignment & Escalation
+            const newMetadata = { ...(ticket.metadata || {}), sla_breached: true };
+
+            await supabase
+              .from("support_tickets")
+              .update({
+                priority: "urgent",
+                metadata: newMetadata,
+                updated_at: now
+              })
+              .eq("id", ticket.id);
+
+            await supabase.from("events_ax2024").insert({
+              type: "sla_breach_escalated",
+              payload: { ticket_id: ticket.id, timestamp: now, source: "batch_triage_api" }
+            });
+
+            const emailP = sendEmailItNotification(
+              "james.ellars@axim.us.com",
+              `🚨 [SLA BREACH ESCALATION] Ticket #${ticket.id.slice(0, 8)}`,
+              `<div style="font-family: sans-serif; padding: 20px;">
+                <h2 style="color: #ef4444;">SLA Breach Detected</h2>
+                <p>Ticket <strong>${ticket.subject}</strong> has breached its SLA and has been escalated to URGENT.</p>
+                <p style="color: #a1a1aa; font-size: 12px;">Automated by AXiM Edge Support Matrix</p>
+              </div>`,
+              env
+            );
+            // Ignore ctx.waitUntil in this API route for simplicity, just await it or don't.
+            // Wait, we don't have ctx in fetch handler. So let's just await it.
+            await emailP;
+
+
+            escalatedCount++;
+          }
+        }
+
+        return new Response(JSON.stringify({
+          success: true,
+          message: "SLA escalation sweep complete.",
+          escalated_count: escalatedCount,
+          timestamp: now
+        }), {
+          status: 200, headers: { "Content-Type": "application/json", ...getCorsHeaders(env, request) }
+        });
+      } catch (err: any) {
+        return new Response(JSON.stringify({ error: err.message }), {
+          status: 500, headers: getCorsHeaders(env, request)
+        });
+      }
+    }
+
     // --- FULL CRON TRIGGER ENDPOINT ---
     if (url.pathname === "/api/v1/cron/trigger-all" && request.method === "POST") {
       const authHeader = request.headers.get("Authorization") || "";
@@ -1085,7 +1183,7 @@ export default {
         // Execute all background automation sweeps concurrently
         ctx.waitUntil(generateAndSendDailyDigest(env));
         ctx.waitUntil(generateAndSendExecutiveDigest(env));
-        ctx.waitUntil(handleSLASweep(env));
+        ctx.waitUntil(handleSLASweep(env, ctx));
         ctx.waitUntil(handleDataRetentionSweep(env));
         ctx.waitUntil(handleStaleTicketSweep(env));
         ctx.waitUntil(checkAndSendStaleHitlReminders(env));

@@ -18,6 +18,7 @@ const statusStyles = {
   pending: { icon: FiClock, color: 'text-amber-400', border: 'border-amber-500/20 shadow-[0_0_10px_rgba(251,191,36,0.2)]', bg: 'bg-amber-500/10' },
   resolved: { icon: FiCheckCircle, color: 'text-emerald-400', border: 'border-emerald-500/20 shadow-[0_0_10px_rgba(16,185,129,0.2)]', bg: 'bg-emerald-500/10' },
   closed: { icon: FiCheckCircle, color: 'text-zinc-500', border: 'border-zinc-500/30 shadow-[0_0_10px_rgba(113,113,122,0.1)]', bg: 'bg-zinc-500/5' },
+  sla_breached: { icon: FiAlertCircle, color: 'text-rose-500', border: 'border-rose-500/50 shadow-[0_0_15px_rgba(225,29,72,0.4)]', bg: 'bg-rose-500/10' },
 };
 
 const SkeletonLoader = () => (
@@ -48,6 +49,11 @@ export default function TicketList({ onSelectTicket, activeQueue, statusFilter =
   const [queueFilter, setQueueFilter] = useState('unassigned');
   const [isTriaging, setIsTriaging] = useState(false);
   const previousTicketCount = useRef(tickets.length);
+
+  const breachedCount = tickets.filter(t =>
+    (t.metadata?.sla_breached === true || (t.sla_breach_at && new Date(t.sla_breach_at) < new Date())) &&
+    t.status !== 'closed' && t.status !== 'resolved'
+  ).length;
 
 
 // Tab notification effect
@@ -130,7 +136,17 @@ export default function TicketList({ onSelectTicket, activeQueue, statusFilter =
   // Filter based on both the Active Queue (Department) and the Status Filter
   let filteredTickets = tickets.filter(ticket => {
     const matchesQueue = activeQueue === 'All' || ticket.assigned_department === activeQueue;
-    const matchesStatus = statusFilter === 'all' || ticket.status === statusFilter;
+
+    let matchesStatus = statusFilter === 'all' || ticket.status === statusFilter;
+
+    let matchesInternalQueue = true;
+    if (queueFilter === 'unassigned') matchesInternalQueue = !ticket.assignee_id;
+    if (queueFilter === 'my_queue') matchesInternalQueue = ticket.assignee_id === currentUser?.id;
+    if (queueFilter === 'sla_breached') {
+      const isBreached = ticket.metadata?.sla_breached === true || (ticket.sla_breach_at && new Date(ticket.sla_breach_at) < new Date());
+      matchesInternalQueue = isBreached && ticket.status !== 'closed' && ticket.status !== 'resolved';
+    }
+
 
     const searchLower = searchQuery.toLowerCase();
     const matchesSearch = searchQuery === '' ||
@@ -138,7 +154,7 @@ export default function TicketList({ onSelectTicket, activeQueue, statusFilter =
                           ticket.id.toLowerCase().includes(searchLower) ||
                           (ticket.customer_id && ticket.customer_id.toLowerCase().includes(searchLower));
 
-    return matchesQueue && matchesStatus && matchesSearch;
+    return matchesQueue && matchesStatus && matchesSearch && matchesInternalQueue;
   });
 
   useEffect(() => {
@@ -267,6 +283,17 @@ export default function TicketList({ onSelectTicket, activeQueue, statusFilter =
           className={`flex-1 py-2 text-xs font-bold uppercase tracking-wider rounded-lg transition-all ${queueFilter === 'all' ? 'bg-zinc-800 text-white shadow-md' : 'text-zinc-500 hover:text-zinc-300'}`}
         >
           All Cases
+        </button>
+        <button
+          onClick={() => setQueueFilter('sla_breached')}
+          className={`flex-1 py-2 flex items-center justify-center gap-2 text-xs font-bold uppercase tracking-wider rounded-lg transition-all ${queueFilter === 'sla_breached' ? 'bg-rose-900/50 text-rose-400 shadow-[0_0_15px_rgba(225,29,72,0.4)] border border-rose-500/50' : 'text-rose-500/50 hover:text-rose-400/80'}`}
+        >
+          <span>SLA Breached</span>
+          {breachedCount > 0 && (
+            <span className="px-1.5 py-0.5 rounded-full bg-rose-500 text-white text-[10px] shadow-[0_0_10px_rgba(225,29,72,0.8)] animate-pulse">
+              {breachedCount}
+            </span>
+          )}
         </button>
       </div>
 
