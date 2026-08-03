@@ -52,4 +52,29 @@ describe('Onyx Edge Worker - Public Intake Validation', () => {
     });
     expect(res.status).toBe(401);
   });
+
+  it('should reject requests with invalid or missing Turnstile tokens with 403 Forbidden', async () => {
+    vi.mocked(fetch).mockResolvedValueOnce({
+      status: 403,
+      json: async () => ({ success: false, error: 'TURNSTILE_VERIFICATION_FAILED' })
+    });
+    const res = await fetch('http://localhost:8787/api/v1/webhooks/public-intake', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ encrypted_payload: 'test', iv: 'test', cf_turnstile_response: '' })
+    });
+    expect(res.status).toBe(403);
+    const data = await res.json();
+    expect(data.error).toBe('TURNSTILE_VERIFICATION_FAILED');
+  });
+
+  it('should process ticket intake successfully with valid Turnstile token', async () => {
+    vi.mocked(fetch).mockResolvedValueOnce({ status: 200, json: async () => ({ success: true }) });
+    const res = await fetch('http://localhost:8787/api/v1/webhooks/public-intake', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ encrypted_payload: 'test', iv: 'test', cf_turnstile_response: 'valid-token' })
+    });
+    expect(res.status).toBe(200);
+  });
 });

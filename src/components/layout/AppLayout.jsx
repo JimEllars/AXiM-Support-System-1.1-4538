@@ -7,11 +7,13 @@ import * as FiIcons from 'react-icons/fi';
 import SafeIcon from '../../common/SafeIcon';
 import { useTicketStore } from '../../store/useTicketStore';
 import Sidebar from './Sidebar';
+import OnyxCommandHub from '../OnyxCommandHub';
 
 export default function AppLayout({ children }) {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [isSocketConnected, setIsSocketConnected] = useState(true);
   const [hasImminentBreach, setHasImminentBreach] = useState(false);
+  const [isCommandHubOpen, setIsCommandHubOpen] = useState(false);
 
   const { subscribeToDLQChanges } = useTicketStore();
 
@@ -61,11 +63,29 @@ export default function AppLayout({ children }) {
     const interval = setInterval(checkSLAStatus, 60000);
     return () => clearInterval(interval);
   }, []);
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+        e.preventDefault();
+        setIsCommandHubOpen(prev => !prev);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
+
 
 
 
   return (
     <div className="min-h-screen bg-black">
+
+      {/* Global header with ⌘K Badge overlay */}
+      <div className="fixed top-4 right-4 z-[90] hidden md:flex items-center gap-2 bg-zinc-900/50 backdrop-blur border border-zinc-800 rounded-lg px-3 py-1.5 pointer-events-none">
+        <span className="text-zinc-500 text-xs font-mono">CMD HUD</span>
+        <kbd className="bg-zinc-800 text-zinc-400 font-mono text-[10px] px-1.5 py-0.5 rounded border border-zinc-700">⌘K</kbd>
+      </div>
+
       {hasImminentBreach && (
         <div className="w-full bg-rose-950/80 border-b border-rose-500/50 text-rose-100 font-mono text-[10px] uppercase font-black text-center py-2 tracking-[0.2em] shadow-[0_0_20px_rgba(225,29,72,0.3)] animate-pulse z-[100] relative">
           ⚠️ CRITICAL ATTENTION REQUIRED: SYSTEM SLA BREACH IMMINENT ON LIVE CASE CHANNELS
@@ -96,6 +116,9 @@ export default function AppLayout({ children }) {
         <ErrorBoundary>
           {children}
         </ErrorBoundary>
+
+        {/* Hidden Global Trigger for CSS badge or styling (optional) */}
+        <OnyxCommandHub isOpen={isCommandHubOpen} onClose={() => setIsCommandHubOpen(false)} />
       </div>
     </div>
   );

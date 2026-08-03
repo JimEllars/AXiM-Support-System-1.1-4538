@@ -3170,42 +3170,42 @@ async function handlePublicWebIngress(request: Request, env: Env, ctx: any): Pro
 
   try {
     // CRITICAL FIX: Verify Cloudflare Turnstile token
-    const turnstileToken = decryptedPayload.cf_turnstile_response;
-    if (!turnstileToken) {
-       return new Response(JSON.stringify({ error: "Missing Turnstile security token." }), { status: 403, headers: getCorsHeaders(env, request) });
-    }
+    if (env.TURNSTILE_SECRET_KEY) {
+      const turnstileToken = decryptedPayload.cf_turnstile_response || decryptedPayload.turnstile_token;
+      if (!turnstileToken) {
+         return new Response(JSON.stringify({ success: false, error: "TURNSTILE_VERIFICATION_FAILED" }), { status: 403, headers: getCorsHeaders(env, request) });
+      }
 
-    const turnstileVerify = await fetch('https://challenges.cloudflare.com/turnstile/v0/siteverify', {
-       method: 'POST',
-       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-       body: `secret=${env.TURNSTILE_SECRET_KEY}&response=${turnstileToken}`
-    });
+      const turnstileVerify = await fetch('https://challenges.cloudflare.com/turnstile/v0/siteverify', {
+         method: 'POST',
+         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+         body: `secret=${env.TURNSTILE_SECRET_KEY}&response=${turnstileToken}`
+      });
 
-    const outcome: any = await turnstileVerify.json();
-    if (!outcome.success) {
-      // CRITICAL FIX: Asynchronous Edge Threat Logging
-      const logThreat = async () => {
-        try {
-          const clientIP = request.headers.get("CF-Connecting-IP") || "unknown_ip";
-          const supabaseAdmin = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
+      const outcome: any = await turnstileVerify.json();
+      if (!outcome.success) {
+        // CRITICAL FIX: Asynchronous Edge Threat Logging
+        const logThreat = async () => {
+          try {
+            const clientIP = request.headers.get("CF-Connecting-IP") || "unknown_ip";
+            const supabaseAdmin = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
 
-          const flatThreatPayload = {
-            reason: "turnstile_validation_failed",
-            ip: clientIP,
-            cf_ray: request.headers.get("cf-ray") || "unknown",
-            timestamp: new Date().toISOString(),
-            error_codes: outcome['error-codes'] || []
-          };
+            const flatThreatPayload = {
+              client_ip: clientIP,
+              timestamp: new Date().toISOString(),
+              error_codes: outcome['error-codes'] || []
+            };
 
-          await supabaseAdmin.from("events_ax2024").insert({
-            type: "threat_blocked",
-            payload: JSON.parse(JSON.stringify(flatThreatPayload)) // Enforce structural clean copy serialization
-          });
-        } catch (e) { /* background failsafe block pass */ }
-      };
-      ctx.waitUntil(logThreat()); // Non-blocking edge execution
+            await supabaseAdmin.from("events_ax2024").insert({
+              type: "turnstile_verification_failed",
+              payload: JSON.parse(JSON.stringify(flatThreatPayload)) // Enforce structural clean copy serialization
+            });
+          } catch (e) { /* background failsafe block pass */ }
+        };
+        ctx.waitUntil(logThreat()); // Non-blocking edge execution
 
-      return new Response(JSON.stringify({ error: "Bot verification failed.", details: outcome['error-codes'] }), { status: 403, headers: getCorsHeaders(env, request) });
+        return new Response(JSON.stringify({ success: false, error: "TURNSTILE_VERIFICATION_FAILED" }), { status: 403, headers: getCorsHeaders(env, request) });
+      }
     }
 
     const cfRayId = request.headers.get("cf-ray") || "unknown_ray";
