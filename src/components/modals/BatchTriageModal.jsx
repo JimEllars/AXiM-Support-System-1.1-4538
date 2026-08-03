@@ -15,6 +15,37 @@ export default function BatchTriageModal({ isOpen, onClose }) {
   const { selectedTicketIds, setSelectedTicketIds, fetchTickets } = useTicketStore();
   const { activeOrganization } = useAuthStore();
 
+  const handleSLAEscalate = async () => {
+    setProcessing(true);
+    try {
+        const { getEdgeWorkerUrl } = await import('../../lib/edgeWorkerUrl.js');
+        const workerUrl = getEdgeWorkerUrl();
+        const { supabase } = await import('../../lib/supabaseClient.js');
+        const { data: { session } } = await supabase.auth.getSession();
+        const token = session?.access_token;
+
+        const res = await fetch(`${workerUrl}/api/v1/sla/escalate`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${token}`
+            }
+        });
+        const result = await res.json();
+
+        if (result.success) {
+            toast.success(`Escalated ${result.escalated_count} SLA breached tickets.`);
+            await useTicketStore.getState().fetchTickets(activeOrganization); // Refresh queue
+            onClose(); // auto close or stay open, let's close it
+        } else {
+            throw new Error(result.error || "SLA escalation failed.");
+        }
+    } catch (e) {
+        toast.error("Failed to execute bulk SLA escalation.");
+        setProcessing(false);
+    }
+  };
+
   const handleStart = async () => {
     if (selectedTicketIds.length === 0) {
         toast.error('No tickets selected for triage.');
@@ -108,13 +139,21 @@ export default function BatchTriageModal({ isOpen, onClose }) {
                       <p className="text-[10px] font-black text-fuchsia-400 uppercase tracking-[0.3em] animate-pulse">Analyzing_Neural_Patterns...</p>
                     </div>
                   ) : (
-                    <button 
-                      onClick={handleStart}
-                      disabled={selectedTicketIds.length === 0}
-                      className="w-full py-5 bg-fuchsia-600 disabled:opacity-50 disabled:cursor-not-allowed hover:bg-fuchsia-500 text-black font-black uppercase tracking-[0.2em] rounded-2xl transition-all shadow-[0_0_30px_rgba(217,70,239,0.3)]"
-                    >
-                      Initialize Batch Triage
-                    </button>
+                    <div className="flex flex-col gap-3">
+                      <button
+                        onClick={handleStart}
+                        disabled={selectedTicketIds.length === 0}
+                        className="w-full py-5 bg-fuchsia-600 disabled:opacity-50 disabled:cursor-not-allowed hover:bg-fuchsia-500 text-black font-black uppercase tracking-[0.2em] rounded-2xl transition-all shadow-[0_0_30px_rgba(217,70,239,0.3)]"
+                      >
+                        Initialize Batch Triage
+                      </button>
+                      <button
+                        onClick={handleSLAEscalate}
+                        className="w-full py-4 bg-rose-600/20 hover:bg-rose-600/40 text-rose-400 border border-rose-500/50 font-black uppercase tracking-[0.2em] rounded-2xl transition-all shadow-[0_0_15px_rgba(225,29,72,0.2)]"
+                      >
+                        Escalate Breached SLAs
+                      </button>
+                    </div>
                   )}
                 </div>
               )}
