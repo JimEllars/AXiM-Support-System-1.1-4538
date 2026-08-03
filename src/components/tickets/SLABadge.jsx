@@ -4,7 +4,7 @@ import * as FiIcons from 'react-icons/fi';
 
 const { FiClock } = FiIcons;
 
-const SLABadge = ({ breachAt, status }) => {
+const SLABadge = ({ breachAt, status, metadata }) => {
   const [now, setNow] = useState(new Date());
 
   useEffect(() => {
@@ -33,7 +33,10 @@ const SLABadge = ({ breachAt, status }) => {
 
   if (diffMs <= 0) {
     label = 'BREACHED';
-    className = 'bg-rose-500/20 text-rose-500 border border-rose-500';
+    className = 'bg-rose-500/20 text-rose-500 border border-rose-500 shadow-[0_0_10px_rgba(244,63,94,0.3)]';
+  } else if (metadata?.sla_warning === true) {
+    label = '⚠️ SLA WARNING (< 1h)';
+    className = 'bg-amber-500/20 text-amber-400 border border-amber-500 shadow-[0_0_15px_rgba(245,158,11,0.4)] animate-pulse';
   } else if (diffMs < 7200000) { // Under 2 hours
     const h = Math.floor(diffMs / 3600000);
     const m = Math.floor((diffMs % 3600000) / 60000);
