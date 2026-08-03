@@ -3,6 +3,7 @@ import { Turnstile } from '@marsidev/react-turnstile';
 import { motion, AnimatePresence } from 'framer-motion';
 import { FiUser, FiMail, FiTag, FiFileText, FiPaperclip, FiCheckCircle, FiAlertCircle } from 'react-icons/fi';
 import { getEdgeWorkerUrl } from '../lib/edgeWorkerUrl';
+import toast from 'react-hot-toast';
 
 const workflowCategories = [
   { id: 'General Inquiry', label: 'General Inquiry' },
@@ -113,10 +114,12 @@ export default function PublicIntake() {
       setSubmitSuccess(true);
       setTicketIdReceipt(result.reference_code || result.ticket_id || 'N/A');
     } catch (err) {
-      setSubmitResult({ error: err.message || 'An unexpected error occurred during submission.' });
-      if (err.message.includes("verification failed") || err.message.includes("Token")) {
+      if (err.message.includes("TURNSTILE_VERIFICATION_FAILED") || err.message.includes("verification failed") || err.message.includes("Token")) {
+        toast.error("Bot verification failed. Please complete the security check and try again.");
         turnstileRef.current?.reset();
         setTurnstileToken('');
+      } else {
+        setSubmitResult({ error: err.message || 'An unexpected error occurred during submission.' });
       }
     } finally {
       setIsSubmitting(false);
