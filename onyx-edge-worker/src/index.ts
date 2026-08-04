@@ -324,6 +324,7 @@ async function handleSLASweep(env: Env) {
   try {
     const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
     const now = new Date().toISOString();
+    const oneHourFromNow = new Date(Date.now() + 60 * 60 * 1000).toISOString();
 
     const { data: breachedTickets, error: fetchError } = await supabase
       .from("support_tickets")
@@ -331,36 +332,64 @@ async function handleSLASweep(env: Env) {
       .in("status", ["open", "pending"])
       .lt("sla_breach_at", now);
 
-    if (fetchError || !breachedTickets || breachedTickets.length === 0) return;
+    if (!fetchError && breachedTickets && breachedTickets.length > 0) {
+      for (const ticket of breachedTickets) {
+        // Autonomous Auto-Reassignment & Escalation
+        await supabase
+          .from("support_tickets")
+          .update({
+            priority: "urgent",
+            assigned_department: "urgent-escalations",
+            updated_at: now
+          })
+          .eq("id", ticket.id);
 
-    for (const ticket of breachedTickets) {
-      // Autonomous Auto-Reassignment & Escalation
-      await supabase
-        .from("support_tickets")
-        .update({
-          priority: "urgent",
-          assigned_department: "urgent-escalations",
-          updated_at: now
-        })
-        .eq("id", ticket.id);
+        await supabase.from("ticket_messages").insert({
+          ticket_id: ticket.id,
+          sender_id: "onyx_system",
+          message_body: "⚠️ **[AUTONOMOUS SLA ESCALATION]** Ticket breached resolution deadline. Priority automatically upgraded to **URGENT** and reassigned to **Urgent Escalations**.",
+          is_internal_note: true,
+          metadata: { source: "autonomous_sla_cron_sweep" }
+        });
 
-      await supabase.from("ticket_messages").insert({
-        ticket_id: ticket.id,
-        sender_id: "onyx_system",
-        message_body: "⚠️ **[AUTONOMOUS SLA ESCALATION]** Ticket breached resolution deadline. Priority automatically upgraded to **URGENT** and reassigned to **Urgent Escalations**.",
-        is_internal_note: true,
-        metadata: { source: "autonomous_sla_cron_sweep" }
-      });
-
-      await supabase.from("events_ax2024").insert({
-        type: "sla_breach_auto_escalated",
-        payload: { ticket_id: ticket.id, timestamp: now }
-      });
+        await supabase.from("events_ax2024").insert({
+          type: "sla_breach_auto_escalated",
+          payload: { ticket_id: ticket.id, timestamp: now }
+        });
+      }
     }
-  } catch (err) {
-    console.error("[SLA SWEEP ERROR]", err);
+
+    // 2. Proactive SLA Warning (< 1 hour)
+    const { data: warningTickets, error: warningError } = await supabase
+      .from("support_tickets")
+      .select("id, subject, metadata")
+      .in("status", ["open", "pending"])
+      .gt("sla_breach_at", now)
+      .lt("sla_breach_at", oneHourFromNow);
+
+    if (!warningError && warningTickets && warningTickets.length > 0) {
+      for (const ticket of warningTickets) {
+        if (!ticket.metadata || ticket.metadata.sla_warning !== true) {
+          const updatedMetadata = { ...(ticket.metadata || {}), sla_warning: true };
+
+          await supabase
+            .from("support_tickets")
+            .update({ metadata: updatedMetadata })
+            .eq("id", ticket.id);
+
+          await supabase.from("events_ax2024").insert({
+            type: "sla_warning_threshold_breached",
+            payload: { ticket_id: ticket.id, timestamp: now }
+          });
+        }
+      }
+    }
+  } catch (error) {
+    console.error("[handleSLASweep] Exception:", error);
   }
 }
+
+
 
 async function handleStatusMutation(request: Request, env: Env, ctx: any): Promise<Response> {
   if (!env.STATUS_KV) {

@@ -141,6 +141,14 @@ export default function TicketList({ onSelectTicket, activeQueue, statusFilter =
     return matchesQueue && matchesStatus && matchesSearch;
   });
 
+  if (queueFilter === 'unassigned') {
+    filteredTickets = filteredTickets.filter(t => !t.assignee_id && t.status === 'open');
+  } else if (queueFilter === 'my_queue' && currentUser) {
+    filteredTickets = filteredTickets.filter(t => t.assignee_id === currentUser.id);
+  } else if (queueFilter === 'sla_warning') {
+    filteredTickets = filteredTickets.filter(t => t.metadata?.sla_warning === true && new Date(t.sla_breach_at) > new Date() && t.status !== 'resolved' && t.status !== 'closed');
+  }
+
   useEffect(() => {
     const newestTicket = tickets[0];
     if (newestTicket && newestTicket.priority === 'urgent' && newestTicket.status === 'open') {
@@ -221,6 +229,12 @@ export default function TicketList({ onSelectTicket, activeQueue, statusFilter =
               >
                 All Cases
               </button>
+              <button
+                onClick={() => setQueueFilter('sla_warning')}
+                className={`flex-1 py-2 text-xs font-bold uppercase tracking-wider rounded-lg transition-all ${queueFilter === 'sla_warning' ? 'bg-amber-500/20 text-amber-400 border border-amber-500/50 shadow-md' : 'text-amber-500/70 hover:text-amber-400'}`}
+              >
+                SLA Warning
+              </button>
             </div>
             <div className="py-24 text-center">
               <div className="flex flex-col items-center justify-center space-y-4 animate-in fade-in zoom-in duration-500">
@@ -267,6 +281,12 @@ export default function TicketList({ onSelectTicket, activeQueue, statusFilter =
           className={`flex-1 py-2 text-xs font-bold uppercase tracking-wider rounded-lg transition-all ${queueFilter === 'all' ? 'bg-zinc-800 text-white shadow-md' : 'text-zinc-500 hover:text-zinc-300'}`}
         >
           All Cases
+        </button>
+        <button
+          onClick={() => setQueueFilter('sla_warning')}
+          className={`flex-1 py-2 text-xs font-bold uppercase tracking-wider rounded-lg transition-all ${queueFilter === 'sla_warning' ? 'bg-amber-500/20 text-amber-400 border border-amber-500/50 shadow-md' : 'text-amber-500/70 hover:text-amber-400'}`}
+        >
+          SLA Warning
         </button>
       </div>
 
@@ -386,7 +406,7 @@ export default function TicketList({ onSelectTicket, activeQueue, statusFilter =
                 )}
                 <div onClick={() => onSelectTicket(ticket.id)}>
                   <div className="flex items-center gap-2">
-                    <SLABadge breachAt={ticket.sla_breach_at} status={ticket.status} />
+                    <SLABadge breachAt={ticket.sla_breach_at} status={ticket.status} metadata={ticket.metadata} />
                     {isNew && (
                       <span className="px-2 py-0.5 bg-cyan-500/20 text-cyan-400 border border-cyan-500/30 rounded text-[9px] font-black uppercase tracking-widest animate-pulse shadow-[0_0_10px_rgba(34,211,238,0.2)]">
                         New
