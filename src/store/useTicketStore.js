@@ -137,6 +137,12 @@ export const useTicketStore = create((set, get) => ({
             toast("📋 Executive Briefing Dispatched", {
               style: { background: '#09090b', color: '#38bdf8', border: '1px solid rgba(56,189,248,0.3)' }
             });
+          } else if (newEvent?.type === 'sla_warning_threshold_breached') {
+            toast(`⚠️ SLA Warning Horizon: Ticket #${newEvent.payload?.ticket_id || 'ID'} is due within 1 hour!`, {
+              style: { background: '#09090b', color: '#f59e0b', border: '1px solid rgba(245,158,11,0.3)' },
+              duration: 5000
+            });
+            get().fetchTickets();
           } else if (newEvent?.type === 'kv_cache_auto_purged') {
             toast(`🧹 Automated Maintenance: Edge KV Cache Purged`, {
               icon: '⚙️',

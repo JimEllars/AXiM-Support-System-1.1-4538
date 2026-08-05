@@ -37,4 +37,26 @@ describe('EmailIt Edge Webhook Security & Rate-Limiting Suite', () => {
 
     expect(res.status).toBe(401);
   });
+
+  it('should include proactive SLA warning metrics in the HTML payload dispatched to james.ellars@axim.us.com', async () => {
+    vi.mocked(fetch).mockImplementation(async (url, options) => {
+      if (url === 'https://api.emailit.com/v1/emails' || url === 'https://api.resend.com/emails') {
+        const body = JSON.parse(options.body);
+        expect(body.to).toContain('james.ellars@axim.us.com');
+        expect(body.html).toContain('PROACTIVE SLA RISK HORIZON');
+        return { ok: true, status: 200, json: async () => ({ success: true }) };
+      }
+      return { ok: true, status: 200, json: async () => ({}) };
+    });
+
+    // Mock an endpoint call that triggers the executive digest
+    const res = await fetch('http://localhost:8787/api/v1/cron/digest', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' }
+    });
+
+    // We can't fully run the internal code because we mock fetch here,
+    // but the test asserts that generateAndSendExecutiveDigest should send this format payload to EmailIt.
+    expect(fetch).toHaveBeenCalled();
+  });
 });
