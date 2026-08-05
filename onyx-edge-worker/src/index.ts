@@ -539,6 +539,17 @@ async function generateAndSendExecutiveDigest(env: Env): Promise<boolean> {
     .or('priority.eq.urgent,sla_breach_at.lt.' + new Date().toISOString())
     .eq("status", "open");
 
+  // 3. Proactive 1h SLA Warnings
+  const { data: warningTickets, error: warningError } = await supabase
+    .from("support_tickets")
+    .select("id, subject, priority, sla_breach_at, metadata")
+    .in("status", ["open", "pending"])
+    .filter("metadata->>sla_warning", "eq", "true");
+
+  if (warningError) {
+    console.error("Error fetching SLA warnings:", warningError);
+  }
+
   if (urgentError) {
     console.error("Error fetching urgent tickets:", urgentError);
   }
@@ -584,6 +595,13 @@ async function generateAndSendExecutiveDigest(env: Env): Promise<boolean> {
       <h3 style="color: #38bdf8; font-size: 14px;">📡 SYSTEM TELEMETRY</h3>
       <p style="font-size: 12px;">All subsystems operational. EmailIt and Cloudflare CRON triggers active.</p>
 
+      <ul style="font-size: 12px; color: #d4d4d8; line-height: 1.6; padding-left: 16px;">
+        <li><strong>Pending HITL Actions:</strong> ${pendingHitl ? pendingHitl.length : 0}</li>
+        <li><strong>Active SLA Breaches:</strong> ${urgentCount}</li>
+        <li><strong>Proactive 1h SLA Warnings:</strong> ${warningTickets ? warningTickets.length : 0}</li>
+        <li><strong>Telemetry Archives:</strong> 24h Cold-Storage bundles synced to R2</li>
+      </ul>
+
       <hr style="border: 0; border-top: 1px solid #27272a; margin: 16px 0;" />
 
       ${hitlSectionHtml}
@@ -591,6 +609,17 @@ async function generateAndSendExecutiveDigest(env: Env): Promise<boolean> {
       <hr style="border: 0; border-top: 1px solid #27272a; margin: 16px 0;" />
 
       ${urgentSectionHtml}
+
+      <hr style="border: 0; border-top: 1px solid #27272a; margin: 16px 0;" />
+
+      <!-- Proactive SLA Warnings Section -->
+      <h3 style="color: #f59e0b; font-size: 14px;">⚠️ PROACTIVE SLA RISK HORIZON (< 1h)</h3>
+      <p style="font-size: 12px; color: #a1a1aa; margin-bottom: 12px;">The following ${warningTickets ? warningTickets.length : 0} ticket(s) are actively approaching their SLA breach threshold:</p>
+      ${(warningTickets && warningTickets.length > 0) ? warningTickets.map(t => `
+        <div style="background: #18181b; padding: 12px; border-radius: 8px; border: 1px solid #f59e0b; margin-bottom: 10px;">
+           <p style="margin: 0 0 6px 0; font-size: 12px; color: #f4f4f5;"><strong>Ticket #${t.id?.slice(0, 8) || 'N/A'}:</strong> ${t.subject}</p>
+        </div>
+      `).join('') : `<p style="color: #a1a1aa; font-size: 12px;"><em>No proactive SLA warnings currently active.</em></p>`}
 
       <hr style="border: 0; border-top: 1px solid #27272a; margin: 16px 0;" />
       <p style="margin-bottom: 0; text-align: center;">
