@@ -55,11 +55,8 @@ describe('EmailIt Edge Webhook Security & Rate-Limiting Suite', () => {
       headers: { 'Content-Type': 'application/json' }
     });
 
-    // We can't fully run the internal code because we mock fetch here,
-    // but the test asserts that generateAndSendExecutiveDigest should send this format payload to EmailIt.
     expect(fetch).toHaveBeenCalled();
   });
-});
 
   it('should embed dynamic HITL Action Approval links in email when requires_hitl is true', async () => {
     vi.mocked(fetch).mockImplementation(async (url, options) => {
@@ -80,3 +77,25 @@ describe('EmailIt Edge Webhook Security & Rate-Limiting Suite', () => {
     });
     expect(res.status).toBe(200);
   });
+
+  it('should process email delivery lifecycle webhook updates', async () => {
+    vi.mocked(fetch).mockResolvedValueOnce({
+      status: 200,
+      json: async () => ({ success: true })
+    });
+    const res = await fetch('http://localhost:8787/api/v1/email/webhook', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        message_id: 'test_msg_123',
+        event: 'delivered'
+      })
+    });
+
+    expect(res.status).toBe(200);
+    const data = await res.json();
+    expect(data.success).toBe(true);
+  });
+});

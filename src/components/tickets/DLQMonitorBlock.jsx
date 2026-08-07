@@ -44,6 +44,32 @@ export default function DLQMonitorBlock() {
     fetchDLQData();
   }, []);
 
+  const handleDrainAll = async () => {
+    if (isFlushing) return;
+    setIsFlushing(true);
+
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const token = session?.access_token;
+      if (!token) throw new Error("Session token required.");
+
+      const workerUrl = getEdgeWorkerUrl();
+      const res = await onyxService.fetchWithTimeout(`${workerUrl}/api/v1/admin/dlq-drain`, { method: 'POST', headers: { 'Authorization': `Bearer ${token}` } });
+
+      if (!res.success || !res.data?.success) throw new Error(res.error || res.data?.error || 'DLQ drain failed.');
+      const data = res.data;
+
+      toast.success(`DLQ drain completed! Re-queued ${data.replayed_count || 0} payloads.`, {
+        style: { background: '#09090b', color: '#10b981', border: '1px solid rgba(16,185,129,0.3)' }
+      });
+      fetchDLQData();
+    } catch (err) {
+      toast.error(`Drain Error: ${err.message}`);
+    } finally {
+      setIsFlushing(false);
+    }
+  };
+
   const handleFlushAll = async () => {
     if (isFlushing) return;
     setIsFlushing(true);
@@ -102,6 +128,18 @@ export default function DLQMonitorBlock() {
         </div>
 
         <div className="flex items-center gap-2">
+          {dlqItems.length > 0 && (
+            <button
+              onClick={handleDrainAll}
+              disabled={isFlushing}
+              className="flex items-center gap-1 px-2 py-0.5 rounded text-[9px] font-bold uppercase text-purple-300 bg-purple-500/10 border border-purple-500/20 hover:bg-purple-500/20 transition-all disabled:opacity-50"
+              title="Drain DLQ and replay all pending payloads"
+            >
+              <FiZap className={isFlushing ? 'animate-spin' : ''} />
+              <span>{isFlushing ? 'Draining...' : 'Drain DLQ / Replay All'}</span>
+            </button>
+          )}
+
           {dlqItems.length > 0 && (
             <button
               onClick={handleFlushAll}
