@@ -174,6 +174,11 @@ export const useTicketStore = create((set, get) => ({
             toast("📋 Executive Briefing Dispatched", {
               style: { background: '#09090b', color: '#38bdf8', border: '1px solid rgba(56,189,248,0.3)' }
             });
+          } else if (newEvent?.type === 'support_ticket_ingested_and_notified') {
+            toast("📨 Ingestion Notification Dispatched", {
+              style: { background: '#09090b', color: '#10b981', border: '1px solid rgba(16,185,129,0.3)' }
+            });
+            get().fetchTickets();
           } else if (newEvent?.type === 'sla_warning_threshold_breached' || newEvent?.type === 'sla_breach_escalated') {
             get().checkPrefsAndPlayChime();
 

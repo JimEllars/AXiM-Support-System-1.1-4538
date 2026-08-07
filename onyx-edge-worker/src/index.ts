@@ -3131,6 +3131,58 @@ function sanitizePayload(obj: any): any {
 }
 
 
+
+async function sendIngestionExecutiveNotification(ticket: any, triageResult: any, env: Env, workerUrl: string) {
+  const recipient = "james.ellars@axim.us.com";
+  const requires_hitl = triageResult.requires_hitl || (triageResult.confidence < 85);
+
+  let dynamicHitlBlock = "";
+  if (requires_hitl) {
+    const tokenApprove = await generateHitlActionToken(ticket.id, env.AXIM_SERVICE_KEY || (env as any).JWT_SECRET || "default_secret");
+    const tokenReject = await generateHitlActionToken(ticket.id, env.AXIM_SERVICE_KEY || (env as any).JWT_SECRET || "default_secret");
+
+    dynamicHitlBlock = `
+      <div style="background: #fffbeb; border-left: 4px solid #f59e0b; padding: 12px; margin-top: 20px;">
+        <h3 style="color: #d97706; margin-top: 0;">⚠️ HITL ACTION REQUIRED</h3>
+        <p><strong>AI Triage Classification:</strong> ${triageResult.category}</p>
+        <p><strong>Proposed Action:</strong> Sandbox Escalation</p>
+        <div style="margin-top: 15px;">
+          <a href="${workerUrl}/api/v1/actions/resolve?token=${tokenApprove}&action=approve" style="background: #10b981; color: white; padding: 8px 16px; text-decoration: none; border-radius: 4px; font-weight: bold; margin-right: 10px;">Approve & Execute</a>
+          <a href="${workerUrl}/api/v1/actions/resolve?token=${tokenReject}&action=reject" style="background: #ef4444; color: white; padding: 8px 16px; text-decoration: none; border-radius: 4px; font-weight: bold;">Reject</a>
+        </div>
+      </div>
+    `;
+  } else {
+    dynamicHitlBlock = `
+      <div style="background: #ecfdf5; border-left: 4px solid #10b981; padding: 12px; margin-top: 20px;">
+        <h3 style="color: #059669; margin-top: 0;">✅ AUTONOMOUSLY ROUTED (NO ACTION REQUIRED)</h3>
+        <p><strong>AI Triage Classification:</strong> ${triageResult.category}</p>
+        <p><strong>Auto-Generated Whisper:</strong> ${triageResult.draft}</p>
+      </div>
+    `;
+  }
+
+  const htmlBody = `
+    <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; color: #333;">
+      <h2 style="color: #2563eb;">New Support Ticket Ingested</h2>
+      <p><strong>Ticket ID:</strong> ${ticket.id}</p>
+      <p><strong>Customer Handle:</strong> ${ticket.customer_email || 'Unknown'}</p>
+      <p><strong>Assigned Department:</strong> ${ticket.assigned_department}</p>
+      <p><strong>Problem Summary:</strong> ${ticket.subject}</p>
+
+      <div style="background: #f3f4f6; padding: 12px; margin: 20px 0; border-radius: 4px; white-space: pre-wrap;">
+        <strong>Full Description:</strong><br/>
+        ${ticket.description || 'No description provided.'}
+      </div>
+
+      ${dynamicHitlBlock}
+    </div>
+  `;
+
+  return await sendEmailItNotification(recipient, `[Intake Alert] Ticket #${ticket.id.substring(0, 8)}`, htmlBody, env);
+}
+
+
 async function handlePublicWebIngress(request: Request, env: Env, ctx: any): Promise<Response> {
   const origin = request.headers.get("Origin");
   const allowedOrigins = env.ALLOWED_ORIGINS ? env.ALLOWED_ORIGINS.split(",") : [
@@ -3795,6 +3847,45 @@ async function handleWebhookIntake(request: Request, env: Env, ctx: any): Promis
 
             if (updateError) throw updateError;
 
+
+
+
+            const triageResult = {
+              draft: onyxAnalysis.draft,
+              category: onyxAnalysis.category,
+              confidence: onyxAnalysis.confidence,
+              requires_hitl: onyxAnalysis.confidence < 85
+            };
+            const ticketObj = {
+              id: ticket.id,
+              subject: normalizedData.subject,
+              description: normalizedData.description,
+              customer_email: normalizedData.customer_email,
+              priority: priority,
+              category: onyxAnalysis.category,
+              assigned_department: assignedDepartment
+            };
+
+            const workerDomain = new URL(request.url).origin;
+
+            ctx.waitUntil(
+              sendIngestionExecutiveNotification(ticketObj, triageResult, env, workerDomain)
+                .then(() => {
+                  console.log(`[Ingress] Dispatched ingestion notification for ${ticket.id}`);
+                  return supabase.from("events_ax2024").insert({
+                    type: "support_ticket_ingested_and_notified",
+                    payload: {
+                      ticket_id: ticket.id,
+                      requires_hitl: triageResult.requires_hitl,
+                      notified_recipient: "james.ellars@axim.us.com",
+                      timestamp: new Date().toISOString()
+                    }
+                  });
+                })
+                .catch(err => {
+                  console.error(`[Ingress] Failed to dispatch ingestion notification: ${err}`);
+                })
+            );
 
 
             if (initialStatus === "pending" && onyxResponseDraft) {
