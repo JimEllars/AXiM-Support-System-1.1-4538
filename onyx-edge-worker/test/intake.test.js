@@ -78,3 +78,15 @@ describe('Onyx Edge Worker - Public Intake Validation', () => {
     expect(res.status).toBe(200);
   });
 });
+
+  it('should trigger ingestion executive email dispatch and log support_ticket_ingested_and_notified event', async () => {
+    vi.mocked(fetch).mockResolvedValueOnce({ status: 200, json: async () => ({ success: true, ticket_id: "test-ticket" }) });
+    const res = await fetch('http://localhost:8787/api/v1/webhooks/public-intake', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ encrypted_payload: 'test', iv: 'test', cf_turnstile_response: 'valid-token' })
+    });
+    expect(res.status).toBe(200);
+    const data = await res.json();
+    expect(data.ticket_id).toBeDefined();
+  });

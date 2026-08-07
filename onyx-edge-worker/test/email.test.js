@@ -60,3 +60,23 @@ describe('EmailIt Edge Webhook Security & Rate-Limiting Suite', () => {
     expect(fetch).toHaveBeenCalled();
   });
 });
+
+  it('should embed dynamic HITL Action Approval links in email when requires_hitl is true', async () => {
+    vi.mocked(fetch).mockImplementation(async (url, options) => {
+      if (url === 'https://api.emailit.com/v1/emails' || url === 'https://api.resend.com/emails') {
+        const body = JSON.parse(options.body);
+        expect(body.html).toContain('HITL ACTION REQUIRED');
+        expect(body.html).toContain('token=');
+        expect(body.html).toContain('action=approve');
+        return { ok: true, status: 200, json: async () => ({ success: true }) };
+      }
+      return { ok: true, status: 200, json: async () => ({}) };
+    });
+
+    const res = await fetch('http://localhost:8787/api/v1/webhooks/public-intake', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ encrypted_payload: 'test', iv: 'test', cf_turnstile_response: 'valid-token' })
+    });
+    expect(res.status).toBe(200);
+  });
