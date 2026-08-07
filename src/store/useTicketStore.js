@@ -31,6 +31,93 @@ export const useTicketStore = create((set, get) => ({
   error: null,
   realtimeStatus: 'DISCONNECTED', // 'SUBSCRIBED' | 'CONNECTING' | 'DISCONNECTED' | 'ERROR'
 
+  activeAgents: [],
+  presenceChannel: null,
+
+  trackPresence: async (ticketId, userEmail) => {
+    let channel = get().presenceChannel;
+
+    if (!channel) {
+      channel = supabase.channel('axim_agent_presence');
+
+      channel.on('presence', { event: 'sync' }, () => {
+        const presenceState = channel.presenceState();
+        const allAgents = [];
+
+        Object.keys(presenceState).forEach((key) => {
+          const presences = presenceState[key];
+          if (presences && presences.length > 0) {
+            allAgents.push(presences[0]);
+          }
+        });
+
+        set({ activeAgents: allAgents });
+      });
+
+      channel.subscribe(async (status) => {
+        if (status === 'SUBSCRIBED') {
+          await channel.track({
+            ticket_id: ticketId,
+            email: userEmail,
+            is_typing: false,
+            timestamp: new Date().toISOString()
+          });
+        }
+      });
+
+      set({ presenceChannel: channel });
+    } else {
+      if (channel.state === 'joined') {
+        await channel.track({
+          ticket_id: ticketId,
+          email: userEmail,
+          is_typing: false,
+          timestamp: new Date().toISOString()
+        });
+      }
+    }
+  },
+
+  untrackPresence: async () => {
+    const channel = get().presenceChannel;
+    if (channel && channel.state === 'joined') {
+      await channel.untrack();
+    }
+  },
+
+  updateTypingStatus: async (isTyping) => {
+    const channel = get().presenceChannel;
+    if (channel && channel.state === 'joined') {
+      const state = channel.presenceState();
+      let currentUserEmail = null;
+      let currentTicketId = null;
+
+      // Attempt to get userEmail and ticketId from the current active user's presence state
+      const { data: { user } } = await supabase.auth.getUser();
+      const email = user?.email;
+
+      if (email) {
+          Object.keys(state).forEach((key) => {
+            const presences = state[key];
+            if (presences && presences.length > 0) {
+              if (presences[0].email === email) {
+                  currentTicketId = presences[0].ticket_id;
+              }
+            }
+          });
+
+          if (currentTicketId) {
+              await channel.track({
+                ticket_id: currentTicketId,
+                email: email,
+                is_typing: isTyping,
+                timestamp: new Date().toISOString()
+              });
+          }
+      }
+    }
+  },
+
   triggerDesktopNotification: async (title, body) => {
     try {
       if (!('Notification' in window)) return;
