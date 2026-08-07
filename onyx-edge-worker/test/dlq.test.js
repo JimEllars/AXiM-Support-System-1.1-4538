@@ -32,4 +32,25 @@ describe('Edge Dead-Letter Queue & Batch Flush Suite', () => {
     expect(data.success).toBe(true);
     expect(data.flushed_count).toBe(3);
   });
+
+  it('should proxy DLQ drain requests to core API', async () => {
+    // Mock the core API response
+    vi.mocked(fetch).mockResolvedValueOnce({
+      status: 200,
+      json: async () => ({ success: true, replayed_count: 5 })
+    });
+
+    const res = await fetch('http://localhost:8787/api/v1/admin/dlq-drain', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer valid_session_token'
+      }
+    });
+
+    expect(res.status).toBe(200);
+    const data = await res.json();
+    expect(data.success).toBe(true);
+    expect(data.replayed_count).toBe(5);
+  });
 });

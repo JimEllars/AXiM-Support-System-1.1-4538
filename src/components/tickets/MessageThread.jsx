@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { FiCode, FiExternalLink, FiChevronDown, FiChevronRight, FiGitCommit, FiUser, FiCpu, FiFileText, FiMail } from 'react-icons/fi';
+import { FiCode, FiExternalLink, FiChevronDown, FiChevronRight, FiGitCommit, FiUser, FiCpu, FiFileText, FiMail, FiCheck, FiEye, FiAlertCircle } from 'react-icons/fi';
 
 export default function MessageThread({ messages = [] }) {
   const [expandedDiffs, setExpandedDiffs] = useState({});
@@ -65,9 +65,20 @@ export default function MessageThread({ messages = [] }) {
                 )}
               </div>
 
-              <span className="text-[10px] font-mono text-zinc-500">
-                {msg.created_at ? new Date(msg.created_at).toLocaleTimeString() : ''}
-              </span>
+              <div className="flex items-center gap-2 text-[10px] font-mono text-zinc-500">
+                <span>{msg.created_at ? new Date(msg.created_at).toLocaleTimeString() : ''}</span>
+                {msg.metadata?.delivery_status === 'delivered' && (
+                  <div className="flex -space-x-1 text-emerald-400" title="Delivered">
+                    <FiCheck /><FiCheck />
+                  </div>
+                )}
+                {msg.metadata?.delivery_status === 'opened' && (
+                  <span className="text-sky-400" title="Opened"><FiEye /></span>
+                )}
+                {msg.metadata?.delivery_status === 'bounced' && (
+                  <span className="text-red-400" title="Bounced"><FiAlertCircle /></span>
+                )}
+              </div>
             </div>
 
             {/* Message Body */}

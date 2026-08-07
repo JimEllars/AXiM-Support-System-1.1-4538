@@ -1989,6 +1989,41 @@ export default {
       }
     }
 
+
+    if (url.pathname === "/api/v1/email/webhook" && request.method === "POST") {
+      try {
+        const payload: any = await request.json();
+        const { message_id, event } = payload;
+
+        if (!message_id || !event) {
+          return new Response(JSON.stringify({ error: "MISSING_WEBHOOK_PARAMETERS" }), { status: 400, headers: getCorsHeaders(env, request) });
+        }
+
+        const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
+
+        // Fetch current message to merge metadata
+        const { data: msgData, error: msgError } = await supabase
+          .from("ticket_messages")
+          .select("metadata")
+          .eq("id", message_id)
+          .single();
+
+        if (!msgError && msgData) {
+          const currentMetadata = msgData.metadata || {};
+          const newMetadata = { ...currentMetadata, delivery_status: event };
+
+          await supabase
+            .from("ticket_messages")
+            .update({ metadata: newMetadata })
+            .eq("id", message_id);
+        }
+
+        return new Response(JSON.stringify({ success: true }), { status: 200, headers: { "Content-Type": "application/json", ...getCorsHeaders(env, request) } });
+      } catch (error: any) {
+        return new Response(JSON.stringify({ error: "WEBHOOK_PARSE_FAULT", details: error.message }), { status: 500, headers: getCorsHeaders(env, request) });
+      }
+    }
+
     if (url.pathname === "/api/v1/email/send" && request.method === "POST") {
       const authHeader = request.headers.get("Authorization") || "";
       const token = authHeader.replace("Bearer ", "").trim();
@@ -2871,6 +2906,43 @@ ${messages.map((m: any) => `[${m.sender_id}]:${m.message_body}`).join("\n")}`;
         return new Response(JSON.stringify({ success: true, message: "Daily operations digest manually initialized." }), {
           status: 200, headers: { "Content-Type": "application/json", ...getCorsHeaders(env, request) }
         });
+    }
+
+
+    if (url.pathname === "/api/v1/admin/dlq-drain" && request.method === "POST") {
+      const authHeader = request.headers.get("Authorization") || "";
+      const token = authHeader.replace("Bearer ", "").trim();
+      if (!token) return new Response(JSON.stringify({ error: "UNAUTHORIZED_ADMIN_DRAIN" }), { status: 401, headers: getCorsHeaders(env, request) });
+
+      const supabaseAuth = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY, {
+        global: { headers: { Authorization: `Bearer ${token}` } }
+      });
+      const { data: { user }, error: authError } = await supabaseAuth.auth.getUser();
+      if (authError || !user) return new Response(JSON.stringify({ error: "INVALID_SESSION" }), { status: 403, headers: getCorsHeaders(env, request) });
+
+      try {
+        const coreRes = await fetch(`${env.CORE_API_URL || "https://onyx-core.local"}/api/v1/dlq-drain`, {
+          method: "POST",
+          headers: { "Authorization": `Bearer ${token}` }
+        });
+
+        const coreData: any = await coreRes.json();
+        const replayedCount = coreData.replayed_count || 0;
+
+        const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
+        await supabase.from("events_ax2024").insert({
+          type: "dlq_drain_executed",
+          payload: {
+            operator: user.email,
+            replayed_count: replayedCount,
+            timestamp: new Date().toISOString()
+          }
+        });
+
+        return new Response(JSON.stringify({ success: true, replayed_count: replayedCount }), { status: 200, headers: { "Content-Type": "application/json", ...getCorsHeaders(env, request) } });
+      } catch (err: any) {
+        return new Response(JSON.stringify({ error: "DRAIN_PROXY_FAULT", details: err.message }), { status: 500, headers: getCorsHeaders(env, request) });
+      }
     }
 
     if (url.pathname === "/api/dlq/bulk-replay" && request.method === "POST") {
