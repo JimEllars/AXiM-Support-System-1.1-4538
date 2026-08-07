@@ -1235,7 +1235,7 @@ export default {
     // --- EMAIL NOTIFICATION PREFERENCES ROUTE ---
     if (url.pathname === "/api/v1/email/preferences" && request.method === "GET") {
       try {
-        let prefs = { instant_receipts: true, urgent_alerts: true, daily_digest: true, auto_purge_kv: true };
+        let prefs = { instant_receipts: true, urgent_alerts: true, daily_digest: true, auto_purge_kv: true, sound_alerts_enabled: true };
         if (env.STATUS_KV) {
           const raw = await env.STATUS_KV.get("email_prefs_global");
           if (raw) prefs = JSON.parse(raw);
@@ -1261,12 +1261,13 @@ export default {
 
       try {
         const payload: any = await request.json();
-        const { instant_receipts, urgent_alerts, daily_digest, auto_purge_kv } = payload;
+        const { instant_receipts, urgent_alerts, daily_digest, auto_purge_kv, sound_alerts_enabled } = payload;
         const newPrefs = {
           instant_receipts: instant_receipts ?? true,
           urgent_alerts: urgent_alerts ?? true,
           daily_digest: daily_digest ?? true,
-          auto_purge_kv: auto_purge_kv ?? true
+          auto_purge_kv: auto_purge_kv ?? true,
+          sound_alerts_enabled: sound_alerts_enabled ?? true
         };
 
         if (env.STATUS_KV) {

@@ -2,6 +2,27 @@ import { create } from 'zustand';
 import { supabase } from '../lib/supabaseClient';
 import toast from 'react-hot-toast';
 
+import { getEdgeWorkerUrl } from '../lib/edgeWorkerUrl';
+
+const playAlertChime = () => {
+  try {
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(587.33, ctx.currentTime); // D5
+    osc.frequency.exponentialRampToValueAtTime(880, ctx.currentTime + 0.15); // A5
+    gain.gain.setValueAtTime(0.1, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.3);
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.start();
+    osc.stop(ctx.currentTime + 0.3);
+  } catch (e) {
+    // AudioContext silent fallback if user interaction hasn't occurred yet
+  }
+};
+
 export const useTicketStore = create((set, get) => ({
   tickets: [],
   activeTicket: null,
@@ -9,6 +30,22 @@ export const useTicketStore = create((set, get) => ({
   isLoading: false,
   error: null,
   realtimeStatus: 'DISCONNECTED', // 'SUBSCRIBED' | 'CONNECTING' | 'DISCONNECTED' | 'ERROR'
+
+
+  checkPrefsAndPlayChime: async () => {
+    try {
+      const workerUrl = getEdgeWorkerUrl();
+      const res = await fetch(`${workerUrl}/api/v1/email/preferences`);
+      if (res.ok) {
+        const data = await res.json();
+        if (data.preferences?.sound_alerts_enabled) {
+          playAlertChime();
+        }
+      }
+    } catch (err) {
+      console.error("Failed to check preferences for audio alert", err);
+    }
+  },
 
   fetchTickets: async () => {
     set({ isLoading: true, error: null });
@@ -137,11 +174,20 @@ export const useTicketStore = create((set, get) => ({
             toast("📋 Executive Briefing Dispatched", {
               style: { background: '#09090b', color: '#38bdf8', border: '1px solid rgba(56,189,248,0.3)' }
             });
-          } else if (newEvent?.type === 'sla_warning_threshold_breached') {
-            toast(`⚠️ SLA Warning Horizon: Ticket #${newEvent.payload?.ticket_id || 'ID'} is due within 1 hour!`, {
-              style: { background: '#09090b', color: '#f59e0b', border: '1px solid rgba(245,158,11,0.3)' },
-              duration: 5000
-            });
+          } else if (newEvent?.type === 'sla_warning_threshold_breached' || newEvent?.type === 'sla_breach_escalated') {
+            get().checkPrefsAndPlayChime();
+
+            if (newEvent?.type === 'sla_warning_threshold_breached') {
+              toast(`⚠️ SLA Warning Horizon: Ticket #${newEvent.payload?.ticket_id || 'ID'} is due within 1 hour!`, {
+                style: { background: '#09090b', color: '#f59e0b', border: '1px solid rgba(245,158,11,0.3)' },
+                duration: 5000
+              });
+            } else if (newEvent?.type === 'sla_breach_escalated') {
+              toast(`🚨 SLA BREACH ESCALATED: Ticket #${newEvent.payload?.ticket_id || 'ID'} has breached SLA!`, {
+                style: { background: '#09090b', color: '#ef4444', border: '1px solid rgba(239,68,68,0.3)' },
+                duration: 7000
+              });
+            }
             get().fetchTickets();
           } else if (newEvent?.type === 'kv_cache_auto_purged') {
             toast(`🧹 Automated Maintenance: Edge KV Cache Purged`, {
