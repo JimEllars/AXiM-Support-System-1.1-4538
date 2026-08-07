@@ -193,6 +193,55 @@ export const useTicketStore = create((set, get) => ({
     }
   },
 
+  executeActionResolution: async (proposalData, targetDisposition) => {
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const token = session?.access_token;
+      if (!token) throw new Error('Active technician session security token invalid or missing');
+
+      const workerUrl = getEdgeWorkerUrl();
+      const currentTicket = get().activeTicket;
+
+      const res = await fetch(`${workerUrl}/api/v1/actions/resolve`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+          'X-Idempotency-Key': `hitl_exec_${proposalData.id}`
+        },
+        body: JSON.stringify({
+          hitlLogId: proposalData.id,
+          disposition: targetDisposition,
+          ticketId: currentTicket?.id,
+          last_updated_at: currentTicket?.updated_at
+        })
+      });
+
+      if (res.status === 409) {
+        toast('Data conflict: This ticket was just modified by another agent. Refreshing latest state...', {
+          icon: '⚠️',
+          style: { background: '#09090b', color: '#f59e0b', border: '1px solid rgba(245,158,11,0.3)' },
+          duration: 5000
+        });
+        get().fetchTickets();
+        if (currentTicket?.id) {
+          get().selectTicket(currentTicket.id);
+        }
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.message || 'STATE_CONFLICT');
+      }
+
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || data.message || 'Upstream vault network handshake declined.');
+      }
+
+      return data;
+    } catch (err) {
+      throw err;
+    }
+  },
+
   subscribeToRealtime: () => {
     set({ realtimeStatus: 'CONNECTING' });
 

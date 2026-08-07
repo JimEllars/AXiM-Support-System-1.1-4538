@@ -52,4 +52,28 @@ describe('Onyx Edge Worker - Action Resolver Validation', () => {
     const data = await res.json();
     expect(data.event).toBe('sla_warning_threshold_breached');
   });
+  it('should generate a 409 Conflict if ticket was modified by another operator', async () => {
+    vi.mocked(fetch).mockResolvedValueOnce({
+      status: 409,
+      json: async () => ({ success: false, error: "STATE_CONFLICT", message: "Ticket modified by another operator" })
+    });
+
+    const res = await fetch('http://localhost:8787/api/v1/actions/resolve', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer test-secret`
+      },
+      body: JSON.stringify({
+        hitlLogId: '123e4567-e89b-12d3-a456-426614174000',
+        ticketId: '123e4567-e89b-12d3-a456-426614174001',
+        last_updated_at: '2026-06-01T12:00:00Z'
+      })
+    });
+    expect(res.status).toBe(409);
+
+    const data = await res.json();
+    expect(data.error).toBe("STATE_CONFLICT");
+    expect(data.success).toBe(false);
+  });
 });

@@ -4,6 +4,7 @@ import { FiShield, FiAlertTriangle, FiCheckCircle, FiPlay, FiLoader, FiXCircle }
 import toast from 'react-hot-toast';
 import { supabase } from '../../lib/supabaseClient';
 import { getEdgeWorkerUrl } from '../../lib/edgeWorkerUrl';
+import useTicketStore from '../../store/useTicketStore';
 
 export default function ActionProposalBlock({ proposalData, ticketId, onActionExecuted }) {
   const [executionState, setExecutionState] = useState('idle'); // 'idle' | 'executing' | 'success' | 'rejected' | 'failed'
@@ -20,6 +21,7 @@ export default function ActionProposalBlock({ proposalData, ticketId, onActionEx
       if (!token) throw new Error('Active technician session security token invalid or missing');
 
       const workerUrl = getEdgeWorkerUrl();
+      const { activeTicket, fetchTickets } = useTicketStore.getState();
 
       const res = await fetch(`${workerUrl}/api/v1/actions/resolve`, {
         method: 'POST',
@@ -30,12 +32,28 @@ export default function ActionProposalBlock({ proposalData, ticketId, onActionEx
         },
         body: JSON.stringify({
           hitlLogId: proposalData.id,
-          disposition: targetDisposition // "approved" or "rejected"
+          status: targetDisposition, // "approved" or "rejected"
+          ticketId: ticketId,
+          toolType: proposalData.tool_type,
+          last_updated_at: activeTicket?.updated_at
         })
       });
 
-      if (!res.success) throw new Error(res.error || res.data?.error || 'Upstream vault network handshake declined.');
-      const outcome = res.data;
+      if (res.status === 409) {
+        toast('Data conflict: This ticket was just modified by another agent. Refreshing latest state...', {
+          icon: '⚠️',
+          style: { background: '#09090b', color: '#f59e0b', border: '1px solid rgba(245,158,11,0.3)' },
+          duration: 5000
+        });
+        fetchTickets();
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.message || 'STATE_CONFLICT');
+      }
+
+      const outcome = await res.json();
+      if (!res.ok || (outcome.success === false)) {
+        throw new Error(outcome.error || outcome.message || 'Upstream vault network handshake declined.');
+      }
 
       if (targetDisposition === 'rejected') {
         setExecutionState('rejected');
