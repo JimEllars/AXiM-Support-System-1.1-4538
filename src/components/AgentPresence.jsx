@@ -1,89 +1,39 @@
-import React, { useEffect, useState } from 'react';
+import React from 'react';
 import { FiUsers, FiEdit3 } from 'react-icons/fi';
-import { supabase } from '../lib/supabaseClient';
+import { useTicketStore } from '../store/useTicketStore';
 
-export default function AgentPresence({ ticketId, isTypingLocal = false }) {
-  const [presenceAgents, setPresenceAgents] = useState([]);
-  const [typingAgents, setTypingAgents] = useState([]);
-  const [channel, setChannel] = useState(null);
+export default function AgentPresence({ ticketId }) {
+  const { activeAgents } = useTicketStore();
 
-  useEffect(() => {
-    if (!ticketId) return;
+  // Filter for agents currently viewing this specific ticket
+  const ticketAgents = activeAgents.filter(agent => agent.ticket_id === ticketId);
+  const typingAgents = ticketAgents.filter(agent => agent.is_typing);
 
-    let presenceChannel;
-
-    const initPresence = async () => {
-      const { data: { user } } = await supabase.auth.getUser();
-      const userEmail = user?.email || 'operator@axim.internal';
-
-      presenceChannel = supabase.channel(`presence:ticket:${ticketId}`, {
-        config: { presence: { key: userEmail } }
-      });
-
-      presenceChannel
-        .on('presence', { event: 'sync' }, () => {
-          const state = presenceChannel.presenceState();
-          const allAgents = [];
-          const currentlyTyping = [];
-
-          Object.keys(state).forEach((key) => {
-            const presences = state[key];
-            if (presences && presences.length > 0) {
-              const latest = presences[presences.length - 1];
-              allAgents.push(latest);
-              // Filter typing agents excluding self
-              if (latest.isTyping && latest.email !== userEmail) {
-                currentlyTyping.push(latest.email);
-              }
-            }
-          });
-
-          setPresenceAgents(allAgents);
-          setTypingAgents(currentlyTyping);
-        })
-        .subscribe(async (status) => {
-          if (status === 'SUBSCRIBED') {
-            await presenceChannel.track({
-              online_at: new Date().toISOString(),
-              email: userEmail,
-              isTyping: isTypingLocal
-            });
-          }
-        });
-
-      setChannel(presenceChannel);
-    };
-
-    initPresence();
-
-    return () => {
-      if (presenceChannel) {
-        supabase.removeChannel(presenceChannel);
-      }
-    };
-  }, [ticketId]);
-
-  // Update presence track whenever local typing status changes
-  useEffect(() => {
-    if (channel && channel.state === 'joined') {
-      supabase.auth.getUser().then(({ data: { user } }) => {
-        channel.track({
-          online_at: new Date().toISOString(),
-          email: user?.email || 'operator@axim.internal',
-          isTyping: isTypingLocal
-        });
-      });
-    }
-  }, [isTypingLocal, channel]);
-
-  if (presenceAgents.length === 0) return null;
+  if (ticketAgents.length === 0) return null;
 
   return (
     <div className="flex items-center gap-2">
+      <div className="flex items-center -space-x-2 mr-2">
+        {ticketAgents.map((agent, index) => {
+          const email = agent.email || 'O';
+          const initial = email.charAt(0).toUpperCase();
+          return (
+            <div
+              key={index}
+              className="relative flex items-center justify-center w-6 h-6 rounded-full bg-zinc-800 border border-zinc-700 text-[10px] font-bold text-white shadow-sm"
+              title={agent.email}
+            >
+              {initial}
+              <div className="absolute bottom-0 right-0 w-2 h-2 rounded-full bg-emerald-500 border-[1.5px] border-zinc-900" />
+            </div>
+          );
+        })}
+      </div>
+
       {/* Viewers Count Badge */}
       <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-lg bg-indigo-500/10 border border-indigo-500/20 text-[10px] font-mono text-indigo-300">
         <FiUsers className="text-indigo-400 text-[11px] animate-pulse"/>
-        <span>{presenceAgents.length} {presenceAgents.length === 1 ? 'Agent Viewing' : 'Agents Viewing'}</span>
+        <span>{ticketAgents.length} {ticketAgents.length === 1 ? 'Agent Viewing' : 'Agents Viewing'}</span>
       </div>
 
       {/* Typing Indicator Badge */}

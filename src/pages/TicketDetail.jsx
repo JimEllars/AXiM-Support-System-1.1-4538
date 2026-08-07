@@ -13,7 +13,7 @@ import { supabase } from '../lib/supabaseClient';
 import { getEdgeWorkerUrl } from '../lib/edgeWorkerUrl';
 
 export default function TicketDetail({ ticketId }) {
-  const { activeTicket, activeThreadMessages, selectTicket, isLoading } = useTicketStore();
+  const { activeTicket, activeThreadMessages, selectTicket, isLoading, trackPresence, untrackPresence, updateTypingStatus, activeAgents } = useTicketStore();
   const [replyText, setReplyText] = useState('');
   const [isSending, setIsSending] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
@@ -27,8 +27,17 @@ export default function TicketDetail({ ticketId }) {
     if (ticketId) {
       selectTicket(ticketId);
       setHasNewIncoming(false);
+      supabase.auth.getUser().then(({ data: { user } }) => {
+        if (user) {
+          trackPresence(ticketId, user.email);
+        }
+      });
     }
-  }, [ticketId, selectTicket]);
+
+    return () => {
+       untrackPresence();
+    }
+  }, [ticketId, selectTicket, trackPresence, untrackPresence]);
 
   useEffect(() => {
     if (activeThreadMessages && activeThreadMessages.length > prevMessageCountRef.current) {
@@ -80,16 +89,21 @@ export default function TicketDetail({ ticketId }) {
 
   const handleTextChange = (e) => {
     setReplyText(e.target.value);
-    if (!isTyping) setIsTyping(true);
+    if (!isTyping) {
+        setIsTyping(true);
+        updateTypingStatus(true);
+    }
 
     if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
     typingTimeoutRef.current = setTimeout(() => {
       setIsTyping(false);
+      updateTypingStatus(false);
     }, 2500);
   };
 
   const handleBlur = () => {
     setIsTyping(false);
+    updateTypingStatus(false);
     if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
   };
 
@@ -99,6 +113,7 @@ export default function TicketDetail({ ticketId }) {
 
     setIsSending(true);
     setIsTyping(false);
+    updateTypingStatus(false);
     setHasNewIncoming(false);
     if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
 
@@ -149,7 +164,7 @@ export default function TicketDetail({ ticketId }) {
           <div className="flex items-center gap-3">
             <span className="text-xs font-mono font-bold text-zinc-400">#{activeTicket.id.slice(0, 8)}</span>
             <SLABadge priority={activeTicket.priority} status={activeTicket.status} />
-            <AgentPresence isTypingLocal={isTyping} ticketId={activeTicket.id} />
+            <AgentPresence ticketId={activeTicket.id} />
           </div>
 
           <div className="flex items-center gap-3">
@@ -197,6 +212,21 @@ export default function TicketDetail({ ticketId }) {
               </button>
             </div>
           )}
+
+          {/* Collision Warning */}
+          {(() => {
+            const collisionAgents = activeAgents.filter(
+              (agent) => agent.ticket_id === activeTicket.id && agent.is_typing && !isTyping
+            );
+            return collisionAgents.length > 0 ? (
+              <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-between text-xs font-mono text-amber-300 animate-pulse">
+                <div className="flex items-center gap-2">
+                  <FiBell className="text-amber-400"/>
+                  <span>⚠️ {collisionAgents[0].email} is currently drafting a response...</span>
+                </div>
+              </div>
+            ) : null;
+          })()}
 
           {/* Reply Composer Form */}
           <form onSubmit={handleSendMessage} className="p-4 rounded-2xl bg-zinc-950/80 border border-zinc-800/80 space-y-3">
