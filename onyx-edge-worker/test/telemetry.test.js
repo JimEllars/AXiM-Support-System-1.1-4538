@@ -70,4 +70,9 @@ describe('Edge Telemetry & Event Audit Log Suite', () => {
     expect(data.success).toBe(true);
     expect(data.archives[0].key).toContain('axim_telemetry_archive');
   });
+
+  it('should include sound_alerts_enabled in default preference payloads', () => {
+    const defaultPrefs = { instant_receipts: true, urgent_alerts: true, daily_digest: true, auto_purge_kv: true, sound_alerts_enabled: true };
+    expect(defaultPrefs.sound_alerts_enabled).toBe(true);
+  });
 });

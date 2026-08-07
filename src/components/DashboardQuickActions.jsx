@@ -10,7 +10,7 @@ export default function DashboardQuickActions() {
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
   const [isPrefsOpen, setIsPrefsOpen] = useState(false);
   const [cronEngine, setCronEngine] = useState({ status: 'active', daily_sweeps: 9, last_kb_curation: null });
-  const [prefs, setPrefs] = useState({ instant_receipts: true, urgent_alerts: true, daily_digest: true, autoresolve_days: 7, auto_purge_kv: true });
+  const [prefs, setPrefs] = useState({ instant_receipts: true, urgent_alerts: true, daily_digest: true, autoresolve_days: 7, auto_purge_kv: true, sound_alerts_enabled: true });
   const [isSavingPrefs, setIsSavingPrefs] = useState(false);
 
   const fetchCronStatus = async () => {
@@ -200,7 +200,22 @@ export default function DashboardQuickActions() {
                 />
               </label>
 
+
+              <label className="flex items-center justify-between p-3 rounded-xl bg-black/50 border border-zinc-800 cursor-pointer">
+                <div>
+                  <div className="font-bold text-zinc-200">Sound Alerts</div>
+                  <div className="text-[10px] text-zinc-500">Audible Web Audio chime on critical SLA warnings & breaches</div>
+                </div>
+                <input
+                  type="checkbox"
+                  checked={prefs.sound_alerts_enabled}
+                  onChange={(e) => setPrefs({ ...prefs, sound_alerts_enabled: e.target.checked })}
+                  className="rounded bg-zinc-900 border-zinc-700 text-indigo-500 focus:ring-0"
+                />
+              </label>
+
               {/* Inactivity Threshold Select */}
+
               <div className="p-3 rounded-xl bg-black/50 border border-zinc-800 space-y-1.5">
                 <div className="font-bold text-zinc-200">Inactivity Auto-Resolution Window</div>
                 <div className="text-[10px] text-zinc-500 mb-1">Threshold for automatically closing pending inactive tickets</div>
