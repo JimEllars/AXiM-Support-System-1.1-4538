@@ -31,6 +31,25 @@ export const useTicketStore = create((set, get) => ({
   error: null,
   realtimeStatus: 'DISCONNECTED', // 'SUBSCRIBED' | 'CONNECTING' | 'DISCONNECTED' | 'ERROR'
 
+  triggerDesktopNotification: async (title, body) => {
+    try {
+      if (!('Notification' in window)) return;
+      if (Notification.permission !== 'granted') return;
+
+      const workerUrl = getEdgeWorkerUrl();
+      const res = await fetch(`${workerUrl}/api/v1/email/preferences`);
+      if (res.ok) {
+        const data = await res.json();
+        if (data.preferences?.desktop_notifications_enabled) {
+          new Notification(title, { body });
+        }
+      }
+    } catch (err) {
+      console.error("Failed to check preferences for desktop notification", err);
+    }
+  },
+
+
 
   checkPrefsAndPlayChime: async () => {
     try {
@@ -181,6 +200,12 @@ export const useTicketStore = create((set, get) => ({
             get().fetchTickets();
           } else if (newEvent?.type === 'sla_warning_threshold_breached' || newEvent?.type === 'sla_breach_escalated') {
             get().checkPrefsAndPlayChime();
+            if (newEvent?.type === 'sla_warning_threshold_breached') {
+              get().triggerDesktopNotification('⚠️ SLA Warning Horizon', `Ticket #${newEvent.payload?.ticket_id || 'ID'} is due within 1 hour!`);
+            } else if (newEvent?.type === 'sla_breach_escalated') {
+              get().triggerDesktopNotification('🚨 SLA BREACH ESCALATED', `Ticket #${newEvent.payload?.ticket_id || 'ID'} has breached SLA!`);
+            }
+
 
             if (newEvent?.type === 'sla_warning_threshold_breached') {
               toast(`⚠️ SLA Warning Horizon: Ticket #${newEvent.payload?.ticket_id || 'ID'} is due within 1 hour!`, {

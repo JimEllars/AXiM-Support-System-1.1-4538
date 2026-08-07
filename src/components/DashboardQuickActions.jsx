@@ -203,6 +203,37 @@ export default function DashboardQuickActions() {
 
               <label className="flex items-center justify-between p-3 rounded-xl bg-black/50 border border-zinc-800 cursor-pointer">
                 <div>
+                  <div className="font-bold text-zinc-200">Desktop OS Notifications</div>
+                  <div className="text-[10px] text-zinc-500">Native OS alerts for SLA warnings & breaches</div>
+                </div>
+                <input
+                  type="checkbox"
+                  checked={prefs.desktop_notifications_enabled || false}
+                  onChange={(e) => {
+                    const checked = e.target.checked;
+                    if (checked) {
+                      if (!('Notification' in window)) {
+                        toast.error('Desktop notifications are not supported in this browser.');
+                        return;
+                      }
+                      Notification.requestPermission().then((permission) => {
+                        if (permission === 'granted') {
+                          setPrefs({ ...prefs, desktop_notifications_enabled: true });
+                        } else {
+                          toast.error('Notification permission denied by OS/Browser.');
+                          setPrefs({ ...prefs, desktop_notifications_enabled: false });
+                        }
+                      });
+                    } else {
+                      setPrefs({ ...prefs, desktop_notifications_enabled: false });
+                    }
+                  }}
+                  className="rounded bg-zinc-900 border-zinc-700 text-indigo-500 focus:ring-0"
+                />
+              </label>
+
+              <label className="flex items-center justify-between p-3 rounded-xl bg-black/50 border border-zinc-800 cursor-pointer">
+                <div>
                   <div className="font-bold text-zinc-200">Sound Alerts</div>
                   <div className="text-[10px] text-zinc-500">Audible Web Audio chime on critical SLA warnings & breaches</div>
                 </div>
