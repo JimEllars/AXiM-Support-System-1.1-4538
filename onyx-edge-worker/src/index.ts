@@ -1235,7 +1235,7 @@ export default {
     // --- EMAIL NOTIFICATION PREFERENCES ROUTE ---
     if (url.pathname === "/api/v1/email/preferences" && request.method === "GET") {
       try {
-        let prefs = { instant_receipts: true, urgent_alerts: true, daily_digest: true, auto_purge_kv: true, sound_alerts_enabled: true };
+        let prefs = { instant_receipts: true, urgent_alerts: true, daily_digest: true, auto_purge_kv: true, sound_alerts_enabled: true, desktop_notifications_enabled: false };
         if (env.STATUS_KV) {
           const raw = await env.STATUS_KV.get("email_prefs_global");
           if (raw) prefs = JSON.parse(raw);
@@ -1261,13 +1261,14 @@ export default {
 
       try {
         const payload: any = await request.json();
-        const { instant_receipts, urgent_alerts, daily_digest, auto_purge_kv, sound_alerts_enabled } = payload;
+        const { instant_receipts, urgent_alerts, daily_digest, auto_purge_kv, sound_alerts_enabled, desktop_notifications_enabled } = payload;
         const newPrefs = {
           instant_receipts: instant_receipts ?? true,
           urgent_alerts: urgent_alerts ?? true,
           daily_digest: daily_digest ?? true,
           auto_purge_kv: auto_purge_kv ?? true,
-          sound_alerts_enabled: sound_alerts_enabled ?? true
+          sound_alerts_enabled: sound_alerts_enabled ?? true,
+          desktop_notifications_enabled: desktop_notifications_enabled ?? false
         };
 
         if (env.STATUS_KV) {
@@ -1291,6 +1292,91 @@ export default {
     }
 
 
+
+
+    // --- SHIFT HANDOVER REPORT ROUTE ---
+    if (url.pathname === "/api/v1/reports/shift-handover" && request.method === "POST") {
+      const authHeader = request.headers.get("Authorization") || "";
+      const token = authHeader.replace("Bearer ", "").trim();
+      if (!token) {
+        return new Response(JSON.stringify({ error: "UNAUTHORIZED_HANDOVER_REPORT" }), {
+          status: 401, headers: getCorsHeaders(env, request)
+        });
+      }
+
+      try {
+        const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
+
+        // Count active tickets by priority
+        const { data: ticketData, error: ticketErr } = await supabase
+          .from('support_tickets')
+          .select('priority')
+          .in('status', ['open', 'escalated', 'pending_user_verification']);
+
+        if (ticketErr) throw ticketErr;
+
+        const queue_summary = {
+          total: ticketData.length,
+          urgent: ticketData.filter(t => t.priority === 'urgent').length,
+          high: ticketData.filter(t => t.priority === 'high').length,
+          medium: ticketData.filter(t => t.priority === 'medium').length,
+          low: ticketData.filter(t => t.priority === 'low').length,
+        };
+
+        // Find SLA Risks
+        const now = new Date();
+        const oneHourFromNow = new Date(now.getTime() + 60 * 60 * 1000);
+
+        const { data: slaRisksData, error: slaErr } = await supabase
+          .from('support_tickets')
+          .select('id, subject, priority, sla_breach_at')
+          .in('status', ['open', 'escalated'])
+          .not('sla_breach_at', 'is', null);
+
+        if (slaErr) throw slaErr;
+
+        const open_breaches = slaRisksData.filter(t => new Date(t.sla_breach_at) < now);
+        const active_warnings = slaRisksData.filter(t => {
+           const breachDate = new Date(t.sla_breach_at);
+           return breachDate >= now && breachDate <= oneHourFromNow;
+        });
+
+        const sla_risks = {
+          open_breaches: open_breaches.length,
+          active_warnings: active_warnings.length,
+          breach_details: open_breaches.map(t => t.id)
+        };
+
+        // Pending HITL logs
+        const { data: hitlData, error: hitlErr } = await supabase
+          .from('hitl_audit_logs')
+          .select('id, ticket_id, tool_type')
+          .eq('status', 'pending');
+
+        if (hitlErr) throw hitlErr;
+
+        const payload = {
+          success: true,
+          queue_summary,
+          sla_risks,
+          hitl_pending: hitlData,
+          generated_at: now.toISOString()
+        };
+
+        await supabase.from("events_ax2024").insert({
+          type: "shift_handover_report_generated",
+          payload: { timestamp: payload.generated_at, generated_by: "administrator" }
+        });
+
+        return new Response(JSON.stringify(payload), {
+          status: 200, headers: { "Content-Type": "application/json", ...getCorsHeaders(env, request) }
+        });
+      } catch (err: any) {
+        return new Response(JSON.stringify({ error: err.message }), {
+          status: 500, headers: getCorsHeaders(env, request)
+        });
+      }
+    }
 
     // --- AGGREGATED EDGE HEALTH DIAGNOSTICS (KV CACHED 30s) ---
     if (url.pathname === "/api/v1/health/diagnostics" && request.method === "GET") {

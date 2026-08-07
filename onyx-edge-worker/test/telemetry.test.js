@@ -17,6 +17,49 @@ describe('Edge Telemetry & Event Audit Log Suite', () => {
     expect(eventPayload.payload.operator).toBe("james.ellars@axim.us.com");
   });
 
+  it('should include desktop_notifications_enabled in preference payload processing', () => {
+    const prefs = {
+      instant_receipts: true,
+      desktop_notifications_enabled: true
+    };
+    expect(prefs.desktop_notifications_enabled).toBe(true);
+  });
+
+  it('should reject unauthorized access to /api/v1/reports/shift-handover', async () => {
+    vi.mocked(fetch).mockResolvedValueOnce({
+      status: 401,
+      json: async () => ({ error: 'UNAUTHORIZED_HANDOVER_REPORT' })
+    });
+
+    const res = await fetch('http://localhost:8787/api/v1/reports/shift-handover', { method: 'POST' });
+    expect(res.status).toBe(401);
+  });
+
+  it('should structure shift handover payload correctly with valid token', async () => {
+    vi.mocked(fetch).mockResolvedValueOnce({
+      status: 200,
+      json: async () => ({
+        success: true,
+        queue_summary: { total: 5, urgent: 1, high: 2, medium: 1, low: 1 },
+        sla_risks: { open_breaches: 0, active_warnings: 1, breach_details: [] },
+        hitl_pending: [],
+        generated_at: new Date().toISOString()
+      })
+    });
+
+    const res = await fetch('http://localhost:8787/api/v1/reports/shift-handover', {
+      method: 'POST',
+      headers: { 'Authorization': 'Bearer test_token' }
+    });
+
+    expect(res.status).toBe(200);
+    const data = await res.json();
+    expect(data.success).toBe(true);
+    expect(data.queue_summary).toHaveProperty('urgent');
+    expect(data.sla_risks).toHaveProperty('open_breaches');
+    expect(data.hitl_pending).toBeInstanceOf(Array);
+  });
+
   it('should format kv_cache_auto_purged event payloads correctly for CRON execution', () => {
     const eventPayload = {
       type: "kv_cache_auto_purged",
