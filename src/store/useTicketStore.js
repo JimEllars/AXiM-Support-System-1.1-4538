@@ -195,6 +195,43 @@ export const useTicketStore = create((set, get) => ({
   },
 
 
+
+  routeToProductFeedback: async (ticketId, category, notes) => {
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const token = session?.access_token;
+      if (!token) throw new Error('Active technician session security token invalid or missing');
+
+      const workerUrl = getEdgeWorkerUrl();
+      const res = await fetch(`${workerUrl}/api/v1/feedback/route`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({ ticket_id: ticketId, category, engineering_notes: notes })
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || 'Failed to route feedback to Product Engineering');
+      }
+
+      toast.success('Feedback successfully routed to Product Engineering', {
+        style: { background: '#09090b', color: '#10b981', border: '1px solid rgba(16,185,129,0.4)' }
+      });
+
+      get().fetchTickets();
+      return data;
+    } catch (err) {
+      console.error('Error routing feedback:', err);
+      toast.error(`Routing failed: ${err.message}`, {
+        style: { background: '#09090b', color: '#f43f5e', border: '1px solid rgba(244,63,94,0.4)' }
+      });
+      throw err;
+    }
+  },
+
   revertAction: async (ticketId) => {
     try {
       const { data: { session } } = await supabase.auth.getSession();

@@ -3,6 +3,43 @@ import { describe, it, expect, vi } from 'vitest';
 global.fetch = vi.fn();
 
 describe('Onyx Edge Worker - Action Resolver Validation', () => {
+
+  it('should return 400 Bad Request if category is missing for feedback routing', async () => {
+    vi.mocked(fetch).mockResolvedValueOnce({
+      status: 400,
+      json: async () => ({ error: "Missing required fields: ticket_id and category" })
+    });
+
+    const res = await fetch('http://localhost:8787/api/v1/feedback/route', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer test-secret`
+      },
+      body: JSON.stringify({ ticket_id: '123e4567-e89b-12d3-a456-426614174000', engineering_notes: 'Some notes' })
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it('should return 200 OK and route feedback successfully', async () => {
+    vi.mocked(fetch).mockResolvedValueOnce({
+      status: 200,
+      json: async () => ({ success: true, message: "Feedback successfully routed to Product Engineering" })
+    });
+
+    const res = await fetch('http://localhost:8787/api/v1/feedback/route', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer test-secret`
+      },
+      body: JSON.stringify({ ticket_id: '123e4567-e89b-12d3-a456-426614174000', category: 'bug', engineering_notes: 'Some notes' })
+    });
+    expect(res.status).toBe(200);
+    const data = await res.json();
+    expect(data.success).toBe(true);
+  });
+
   it('should reject execution requests without a valid Bearer token', async () => {
     vi.mocked(fetch).mockResolvedValueOnce({
       status: 401,
