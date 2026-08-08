@@ -1,3 +1,4 @@
+import React from 'react';
 import { create } from 'zustand';
 import { supabase } from '../lib/supabaseClient';
 import toast from 'react-hot-toast';
@@ -193,6 +194,44 @@ export const useTicketStore = create((set, get) => ({
     }
   },
 
+
+  revertAction: async (ticketId) => {
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const token = session?.access_token;
+      if (!token) throw new Error('Active technician session security token invalid or missing');
+
+      const workerUrl = getEdgeWorkerUrl();
+
+      const res = await fetch(`${workerUrl}/api/v1/actions/revert`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({ ticketId })
+      });
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        if (data.error === 'GRACE_PERIOD_EXPIRED') {
+            toast.error(data.message || 'The undo window for this action has closed.', { style: { background: '#09090b', color: '#f43f5e', border: '1px solid rgba(244,63,94,0.4)' } });
+        } else {
+            toast.error(data.message || data.error || 'Failed to revert action', { style: { background: '#09090b', color: '#f43f5e', border: '1px solid rgba(244,63,94,0.4)' } });
+        }
+        throw new Error(data.error);
+      }
+
+      toast.success('Action reverted successfully', { style: { background: '#09090b', color: '#10b981', border: '1px solid rgba(16,185,129,0.4)' } });
+      get().fetchTickets();
+      return data;
+    } catch (err) {
+      console.error('Error reverting action:', err);
+      throw err;
+    }
+  },
+
   executeActionResolution: async (proposalData, targetDisposition) => {
     try {
       const { data: { session } } = await supabase.auth.getSession();
@@ -234,6 +273,34 @@ export const useTicketStore = create((set, get) => ({
       const data = await res.json();
       if (!res.ok || !data.success) {
         throw new Error(data.error || data.message || 'Upstream vault network handshake declined.');
+      }
+
+      // Action succeeded, show interactive toast with undo button
+      if (targetDisposition === 'approve') {
+          toast((t) => {
+            return React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: '10px' } },
+              React.createElement('span', null, 'Action Resolved.'),
+              React.createElement('button', {
+                onClick: () => {
+                  toast.dismiss(t.id);
+                  get().revertAction(currentTicket?.id || proposalData.ticket_id);
+                },
+                style: {
+                  background: '#374151',
+                  color: '#fff',
+                  border: '1px solid #4b5563',
+                  borderRadius: '4px',
+                  padding: '4px 8px',
+                  fontSize: '12px',
+                  cursor: 'pointer',
+                  fontWeight: 'bold'
+                }
+              }, 'UNDO')
+            );
+          }, {
+            duration: 15000,
+            style: { background: '#09090b', color: '#10b981', border: '1px solid rgba(16,185,129,0.4)' }
+          });
       }
 
       return data;

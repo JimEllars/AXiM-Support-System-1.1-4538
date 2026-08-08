@@ -2823,6 +2823,82 @@ ${messages.map((m: any) => `[${m.sender_id}]:${m.message_body}`).join("\n")}`;
       }
     }
 
+
+    if (url.pathname === "/api/v1/actions/revert" && request.method === "POST") {
+      const authHeader = request.headers.get("Authorization") || "";
+      const token = authHeader.replace("Bearer ", "").trim();
+      if (!token) {
+        return new Response(JSON.stringify({ error: "UNAUTHORIZED_ACTION_REVERT" }), {
+          status: 401, headers: getCorsHeaders(env, request)
+        });
+      }
+
+      try {
+        const supabaseAuth = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY, {
+          global: { headers: { Authorization: `Bearer ${token}` } }
+        });
+        const { data: { user }, error: authError } = await supabaseAuth.auth.getUser();
+        if (authError || !user) {
+          return new Response(JSON.stringify({ error: "INVALID_TECHNICIAN_SESSION" }), {
+            status: 403, headers: getCorsHeaders(env, request)
+          });
+        }
+
+        const body: any = await request.json();
+        const { ticketId } = body;
+
+        if (!ticketId) {
+            return new Response(JSON.stringify({ error: "MISSING_TICKET_ID" }), {
+                status: 400, headers: getCorsHeaders(env, request)
+            });
+        }
+
+        const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
+
+        const { data: ticket, error: fetchError } = await supabase
+            .from('support_tickets')
+            .select('updated_at, status')
+            .eq('id', ticketId)
+            .single();
+
+        if (fetchError || !ticket) {
+            return new Response(JSON.stringify({ error: "TICKET_NOT_FOUND" }), {
+                status: 404, headers: getCorsHeaders(env, request)
+            });
+        }
+
+        const updatedAtTime = new Date(ticket.updated_at).getTime();
+        const nowTime = new Date().getTime();
+
+        if (nowTime - updatedAtTime > 15000) {
+            return new Response(JSON.stringify({ error: "GRACE_PERIOD_EXPIRED", message: "The undo window for this action has closed." }), {
+                status: 400, headers: getCorsHeaders(env, request)
+            });
+        }
+
+        const { error: updateError } = await supabase
+            .from('support_tickets')
+            .update({ status: 'in_progress', resolution_notes: null, updated_at: new Date().toISOString() })
+            .eq('id', ticketId);
+
+        if (updateError) throw updateError;
+
+        await supabase.from("events_ax2024").insert({
+            type: "action_reverted",
+            payload: { ticket_id: ticketId, reverted_by: user.id }
+        });
+
+        return new Response(JSON.stringify({ success: true, message: "Action reverted successfully." }), {
+            status: 200, headers: getCorsHeaders(env, request)
+        });
+
+      } catch (err: any) {
+        return new Response(JSON.stringify({ error: err.message }), {
+          status: 500, headers: getCorsHeaders(env, request)
+        });
+      }
+    }
+
     if (url.pathname === "/api/v1/actions/resolve" && request.method === "POST") {
       const authHeader = request.headers.get("Authorization") || "";
       const token = authHeader.replace("Bearer ", "").trim();

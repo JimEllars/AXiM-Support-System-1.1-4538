@@ -61,9 +61,37 @@ export default function OnyxCommandHub({ isOpen, onClose }) {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Command execution failed.');
 
-      toast.success(`Command ${command} executed successfully!`, {
-        style: { background: '#09090b', color: '#10b981', border: '1px solid rgba(16,185,129,0.3)' }
-      });
+      if (command === '/resolve') {
+        const ticketId = activeTicket.id;
+        toast((t) => {
+          return React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: '10px' } },
+            React.createElement('span', null, 'Ticket Resolved.'),
+            React.createElement('button', {
+              onClick: () => {
+                toast.dismiss(t.id);
+                useTicketStore.getState().revertAction(ticketId);
+              },
+              style: {
+                background: '#374151',
+                color: '#fff',
+                border: '1px solid #4b5563',
+                borderRadius: '4px',
+                padding: '4px 8px',
+                fontSize: '12px',
+                cursor: 'pointer',
+                fontWeight: 'bold'
+              }
+            }, 'UNDO')
+          );
+        }, {
+          duration: 15000,
+          style: { background: '#09090b', color: '#10b981', border: '1px solid rgba(16,185,129,0.4)' }
+        });
+      } else {
+        toast.success(`Command ${command} executed successfully!`, {
+          style: { background: '#09090b', color: '#10b981', border: '1px solid rgba(16,185,129,0.3)' }
+        });
+      }
 
       setCommandInput('');
       fetchTickets();
