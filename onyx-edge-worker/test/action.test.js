@@ -77,3 +77,43 @@ describe('Onyx Edge Worker - Action Resolver Validation', () => {
     expect(data.success).toBe(false);
   });
 });
+
+  it('should successfully revert an action within the 15-second grace period', async () => {
+    vi.mocked(fetch).mockResolvedValueOnce({
+      status: 200,
+      json: async () => ({ success: true, message: "Action reverted successfully." })
+    });
+
+    const res = await fetch('http://localhost:8787/api/v1/actions/revert', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer test-secret`
+      },
+      body: JSON.stringify({ ticketId: '12345' })
+    });
+
+    expect(res.status).toBe(200);
+    const data = await res.json();
+    expect(data.success).toBe(true);
+  });
+
+  it('should fail to revert an action after the 15-second grace period', async () => {
+    vi.mocked(fetch).mockResolvedValueOnce({
+      status: 400,
+      json: async () => ({ error: "GRACE_PERIOD_EXPIRED", message: "The undo window for this action has closed." })
+    });
+
+    const res = await fetch('http://localhost:8787/api/v1/actions/revert', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer test-secret`
+      },
+      body: JSON.stringify({ ticketId: '67890' })
+    });
+
+    expect(res.status).toBe(400);
+    const data = await res.json();
+    expect(data.error).toBe("GRACE_PERIOD_EXPIRED");
+  });
