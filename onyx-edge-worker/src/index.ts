@@ -2845,9 +2845,39 @@ ${messages.map((m: any) => `[${m.sender_id}]:${m.message_body}`).join("\n")}`;
 
       try {
         const body: any = await request.json();
-        const { logId, status, ticketId, toolType, payload } = body;
+        const { logId, status, ticketId, toolType, payload, last_updated_at } = body;
 
         const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
+
+        if (ticketId && last_updated_at) {
+          const { data: ticketData, error: ticketError } = await supabase
+            .from("support_tickets")
+            .select("updated_at")
+            .eq("id", ticketId)
+            .single();
+
+          if (ticketError) throw ticketError;
+
+          if (new Date(ticketData.updated_at).getTime() > new Date(last_updated_at).getTime()) {
+            await supabase.from("events_ax2024").insert({
+              type: "concurrent_modification_prevented",
+              payload: {
+                ticket_id: ticketId,
+                action_log_id: logId,
+                attempted_by: user.email
+              }
+            });
+
+            return new Response(JSON.stringify({
+              success: false,
+              error: "STATE_CONFLICT",
+              message: "Ticket modified by another operator"
+            }), {
+              status: 409,
+              headers: getCorsHeaders(env, request)
+            });
+          }
+        }
 
         // 1. Permanently record structural updates into the database log table
         const { data: logRecord, error: logError } = await supabase
