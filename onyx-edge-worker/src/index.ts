@@ -2899,6 +2899,75 @@ ${messages.map((m: any) => `[${m.sender_id}]:${m.message_body}`).join("\n")}`;
       }
     }
 
+
+    if (url.pathname === "/api/v1/feedback/route" && request.method === "POST") {
+      const authHeader = request.headers.get("Authorization") || "";
+      const token = authHeader.replace("Bearer ", "").trim();
+      if (!token) {
+        return new Response(JSON.stringify({ error: "UNAUTHORIZED_ACTION_RESOLUTION" }), {
+          status: 401, headers: getCorsHeaders(env, request)
+        });
+      }
+
+      try {
+        const payload = await request.json() as any;
+        const { ticket_id, category, engineering_notes } = payload;
+
+        if (!ticket_id || !category) {
+          return new Response(JSON.stringify({ error: "Missing required fields: ticket_id and category" }), {
+            status: 400, headers: getCorsHeaders(env, request)
+          });
+        }
+
+        const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
+
+        // Insert into product_feedback
+        const { error: feedbackError } = await supabase
+          .from("product_feedback")
+          .insert({
+            ticket_id,
+            rating: 3, // Default since schema requires it. (rating >= 1 AND rating <= 5)
+            comments: `[Engineering Route: ${category}] ${engineering_notes || 'No notes provided.'}`
+          });
+
+        if (feedbackError) throw feedbackError;
+
+        // Fetch current ticket metadata
+        const { data: currentTicket, error: fetchError } = await supabase
+          .from("support_tickets")
+          .select("metadata")
+          .eq("id", ticket_id)
+          .single();
+
+        if (fetchError) throw fetchError;
+
+        const currentMetadata = currentTicket.metadata || {};
+        const updatedMetadata = { ...currentMetadata, feedback_routed: true };
+
+        // Update ticket metadata
+        const { error: updateError } = await supabase
+          .from("support_tickets")
+          .update({ metadata: updatedMetadata })
+          .eq("id", ticket_id);
+
+        if (updateError) throw updateError;
+
+        // Log telemetry event
+        await supabase.from("events_ax2024").insert({
+          type: "product_feedback_routed",
+          payload: { ticket_id, category, engineering_notes }
+        });
+
+        return new Response(JSON.stringify({ success: true, message: "Feedback successfully routed to Product Engineering" }), {
+          status: 200, headers: getCorsHeaders(env, request)
+        });
+      } catch (err: any) {
+        return new Response(JSON.stringify({ error: err.message }), {
+          status: 500, headers: getCorsHeaders(env, request)
+        });
+      }
+    }
+
     if (url.pathname === "/api/v1/actions/resolve" && request.method === "POST") {
       const authHeader = request.headers.get("Authorization") || "";
       const token = authHeader.replace("Bearer ", "").trim();
