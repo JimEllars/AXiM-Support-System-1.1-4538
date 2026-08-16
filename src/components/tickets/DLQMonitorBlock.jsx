@@ -1,6 +1,7 @@
 import { onyxService } from "../../services/onyxService";
 import React, { useState, useEffect } from 'react';
-import { FiAlertTriangle, FiRefreshCw, FiCheckCircle2, FiShield, FiZap } from 'react-icons/fi';
+import DLQPayloadEditorModal from '../modals/DLQPayloadEditorModal';
+import { FiAlertTriangle, FiRefreshCw, FiCheckCircle2, FiShield, FiZap, FiSearch } from 'react-icons/fi';
 import { supabase } from '../../lib/supabaseClient';
 import { getEdgeWorkerUrl } from '../../lib/edgeWorkerUrl';
 import toast from 'react-hot-toast';
@@ -11,6 +12,8 @@ export default function DLQMonitorBlock() {
   const [isLoading, setIsLoading] = useState(false);
   const [isFlushing, setIsFlushing] = useState(false);
   const [retryingId, setRetryingId] = useState(null);
+  const [isEditorModalOpen, setIsEditorModalOpen] = useState(false);
+  const [selectedEvent, setSelectedEvent] = useState(null);
 
   const fetchDLQData = async () => {
     setIsLoading(true);
@@ -28,9 +31,9 @@ export default function DLQMonitorBlock() {
       const { data } = await supabase
         .from('events_ax2024')
         .select('*')
-        .eq('type', 'dlq_queue_inserted')
+        .contains('payload', { status: 'permanent_failure' })
         .order('timestamp', { ascending: false })
-        .limit(5);
+        .limit(10);
 
       setDlqItems(data || []);
     } catch (err) {
@@ -183,12 +186,14 @@ export default function DLQMonitorBlock() {
               </div>
 
               <button
-                onClick={() => handleRetryPayload(item.id, item.payload)}
-                disabled={retryingId === item.id}
+                onClick={() => {
+                  setSelectedEvent(item);
+                  setIsEditorModalOpen(true);
+                }}
                 className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-zinc-900 hover:bg-zinc-800 text-[10px] text-indigo-300 border border-zinc-800 transition-all flex-shrink-0 disabled:opacity-50"
               >
-                <FiRefreshCw className={retryingId === item.id ? 'animate-spin' : ''} />
-                <span>{retryingId === item.id ? 'Retrying...' : 'Re-queue'}</span>
+                <FiSearch />
+                <span>Inspect Payload</span>
               </button>
             </div>
           ))
@@ -198,6 +203,16 @@ export default function DLQMonitorBlock() {
           </div>
         )}
       </div>
+
+      <DLQPayloadEditorModal
+        isOpen={isEditorModalOpen}
+        onClose={() => {
+          setIsEditorModalOpen(false);
+          setSelectedEvent(null);
+        }}
+        event={selectedEvent}
+        onRefresh={fetchDLQData}
+      />
     </div>
   );
 }
