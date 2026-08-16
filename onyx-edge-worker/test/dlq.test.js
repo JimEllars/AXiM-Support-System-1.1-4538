@@ -54,3 +54,43 @@ describe('Edge Dead-Letter Queue & Batch Flush Suite', () => {
     expect(data.replayed_count).toBe(5);
   });
 });
+
+describe('Edge Dead-Letter Queue Targeted Replays', () => {
+  it('should process force retry requests successfully', async () => {
+    vi.mocked(fetch).mockResolvedValueOnce({
+      status: 200,
+      json: async () => ({ success: true })
+    });
+
+    const res = await fetch('http://localhost:8787/api/v1/admin/dlq/force-retry', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer valid_session_token'
+      },
+      body: JSON.stringify({ event_id: '123', updated_payload: { foo: 'bar' } })
+    });
+
+    expect(res.status).toBe(200);
+    const data = await res.json();
+    expect(data.success).toBe(true);
+  });
+
+  it('should process purge requests successfully', async () => {
+    vi.mocked(fetch).mockResolvedValueOnce({
+      status: 200,
+      json: async () => ({ success: true })
+    });
+
+    const res = await fetch('http://localhost:8787/api/v1/admin/dlq/purge?event_id=123', {
+      method: 'DELETE',
+      headers: {
+        'Authorization': 'Bearer valid_session_token'
+      }
+    });
+
+    expect(res.status).toBe(200);
+    const data = await res.json();
+    expect(data.success).toBe(true);
+  });
+});
