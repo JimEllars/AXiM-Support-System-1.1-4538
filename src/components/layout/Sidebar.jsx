@@ -88,6 +88,18 @@ export default function Sidebar({ isOpen, setIsOpen }) {
       </nav>
 
       <div className="mt-auto flex flex-col items-center gap-6 w-full px-2">
+
+        {/* Super-Admin Tenant Switcher */}
+        {user?.app_metadata?.role === 'admin' && (
+          <button
+            onClick={() => { toast('Tenant switching authorized for Super-Admin', { icon: '🏢' }); }}
+            className="w-10 h-10 rounded-xl bg-indigo-900 border border-indigo-700 flex items-center justify-center text-indigo-400 cursor-pointer hover:border-indigo-500 hover:text-indigo-300 transition-all mb-4"
+            title="Super-Admin Tenant Switcher"
+          >
+            <FiDatabase className="text-xl" />
+          </button>
+        )}
+
         <div className="w-10 h-10 rounded-xl bg-zinc-900 border border-zinc-800 flex items-center justify-center text-zinc-500 cursor-pointer hover:border-fuchsia-500/50 hover:text-fuchsia-400 transition-all mb-4">
           <SafeIcon icon={FiCpu} />
         </div>
