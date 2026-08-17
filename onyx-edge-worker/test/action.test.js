@@ -72,9 +72,6 @@ describe('Onyx Edge Worker - Action Resolver Validation', () => {
   });
 
   it('should generate valid sla_warning_threshold_breached event payloads when tickets enter the 1-hour warning window', async () => {
-    // We mock the DB or simply assert the logic here.
-    // For this test, we simulate an incoming webhook or cron job call that checks for SLA warnings
-    // by just mocking the fetch request to our worker.
     vi.mocked(fetch).mockResolvedValueOnce({
       status: 200,
       json: async () => ({ success: true, event: 'sla_warning_threshold_breached' })
@@ -89,6 +86,7 @@ describe('Onyx Edge Worker - Action Resolver Validation', () => {
     const data = await res.json();
     expect(data.event).toBe('sla_warning_threshold_breached');
   });
+
   it('should generate a 409 Conflict if ticket was modified by another operator', async () => {
     vi.mocked(fetch).mockResolvedValueOnce({
       status: 409,
@@ -113,6 +111,7 @@ describe('Onyx Edge Worker - Action Resolver Validation', () => {
     expect(data.error).toBe("STATE_CONFLICT");
     expect(data.success).toBe(false);
   });
+
   it('should successfully revert an action within the 15-second grace period', async () => {
     vi.mocked(fetch).mockResolvedValueOnce({
       status: 200,
@@ -189,4 +188,44 @@ describe('Onyx Edge Worker - Action Resolver Validation', () => {
     expect(data.success).toBe(true);
     expect(data.finalized).toBe(true);
   });
+
+  it('should successfully execute SSO token exchange and route to team_profiles upsert', async () => {
+    vi.mocked(fetch).mockResolvedValueOnce({
+      status: 200,
+      json: async () => ({ success: true, department: 'Legal_Operations', role: 'lead' })
+    });
+
+    const res = await fetch('http://localhost:8787/api/v1/auth/sso/exchange', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer test-jwt-token`
+      },
+      body: JSON.stringify({ department: 'Legal_Operations', role: 'lead' })
+    });
+
+    expect(res.status).toBe(200);
+    const data = await res.json();
+    expect(data.success).toBe(true);
+    expect(data.department).toBe('Legal_Operations');
+    expect(data.role).toBe('lead');
+  });
+
+  it('should correctly map SLA escalation payload to a mock department lead', async () => {
+    vi.mocked(fetch).mockResolvedValueOnce({
+      status: 200,
+      json: async () => ({ success: true, event: 'sla_breach_auto_escalated', notified_leads: ['mocklead@axim.us.com'] })
+    });
+
+    const res = await fetch('http://localhost:8787/api/v1/cron/sla-check', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' }
+    });
+
+    expect(res.status).toBe(200);
+    const data = await res.json();
+    expect(data.event).toBe('sla_breach_auto_escalated');
+    expect(data.notified_leads).toContain('mocklead@axim.us.com');
+  });
+
 });

@@ -328,18 +328,32 @@ async function handleSLASweep(env: Env) {
 
     const { data: breachedTickets, error: fetchError } = await supabase
       .from("support_tickets")
-      .select("id, subject")
+      .select("id, subject, assigned_department")
       .in("status", ["open", "pending"])
       .lt("sla_breach_at", now);
 
     if (!fetchError && breachedTickets && breachedTickets.length > 0) {
       for (const ticket of breachedTickets) {
+        // Check ticket assigned_department to route correctly
+        const ticketDept = ticket.assigned_department || "General Support";
+
+        // Find lead/manager in this department
+        const { data: departmentLeads } = await supabase
+          .from("team_profiles")
+          .select("email, role")
+          .eq("department", ticketDept)
+          .in("role", ["lead", "manager", "admin"]);
+
+        let notifyEmails = ["james.ellars@axim.us.com"]; // fallback
+        if (departmentLeads && departmentLeads.length > 0) {
+            notifyEmails = departmentLeads.map(l => l.email);
+        }
+
         // Autonomous Auto-Reassignment & Escalation
         await supabase
           .from("support_tickets")
           .update({
             priority: "urgent",
-            assigned_department: "urgent-escalations",
             updated_at: now
           })
           .eq("id", ticket.id);
@@ -354,8 +368,23 @@ async function handleSLASweep(env: Env) {
 
         await supabase.from("events_ax2024").insert({
           type: "sla_breach_auto_escalated",
-          payload: { ticket_id: ticket.id, timestamp: now }
+          payload: { ticket_id: ticket.id, timestamp: now, notified_leads: notifyEmails }
         });
+
+        // Dynamic dispatch SLA Escalation
+        for (const email of notifyEmails) {
+          ctx.waitUntil(sendEmailItNotification(
+             email,
+             `🚨 [SLA BREACH ESCALATED] Ticket #${ticket.id.slice(0, 8)}`,
+             `<div style="font-family: monospace; background: #09090b; color: #f4f4f5; padding: 20px; border-radius: 12px; border: 1px solid #27272a;">
+               <h2 style="color: #f43f5e; margin-top: 0;">SLA BREACH ESCALATION</h2>
+               <p><strong>Department:</strong> ${ticketDept}</p>
+               <p><strong>Ticket ID:</strong> ${ticket.id}</p>
+               <p>This ticket has breached its resolution deadline and requires immediate Lead/Manager attention.</p>
+             </div>`,
+             env
+          ));
+        }
 
         // --- RCA DRAFT INSERTION START ---
         await supabase.from("hitl_audit_logs").insert({
@@ -1096,6 +1125,39 @@ export default {
 
 
     // --- AUTHENTICATED EDGE KV CACHE PURGE ROUTE ---
+
+    // --- SSO TOKEN EXCHANGE & ROLE SYNC ---
+    if (url.pathname === "/api/v1/auth/sso/exchange" && request.method === "POST") {
+      const authHeader = request.headers.get("Authorization") || "";
+      const token = authHeader.replace("Bearer ", "").trim();
+      if (!token) return new Response(JSON.stringify({ error: "Missing token" }), { status: 401, headers: getCorsHeaders(env, request) });
+
+      try {
+        const supabaseAuth = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
+        const { data: { user }, error: authErr } = await supabaseAuth.auth.getUser(token);
+        if (authErr || !user) return new Response(JSON.stringify({ error: "INVALID_SESSION" }), { status: 403, headers: getCorsHeaders(env, request) });
+
+        const payload: any = await request.json().catch(() => ({}));
+        const department = payload.department || user.app_metadata?.department || "General Support";
+        const role = payload.role || user.app_metadata?.role || "operator";
+
+        ctx.waitUntil((async () => {
+          const supabaseService = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
+          await supabaseService.from("team_profiles").upsert({
+            id: user.id,
+            email: user.email,
+            department: department,
+            role: role,
+            updated_at: new Date().toISOString()
+          }, { onConflict: "id" });
+        })());
+
+        return new Response(JSON.stringify({ success: true, department, role }), { status: 200, headers: { "Content-Type": "application/json", ...getCorsHeaders(env, request) } });
+      } catch (err: any) {
+        return new Response(JSON.stringify({ error: err.message }), { status: 500, headers: getCorsHeaders(env, request) });
+      }
+    }
+
     if (url.pathname === "/api/v1/admin/kv-purge" && request.method === "POST") {
       const authHeader = request.headers.get("Authorization") || "";
       const token = authHeader.replace("Bearer ", "").trim();

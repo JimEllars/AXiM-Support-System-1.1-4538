@@ -4,10 +4,18 @@ import toast from 'react-hot-toast';
 import { supabase } from '../lib/supabaseClient';
 import { getEdgeWorkerUrl } from '../lib/edgeWorkerUrl';
 import ExecutiveDirectiveHistoryModal from './modals/ExecutiveDirectiveHistoryModal';
+import { useAuthStore } from '../store/useAuthStore';
+import { FiRadio, FiAlertTriangle } from 'react-icons/fi';
+import SystemBroadcastModal from './modals/SystemBroadcastModal';
+import DLQPayloadEditorModal from './modals/DLQPayloadEditorModal';
 
 export default function DashboardQuickActions() {
   const [isSendingDigest, setIsSendingDigest] = useState(false);
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
+  const [isBroadcastOpen, setIsBroadcastOpen] = useState(false);
+  const [isDlqOpen, setIsDlqOpen] = useState(false);
+  const { user } = useAuthStore();
+  const isPrivileged = user?.app_metadata?.role === "lead" || user?.app_metadata?.role === "admin";
   const [isPrefsOpen, setIsPrefsOpen] = useState(false);
   const [cronEngine, setCronEngine] = useState({ status: 'active', daily_sweeps: 9, last_kb_curation: null });
   const [prefs, setPrefs] = useState({ instant_receipts: true, urgent_alerts: true, daily_digest: true, autoresolve_days: 7, auto_purge_kv: true, sound_alerts_enabled: true });
@@ -146,7 +154,33 @@ export default function DashboardQuickActions() {
         <span>{isSendingDigest ? 'Sending...' : 'Email Briefing'}</span>
       </button>
 
+
+        {isPrivileged && (
+          <>
+            <button
+              onClick={() => setIsDlqOpen(true)}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-[11px] font-bold uppercase text-rose-400 bg-rose-500/10 border border-rose-500/20 hover:bg-rose-500/20 transition-all"
+              title="Drain Dead Letter Queue"
+            >
+              <FiAlertTriangle/>
+              <span>Drain DLQ</span>
+            </button>
+
+            <button
+              onClick={() => setIsBroadcastOpen(true)}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-[11px] font-bold uppercase text-cyan-400 bg-cyan-500/10 border border-cyan-500/20 hover:bg-cyan-500/20 transition-all"
+              title="System Broadcast"
+            >
+              <FiRadio/>
+              <span>System Broadcast</span>
+            </button>
+          </>
+        )}
+
       <ExecutiveDirectiveHistoryModal isOpen={isHistoryOpen} onClose={() => setIsHistoryOpen(false)} />
+      {isBroadcastOpen && <SystemBroadcastModal isOpen={isBroadcastOpen} onClose={() => setIsBroadcastOpen(false)} />}
+      {isDlqOpen && <DLQPayloadEditorModal isOpen={isDlqOpen} onClose={() => setIsDlqOpen(false)} />}
+
 
       {/* Preferences & Automation Modal */}
       {isPrefsOpen && (
