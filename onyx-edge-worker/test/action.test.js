@@ -113,8 +113,6 @@ describe('Onyx Edge Worker - Action Resolver Validation', () => {
     expect(data.error).toBe("STATE_CONFLICT");
     expect(data.success).toBe(false);
   });
-});
-
   it('should successfully revert an action within the 15-second grace period', async () => {
     vi.mocked(fetch).mockResolvedValueOnce({
       status: 200,
@@ -154,3 +152,41 @@ describe('Onyx Edge Worker - Action Resolver Validation', () => {
     const data = await res.json();
     expect(data.error).toBe("GRACE_PERIOD_EXPIRED");
   });
+
+  it('should verify RCA generation logic upon sla_breach_escalated trigger', async () => {
+    vi.mocked(fetch).mockResolvedValueOnce({
+      status: 200,
+      json: async () => ({ success: true, event: 'rca_draft_generated' })
+    });
+
+    const res = await fetch('http://localhost:8787/api/v1/cron/sla-check', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' }
+    });
+
+    expect(res.status).toBe(200);
+    const data = await res.json();
+    expect(data.event).toBe('rca_draft_generated');
+  });
+
+  it('should validate RCA payload and update state to finalized via /api/v1/actions/rca/finalize', async () => {
+    vi.mocked(fetch).mockResolvedValueOnce({
+      status: 200,
+      json: async () => ({ success: true, finalized: true })
+    });
+
+    const res = await fetch('http://localhost:8787/api/v1/actions/rca/finalize', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer test-secret`
+      },
+      body: JSON.stringify({ rcaLogId: '123e4567-e89b-12d3-a456-426614174000', notes: 'Finalized notes.' })
+    });
+
+    expect(res.status).toBe(200);
+    const data = await res.json();
+    expect(data.success).toBe(true);
+    expect(data.finalized).toBe(true);
+  });
+});

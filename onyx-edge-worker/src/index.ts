@@ -356,6 +356,24 @@ async function handleSLASweep(env: Env) {
           type: "sla_breach_auto_escalated",
           payload: { ticket_id: ticket.id, timestamp: now }
         });
+
+        // --- RCA DRAFT INSERTION START ---
+        await supabase.from("hitl_audit_logs").insert({
+          support_ticket_id: ticket.id,
+          tool_type: 'rca_report',
+          status: 'draft',
+          payload: {
+            breach_type: 'sla_breach_escalated',
+            timestamp: now,
+            notes: ''
+          }
+        });
+
+        await supabase.from("events_ax2024").insert({
+          type: "rca_draft_generated",
+          payload: { ticket_id: ticket.id, timestamp: now }
+        });
+        // --- RCA DRAFT INSERTION END ---
       }
     }
 
@@ -2968,6 +2986,59 @@ ${messages.map((m: any) => `[${m.sender_id}]:${m.message_body}`).join("\n")}`;
       }
     }
 
+    if (url.pathname === "/api/v1/actions/rca/finalize" && request.method === "POST") {
+      const authHeader = request.headers.get("Authorization") || "";
+      const token = authHeader.replace("Bearer ", "").trim();
+      if (!token) {
+        return new Response(JSON.stringify({ error: "Unauthorized" }), { status: 401, headers: getCorsHeaders(env, request) });
+      }
+
+      try {
+        const payload: any = await request.json();
+        const { rcaLogId, notes } = payload;
+
+        if (!rcaLogId) {
+          return new Response(JSON.stringify({ error: "Missing rcaLogId" }), { status: 400, headers: getCorsHeaders(env, request) });
+        }
+
+        const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
+
+        const { data: log, error: fetchErr } = await supabase.from("hitl_audit_logs").select("*").eq("id", rcaLogId).single();
+        if (fetchErr || !log) throw new Error("RCA log not found");
+
+        const updatedPayload = { ...(log.payload || {}), notes: notes || "", finalized_at: new Date().toISOString() };
+
+        const { error: updateErr } = await supabase.from("hitl_audit_logs").update({
+          status: 'finalized',
+          payload: updatedPayload
+        }).eq("id", rcaLogId);
+
+        if (updateErr) throw updateErr;
+
+        if (log.support_ticket_id) {
+           await supabase.from("ticket_messages").insert({
+             ticket_id: log.support_ticket_id,
+             sender_id: "onyx_system",
+             message_body: `**[RCA FINALIZED]**
+
+The Root Cause Analysis has been finalized by an operator.
+
+**Notes:**
+${notes}`,
+             is_internal_note: true
+           });
+        }
+
+        return new Response(JSON.stringify({ success: true, finalized: true }), {
+          status: 200, headers: { "Content-Type": "application/json", ...getCorsHeaders(env, request) }
+        });
+      } catch (err: any) {
+        return new Response(JSON.stringify({ error: err.message }), {
+          status: 500, headers: { "Content-Type": "application/json", ...getCorsHeaders(env, request) }
+        });
+      }
+    }
+
     if (url.pathname === "/api/v1/actions/resolve" && request.method === "POST") {
       const authHeader = request.headers.get("Authorization") || "";
       const token = authHeader.replace("Bearer ", "").trim();
@@ -3143,6 +3214,25 @@ ${messages.map((m: any) => `[${m.sender_id}]:${m.message_body}`).join("\n")}`;
             await supabaseAuth.from("events_ax2024").update({
                 payload: { ...updatedPayload, status: 'permanent_failure', error_reason: 'Force retry failed' }
             }).eq("id", eventId);
+
+            // --- RCA DRAFT INSERTION START ---
+            await supabaseAuth.from("hitl_audit_logs").insert({
+              support_ticket_id: updatedPayload.ticket_id || null,
+              tool_type: 'rca_report',
+              status: 'draft',
+              payload: {
+                breach_type: 'dlq_permanent_failure',
+                timestamp: new Date().toISOString(),
+                dlq_id: eventId,
+                notes: ''
+              }
+            });
+
+            await supabaseAuth.from("events_ax2024").insert({
+              type: "rca_draft_generated",
+              payload: { ticket_id: updatedPayload.ticket_id || null, dlq_id: eventId, timestamp: new Date().toISOString() }
+            });
+
             throw new Error("Force retry dispatch failed");
         }
 

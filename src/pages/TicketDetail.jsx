@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useTicketStore } from '../store/useTicketStore';
 import MessageThread from '../components/tickets/MessageThread';
 import OnyxInvestigationPanel from '../components/tickets/OnyxInvestigationPanel';
+import RCADocumentBlock from '../components/tickets/RCADocumentBlock';
 import AutoDraftWhisper from '../components/tickets/AutoDraftWhisper';
 import Customer360 from '../components/tickets/Customer360';
 import KBSidebar from '../components/tickets/KBSidebar';
@@ -18,15 +19,38 @@ export default function TicketDetail({ ticketId }) {
   const [isSending, setIsSending] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
   const [isTyping, setIsTyping] = useState(false);
+  const [rcaRecord, setRcaRecord] = useState(null);
   const [hasNewIncoming, setHasNewIncoming] = useState(false);
   const prevMessageCountRef = useRef(activeThreadMessages?.length || 0);
   const composerRef = useRef(null);
   const typingTimeoutRef = useRef(null);
 
+  const fetchRcaRecord = async () => {
+    if (!ticketId) return;
+    try {
+      const { data, error } = await supabase
+        .from('hitl_audit_logs')
+        .select('*')
+        .eq('support_ticket_id', ticketId)
+        .eq('tool_type', 'rca_report')
+        .order('created_at', { ascending: false })
+        .limit(1);
+
+      if (!error && data && data.length > 0) {
+        setRcaRecord(data[0]);
+      } else {
+        setRcaRecord(null);
+      }
+    } catch (e) {
+      console.error("Failed to fetch RCA record:", e);
+    }
+  };
+
   useEffect(() => {
     if (ticketId) {
       selectTicket(ticketId);
       setHasNewIncoming(false);
+      fetchRcaRecord();
       supabase.auth.getUser().then(({ data: { user } }) => {
         if (user) {
           trackPresence(ticketId, user.email);
@@ -189,6 +213,15 @@ export default function TicketDetail({ ticketId }) {
       {/* Main Workstation Grid */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
         <div className="lg:col-span-8 space-y-6">
+          {rcaRecord && (
+            <RCADocumentBlock
+              rcaRecord={rcaRecord}
+              onFinalized={() => {
+                fetchRcaRecord();
+                selectTicket(activeTicket.id);
+              }}
+            />
+          )}
           <OnyxInvestigationPanel ticketId={activeTicket.id} />
 
           {sampleDraft && (
