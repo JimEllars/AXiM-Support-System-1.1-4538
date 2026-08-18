@@ -320,7 +320,7 @@ async function handleStaleTicketSweep(env: Env) {
   }
 }
 
-async function handleSLASweep(env: Env) {
+async function handleSLASweep(env: Env, ctx?: any) {
   try {
     const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
     const now = new Date().toISOString();
@@ -373,7 +373,7 @@ async function handleSLASweep(env: Env) {
 
         // Dynamic dispatch SLA Escalation
         for (const email of notifyEmails) {
-          ctx.waitUntil(sendEmailItNotification(
+          if (ctx) ctx.waitUntil(sendEmailItNotification(
              email,
              `🚨 [SLA BREACH ESCALATED] Ticket #${ticket.id.slice(0, 8)}`,
              `<div style="font-family: monospace; background: #09090b; color: #f4f4f5; padding: 20px; border-radius: 12px; border: 1px solid #27272a;">
@@ -1105,6 +1105,32 @@ export default {
   },
   async fetch(request: Request, env: Env, ctx: any): Promise<Response> {
     const url = new URL(request.url);
+
+    // STRICT ENVIRONMENT SECRET SANITY FILTER
+    if (!env.AXIM_ONYX_SECRET || env.AXIM_ONYX_SECRET.trim() === "" || !env.TURNSTILE_SECRET_KEY || env.TURNSTILE_SECRET_KEY.trim() === "") {
+      const logFault = async () => {
+        try {
+          const supabaseAdmin = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
+          await supabaseAdmin.from("events_ax2024").insert({
+            type: "gateway_configuration_fault",
+            payload: {
+              reason: "missing_core_infrastructure_secrets",
+              timestamp: new Date().toISOString()
+            }
+          });
+        } catch (e) { /* ignore telemetry log failure if db also down */ }
+      };
+      ctx.waitUntil(logFault());
+
+      return new Response(JSON.stringify({
+        success: false,
+        error: "ENV_SECRET_MISALIGNMENT",
+        message: "Required core infrastructure secrets are missing from the active worker environment context."
+      }), {
+        status: 500,
+        headers: { "Content-Type": "application/json", ...getCorsHeaders(env, request) }
+      });
+    }
 
     // 1. CORS Preflight Intercept
     if (request.method === "OPTIONS") {

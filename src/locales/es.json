@@ -1,3 +1,13 @@
 {
-  "submit_ticket": "INICIALIZAR_TICKET"
+  "submit_ticket": "INICIALIZAR_TICKET",
+  "nav": {
+    "dashboard": "Panel",
+    "queue": "Cola",
+    "memory_hub": "Centro de Memoria",
+    "settings": "Configuración",
+    "team": "Equipo Neuronal",
+    "shift_handover": "Cambio de Turno",
+    "dlq_monitor": "Monitor DLQ",
+    "super_admin_switcher": "Cambiador de Superadministrador"
+  }
 }
