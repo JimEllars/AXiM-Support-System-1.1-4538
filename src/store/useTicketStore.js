@@ -346,6 +346,39 @@ export const useTicketStore = create((set, get) => ({
     }
   },
 
+  contributeToOnyxMemory: async (ticketId, messageText, messageId) => {
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const token = session?.access_token;
+      if (!token) throw new Error("Active technician session security token invalid or missing");
+
+      const workerUrl = getEdgeWorkerUrl();
+      const res = await fetch(`${workerUrl}/api/v1/onyx/memory/contribute`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          ticket_id: ticketId,
+          resolution_text: messageText,
+          message_id: messageId,
+          category: "support_resolution"
+        })
+      });
+
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to contribute to Onyx KB");
+
+      toast.success("Solution successfully vectorized and added to Onyx KB", { style: { background: "#09090b", color: "#10b981", border: "1px solid rgba(16,185,129,0.4)" } });
+      return data;
+    } catch (err) {
+      console.error("Error contributing to Onyx KB:", err);
+      toast.error(err.message || "Failed to contribute to Onyx KB", { style: { background: "#09090b", color: "#f43f5e", border: "1px solid rgba(244,63,94,0.4)" } });
+      throw err;
+    }
+  },
+
   subscribeToRealtime: () => {
     set({ realtimeStatus: 'CONNECTING' });
 

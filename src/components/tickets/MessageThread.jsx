@@ -1,7 +1,11 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { FiCode, FiExternalLink, FiChevronDown, FiChevronRight, FiGitCommit, FiUser, FiCpu, FiFileText, FiMail, FiCheck, FiEye, FiAlertCircle } from 'react-icons/fi';
+import { FiCode, FiExternalLink, FiChevronDown, FiChevronRight, FiGitCommit, FiUser, FiCpu, FiFileText, FiMail, FiCheck, FiEye, FiAlertCircle, FiDatabase } from 'react-icons/fi';
+import { useTicketStore } from '../../store/useTicketStore';
 
-export default function MessageThread({ messages = [] }) {
+export default function MessageThread({ messages = [], ticketStatus }) {
+  const contributeToOnyxMemory = useTicketStore(state => state.contributeToOnyxMemory);
+  const activeTicket = useTicketStore(state => state.activeTicket);
+
   const [expandedDiffs, setExpandedDiffs] = useState({});
   const messagesEndRef = useRef(null);
 
@@ -67,6 +71,21 @@ export default function MessageThread({ messages = [] }) {
 
               <div className="flex items-center gap-2 text-[10px] font-mono text-zinc-500">
                 <span>{msg.created_at ? new Date(msg.created_at).toLocaleTimeString() : ''}</span>
+                {(!isSystem && !isEmailInbound && (ticketStatus === "resolved" || activeTicket?.status === "resolved")) && (
+                  msg.metadata?.onyx_saved ? (
+                    <span className="flex items-center gap-1 text-emerald-400 font-bold" title="Saved to KB">
+                      <FiCheck /> Saved to KB
+                    </span>
+                  ) : (
+                    <button
+                      onClick={() => contributeToOnyxMemory(activeTicket?.id || msg.ticket_id, msg.message_body, msg.id)}
+                      className="flex items-center gap-1 text-[10px] bg-zinc-800/80 hover:bg-zinc-700 text-zinc-300 px-1.5 py-0.5 rounded border border-zinc-700 transition-colors"
+                      title="Add to Onyx Knowledge Base"
+                    >
+                      <FiDatabase /> Add to Onyx
+                    </button>
+                  )
+                )}
                 {msg.metadata?.delivery_status === 'delivered' && (
                   <div className="flex -space-x-1 text-emerald-400" title="Delivered">
                     <FiCheck /><FiCheck />
