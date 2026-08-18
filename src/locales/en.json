@@ -1,3 +1,13 @@
 {
-  "submit_ticket": "INITIALIZE_TICKET"
+  "submit_ticket": "INITIALIZE_TICKET",
+  "nav": {
+    "dashboard": "Dashboard",
+    "queue": "Queue",
+    "memory_hub": "Memory Hub",
+    "settings": "Settings",
+    "team": "Neural Team",
+    "shift_handover": "Shift Handover",
+    "dlq_monitor": "DLQ Monitor",
+    "super_admin_switcher": "Super Admin Switcher"
+  }
 }
