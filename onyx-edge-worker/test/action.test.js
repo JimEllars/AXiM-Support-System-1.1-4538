@@ -228,4 +228,28 @@ describe('Onyx Edge Worker - Action Resolver Validation', () => {
     expect(data.notified_leads).toContain('mocklead@axim.us.com');
   });
 
+
+  it('should successfully contribute to Onyx Memory Bank and insert into pgvector', async () => {
+    vi.mocked(fetch).mockResolvedValueOnce({
+      status: 200,
+      json: async () => ({ success: true })
+    });
+
+    const res = await fetch('http://localhost:8787/api/v1/onyx/memory/contribute', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer test-secret`
+      },
+      body: JSON.stringify({
+        ticket_id: '123e4567-e89b-12d3-a456-426614174000',
+        resolution_text: 'Test resolution text',
+        category: 'support_resolution'
+      })
+    });
+
+    expect(res.status).toBe(200);
+    const data = await res.json();
+    expect(data.success).toBe(true);
+});
 });

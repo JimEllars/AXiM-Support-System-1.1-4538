@@ -2623,6 +2623,10 @@ export default {
       return handleVectorSearch(request, env, ctx);
     }
 
+    if (url.pathname === "/api/v1/onyx/memory/contribute" && request.method === "POST") {
+      return handleOnyxMemoryContribute(request, env, ctx);
+    }
+
     if (url.pathname === "/api/v1/onyx/generate-suggestion") {
       return handleGenerateSuggestion(request, env, ctx);
     }
@@ -6112,5 +6116,89 @@ async function dispatchSecureEgressWebhook(
     });
   } catch (fetchErr: any) {
     console.error(`[EGRESS TRANSPORT DROP] Failed to reach destination ${targetUrl}:`, fetchErr.message);
+  }
+}
+
+async function handleOnyxMemoryContribute(request: Request, env: Env, ctx: any): Promise<Response> {
+  const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
+  const logCtx = createLogContext(request);
+
+  const authHeader = request.headers.get("Authorization") || "";
+  const token = authHeader.replace("Bearer ", "").trim();
+  if (!token) {
+    return new Response(JSON.stringify({ error: "UNAUTHORIZED_CONTRIBUTION" }), {
+      status: 401, headers: getCorsHeaders(env, request)
+    });
+  }
+
+  const supabaseAuth = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY, {
+    global: { headers: { Authorization: `Bearer ${token}` } }
+  });
+
+  const { data: { user }, error: authError } = await supabaseAuth.auth.getUser();
+  if (authError || !user) {
+    return new Response(JSON.stringify({ error: "INVALID_SESSION" }), {
+      status: 403, headers: getCorsHeaders(env, request)
+    });
+  }
+
+  try {
+    const body: any = await request.json();
+    const { ticket_id, resolution_text, category, message_id } = body;
+
+    if (!ticket_id || !resolution_text) {
+      return new Response(JSON.stringify({ error: "MISSING_REQUIRED_FIELDS" }), {
+        status: 400, headers: getCorsHeaders(env, request)
+      });
+    }
+
+    let embeddingForMemory = [];
+    if (env.AI) {
+      try {
+        const embeddings: any = await env.AI.run("@cf/baai/bge-base-en-v1.5", {
+          text: resolution_text,
+        });
+        embeddingForMemory = embeddings.data[0];
+      } catch (embedErr) {
+        console.warn("[WORKERS_AI EMBEDDING FAULT] Failed to generate embedding for contribution:", embedErr);
+      }
+    }
+
+    const { error: insertError } = await supabase.from("memory_banks").insert({
+      title: `Agent Contribution (Ticket ${ticket_id.slice(0,8)})`,
+      content: resolution_text,
+      embedding: embeddingForMemory,
+      metadata: {
+        source: "agent_contribution",
+        ticket_id,
+        author_id: user.id,
+        category: category || "general"
+      },
+    });
+
+    if (insertError) {
+      throw insertError;
+    }
+
+    if (message_id) {
+       await supabase.from("ticket_messages").update({
+         metadata: { onyx_saved: true }
+       }).eq("id", message_id);
+    }
+
+    await supabase.from("events_ax2024").insert({
+      type: "onyx_memory_bank_contributed",
+      payload: { ticket_id, author_id: user.id, category }
+    });
+
+    return new Response(JSON.stringify({ success: true }), {
+      status: 200, headers: { "Content-Type": "application/json", ...getCorsHeaders(env, request) }
+    });
+
+  } catch (err: any) {
+    logErr(supabase, logCtx, err, ctx);
+    return new Response(JSON.stringify({ error: err.message }), {
+      status: 500, headers: getCorsHeaders(env, request)
+    });
   }
 }
