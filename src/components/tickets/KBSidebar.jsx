@@ -74,13 +74,46 @@ export default function KBSidebar({ ticketId, onAttachPlaybook }) {
             Generating edge vector embeddings...
           </div>
         ) : articles.length > 0 ? (
-          articles.map((art) => (
+          articles.map((art) => {
+            let badge = null;
+            let isArchived = false;
+
+            if (art.metadata?.is_stale) {
+              isArchived = true;
+              badge = <span className="text-[9px] font-mono text-red-400 uppercase bg-red-500/10 px-1.5 py-0.5 rounded flex-shrink-0 ml-2">Archived</span>;
+            } else if (art.created_at) {
+              const ageInDays = (new Date() - new Date(art.created_at)) / (1000 * 60 * 60 * 24);
+              if (ageInDays > 90) {
+                isArchived = true;
+                badge = <span className="text-[9px] font-mono text-red-400 uppercase bg-red-500/10 px-1.5 py-0.5 rounded flex-shrink-0 ml-2">Archived</span>;
+              } else if (ageInDays > 75) {
+                badge = <span className="text-[9px] font-mono text-amber-400 uppercase bg-amber-500/10 px-1.5 py-0.5 rounded flex-shrink-0 ml-2">⚠️ Expiring Soon</span>;
+              }
+            }
+
+            if (isArchived) {
+              return (
+                <div key={art.id} className="p-3 rounded-xl bg-black/20 border border-zinc-800/30 space-y-2 opacity-50">
+                  <div className="flex items-center justify-between opacity-50">
+                    <h4 className="text-xs font-bold text-zinc-500 truncate pr-2 line-through">{art.title}</h4>
+                    {badge}
+                  </div>
+                  <p className="text-[11px] text-zinc-600 line-clamp-2 font-sans leading-relaxed">
+                    {art.content}
+                  </p>
+                </div>
+              );
+            }
+
+            return (
+
             <div key={art.id} className="p-3 rounded-xl bg-black/40 border border-zinc-800/60 space-y-2 hover:border-zinc-700 transition-colors">
               <div className="flex items-center justify-between">
                 <h4 className="text-xs font-bold text-zinc-200 truncate pr-2">{art.title}</h4>
                 <span className="text-[9px] font-mono text-indigo-400 uppercase bg-indigo-500/10 px-1.5 py-0.5 rounded flex-shrink-0">
                   {art.category || 'Docs'}
                 </span>
+                {badge}
               </div>
               <p className="text-[11px] text-zinc-400 line-clamp-2 font-sans leading-relaxed">
                 {art.content}
@@ -93,7 +126,8 @@ export default function KBSidebar({ ticketId, onAttachPlaybook }) {
                 <FiCornerDownLeft className="text-[9px]"/> Insert Playbook into Reply
               </button>
             </div>
-          ))
+            );
+          })
         ) : (
           <div className="text-center py-4 text-xs font-mono text-zinc-600">
             Enter keywords to query edge playbooks.

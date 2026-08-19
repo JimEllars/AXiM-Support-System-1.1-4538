@@ -863,6 +863,59 @@ async function verifyEmailItWebhookSignature(rawBody: string, signature: string,
 
 
 // --- AUTONOMOUS VECTOR KB INDEX HEALTH SWEEP ---
+
+async function handleStaleMemoryPruningSweep(env: Env): Promise<number> {
+  const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
+
+  const ninetyDaysAgo = new Date();
+  ninetyDaysAgo.setDate(ninetyDaysAgo.getDate() - 90);
+  const cutoffDate = ninetyDaysAgo.toISOString();
+
+  // Query memory_banks where created_at < 90 days ago and metadata->>is_stale != 'true'
+  // Using filter: created_at < cutoff AND (metadata->>is_stale IS NULL OR metadata->>is_stale != 'true')
+  const { data: staleRecords, error: queryErr } = await supabase
+    .from("memory_banks")
+    .select("id, metadata")
+    .lt("created_at", cutoffDate);
+
+  if (queryErr) {
+    console.error("[handleStaleMemoryPruningSweep] Failed to query memory_banks:", queryErr);
+    return 0;
+  }
+
+  const recordsToPrune = (staleRecords || []).filter(record => {
+    return !record.metadata || String(record.metadata.is_stale) !== "true";
+  });
+
+  if (recordsToPrune.length === 0) return 0;
+
+  let prunedCount = 0;
+  for (const record of recordsToPrune) {
+    const updatedMetadata = { ...(record.metadata || {}), is_stale: true };
+    const { error: updateErr } = await supabase
+      .from("memory_banks")
+      .update({ metadata: updatedMetadata })
+      .eq("id", record.id);
+
+    if (!updateErr) {
+      prunedCount++;
+    }
+  }
+
+  if (prunedCount > 0) {
+    await supabase.from("events_ax2024").insert({
+      type: "onyx_memory_pruned",
+      payload: {
+        pruned_records_count: prunedCount,
+        timestamp: new Date().toISOString()
+      }
+    });
+    console.log(`[handleStaleMemoryPruningSweep] Pruned ${prunedCount} stale memory banks.`);
+  }
+
+  return prunedCount;
+}
+
 async function handleKbIndexHealthSweep(env: Env): Promise<number> {
   const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
   const now = new Date().toISOString();
@@ -1017,6 +1070,7 @@ export default {
     ctx.waitUntil(handleAutoKnowledgeCurationSweep(env));
     ctx.waitUntil(handleStaleTicketAutoResolution(env));
     ctx.waitUntil(sendDailySystemProgressReport(env));
+    ctx.waitUntil(handleStaleMemoryPruningSweep(env));
     ctx.waitUntil(handleKbIndexHealthSweep(env));
 
     const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
@@ -2217,19 +2271,21 @@ export default {
 
         if (queryVector) {
           // Perform vector similarity RPC lookup
-          const { data, error } = await supabase.rpc("match_kb_articles", {
+          let { data, error } = await supabase.rpc("match_kb_articles", {
             query_embedding: queryVector,
             match_threshold: 0.5,
             match_count: 5
           });
-          if (!error && data) results = data;
+          if (!error && data) {
+            results = data.filter((r: any) => !r.metadata || String(r.metadata.is_stale) !== "true");
+          }
         }
 
         // Text search fallback if vector search returns empty
         if (results.length === 0) {
           const { data } = await supabase
             .from("knowledge_articles")
-            .select("id, title, content, category")
+            .select("id, title, content, category, created_at, metadata")
             .ilike("title", `%${query}%`)
             .limit(5);
           if (data) results = data;
@@ -3588,11 +3644,15 @@ async function handleVectorSearch(request: Request, env: Env, ctx: any): Promise
       throw new Error("Failed to fetch embedding from Core");
     }
 
-    const { data, error } = await supabase.rpc("match_kb_articles", {
+    let { data, error } = await supabase.rpc("match_kb_articles", {
       query_embedding: embedding,
       match_threshold: 0.5,
       match_count: 3,
     });
+
+    if (data) {
+      data = data.filter((item: any) => !item.metadata || String(item.metadata.is_stale) !== "true");
+    }
 
     if (error || !data || data.length === 0) {
       return new Response(JSON.stringify([]), { headers: { "Content-Type": "application/json", ...getCorsHeaders(env, request) } });
@@ -4588,13 +4648,15 @@ async function getCachedRAGContext(queryText: string, env: Env, supabase: any, c
 
       if (embedding && embedding.length > 0) {
         // Query Supabase Vectors
-        const { data: searchResults, error: searchError } = await supabase.rpc("match_memory_banks", {
+        let { data: searchResults, error: searchError } = await supabase.rpc("match_memory_banks", {
           query_embedding: embedding,
           match_threshold: 0.5,
           match_count: 3,
         });
 
         if (!searchError && searchResults && searchResults.length > 0) {
+          // Filter out stale vectors
+          searchResults = searchResults.filter((r: any) => !r.metadata || String(r.metadata.is_stale) !== "true");
           contextText = searchResults.map((r: any) => `Title: ${r.title}\nContent: ${r.content}`).join("\n\n");
         }
       }
@@ -5476,12 +5538,15 @@ async function handleGenerateSuggestion(request: Request, env: Env, ctx: any): P
       }
     } catch (err) { console.error("Embedding generation fallback engaged."); }
 
-    const { data: memoryBanks } = await supabase.rpc("match_memory_banks", {
+    let { data: memoryBanks } = await supabase.rpc("match_memory_banks", {
       query_embedding: embedding,
       match_threshold: 0.75,
       match_count: 3,
     });
 
+    if (memoryBanks) {
+      memoryBanks = memoryBanks.filter((m: any) => !m.metadata || String(m.metadata.is_stale) !== "true");
+    }
     const contextText = memoryBanks?.map((m: any) => `Title: ${m.title}\nContent: ${m.content}`).join("\n\n") || "No context found.";
 
     const prompt = `You are Onyx, an expert AXiM Support AI. Given the following ticket details and context from our memory banks, write a professional and helpful support response draft for the agent to review.\n\nTicket Subject: ${subject}\nTicket Description: ${description}\n\nRecent Conversation History:\n${historyText || "No previous replies."}\n\nContext from Memory Banks:\n${contextText}\n\nOutput ONLY the suggested response text:`;
