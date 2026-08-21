@@ -346,6 +346,38 @@ export const useTicketStore = create((set, get) => ({
     }
   },
 
+  renewOnyxMemory: async (memoryId) => {
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const token = session?.access_token;
+      if (!token) throw new Error("Active technician session security token invalid or missing");
+
+      const workerUrl = getEdgeWorkerUrl();
+      const res = await fetch(`${workerUrl}/api/v1/onyx/memory/renew`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${token}`
+        },
+        body: JSON.stringify({ memory_id: memoryId })
+      });
+
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to renew Onyx KB memory");
+
+      toast.success("Knowledge Base protocol successfully verified and renewed.", {
+        style: { background: "#09090b", color: "#10b981", border: "1px solid rgba(16,185,129,0.4)" }
+      });
+      return data;
+    } catch (err) {
+      console.error("Error renewing Onyx KB memory:", err);
+      toast.error(err.message || "Failed to renew Onyx KB memory", {
+        style: { background: "#09090b", color: "#f43f5e", border: "1px solid rgba(244,63,94,0.4)" }
+      });
+      throw err;
+    }
+  },
+
   contributeToOnyxMemory: async (ticketId, messageText, messageId) => {
     try {
       const { data: { session } } = await supabase.auth.getSession();

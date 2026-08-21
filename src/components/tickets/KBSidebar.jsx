@@ -2,12 +2,32 @@ import React, { useState } from 'react';
 import { FiBookOpen, FiSearch, FiCpu, FiCornerDownLeft } from 'react-icons/fi';
 import toast from 'react-hot-toast';
 import { getEdgeWorkerUrl } from '../../lib/edgeWorkerUrl';
+import { useTicketStore } from '../../store/useTicketStore';
+import { FiRefreshCw } from 'react-icons/fi';
 
 export default function KBSidebar({ ticketId, onAttachPlaybook }) {
   const [searchQuery, setSearchQuery] = useState('');
   const [articles, setArticles] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
   const [provenance, setProvenance] = useState(null);
+  const renewOnyxMemory = useTicketStore((state) => state.renewOnyxMemory);
+
+  const handleRenew = async (memoryId, e) => {
+    e.stopPropagation();
+    try {
+      await renewOnyxMemory(memoryId);
+      // Immediately drop the warning badge from local state
+      setArticles((prev) =>
+        prev.map((art) =>
+          art.id === memoryId
+            ? { ...art, created_at: new Date().toISOString(), metadata: { ...(art.metadata || {}), is_stale: false } }
+            : art
+        )
+      );
+    } catch (err) {
+      // Error handled in store
+    }
+  };
 
   const handleSearch = async (e) => {
     if (e) e.preventDefault();
@@ -93,10 +113,19 @@ export default function KBSidebar({ ticketId, onAttachPlaybook }) {
 
             if (isArchived) {
               return (
-                <div key={art.id} className="p-3 rounded-xl bg-black/20 border border-zinc-800/30 space-y-2 opacity-50">
-                  <div className="flex items-center justify-between opacity-50">
-                    <h4 className="text-xs font-bold text-zinc-500 truncate pr-2 line-through">{art.title}</h4>
-                    {badge}
+                <div key={art.id} className="p-3 rounded-xl bg-black/20 border border-zinc-800/30 space-y-2 opacity-50 relative group">
+                  <div className="flex items-center justify-between opacity-50 group-hover:opacity-100 transition-opacity">
+                    <h4 className="text-xs font-bold text-zinc-500 truncate pr-2 line-through group-hover:text-zinc-300">{art.title}</h4>
+                    <div className="flex items-center gap-2">
+                      {badge}
+                      <button
+                        onClick={(e) => handleRenew(art.id, e)}
+                        className="text-zinc-500 hover:text-indigo-400 transition-colors p-1"
+                        title="Renew Protocol"
+                      >
+                        <FiRefreshCw className="text-[10px]" />
+                      </button>
+                    </div>
                   </div>
                   <p className="text-[11px] text-zinc-600 line-clamp-2 font-sans leading-relaxed">
                     {art.content}
@@ -110,10 +139,21 @@ export default function KBSidebar({ ticketId, onAttachPlaybook }) {
             <div key={art.id} className="p-3 rounded-xl bg-black/40 border border-zinc-800/60 space-y-2 hover:border-zinc-700 transition-colors">
               <div className="flex items-center justify-between">
                 <h4 className="text-xs font-bold text-zinc-200 truncate pr-2">{art.title}</h4>
-                <span className="text-[9px] font-mono text-indigo-400 uppercase bg-indigo-500/10 px-1.5 py-0.5 rounded flex-shrink-0">
-                  {art.category || 'Docs'}
-                </span>
-                {badge}
+                <div className="flex items-center gap-2">
+                  <span className="text-[9px] font-mono text-indigo-400 uppercase bg-indigo-500/10 px-1.5 py-0.5 rounded flex-shrink-0">
+                    {art.category || 'Docs'}
+                  </span>
+                  {badge}
+                  {badge && (
+                    <button
+                      onClick={(e) => handleRenew(art.id, e)}
+                      className="text-zinc-500 hover:text-indigo-400 transition-colors p-1"
+                      title="Renew Protocol"
+                    >
+                      <FiRefreshCw className="text-[10px]" />
+                    </button>
+                  )}
+                </div>
               </div>
               <p className="text-[11px] text-zinc-400 line-clamp-2 font-sans leading-relaxed">
                 {art.content}
