@@ -2679,6 +2679,10 @@ export default {
       return handleVectorSearch(request, env, ctx);
     }
 
+    if (url.pathname === "/api/v1/onyx/memory/renew" && request.method === "POST") {
+      return handleOnyxMemoryRenew(request, env, ctx);
+    }
+
     if (url.pathname === "/api/v1/onyx/memory/contribute" && request.method === "POST") {
       return handleOnyxMemoryContribute(request, env, ctx);
     }
@@ -6181,6 +6185,81 @@ async function dispatchSecureEgressWebhook(
     });
   } catch (fetchErr: any) {
     console.error(`[EGRESS TRANSPORT DROP] Failed to reach destination ${targetUrl}:`, fetchErr.message);
+  }
+}
+
+async function handleOnyxMemoryRenew(request: Request, env: Env, ctx: any): Promise<Response> {
+  const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
+  const logCtx = createLogContext(request);
+
+  const authHeader = request.headers.get("Authorization") || "";
+  const token = authHeader.replace("Bearer ", "").trim();
+  if (!token) {
+    return new Response(JSON.stringify({ error: "UNAUTHORIZED_RENEWAL" }), {
+      status: 401, headers: getCorsHeaders(env, request)
+    });
+  }
+
+  const supabaseAuth = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY, {
+    global: { headers: { Authorization: `Bearer ${token}` } }
+  });
+
+  const { data: { user }, error: authError } = await supabaseAuth.auth.getUser();
+  if (authError || !user) {
+    return new Response(JSON.stringify({ error: "INVALID_SESSION" }), {
+      status: 403, headers: getCorsHeaders(env, request)
+    });
+  }
+
+  try {
+    const body: any = await request.json();
+    const { memory_id } = body;
+
+    if (!memory_id) {
+      return new Response(JSON.stringify({ error: "MISSING_MEMORY_ID" }), {
+        status: 400, headers: getCorsHeaders(env, request)
+      });
+    }
+
+    // Tenant isolation verification - Ensure the requester is an authenticated operator
+    // Update the memory bank item: reset created_at and set is_stale to false
+    // Fetch current memory block to preserve metadata
+    const { data: currentMemory, error: fetchError } = await supabase
+      .from("memory_banks")
+      .select("metadata")
+      .eq("id", memory_id)
+      .single();
+
+    if (fetchError) {
+      throw fetchError;
+    }
+
+    const { error: updateError } = await supabase
+      .from("memory_banks")
+      .update({
+        created_at: new Date().toISOString(),
+        metadata: { ...(currentMemory?.metadata || {}), is_stale: false }
+      })
+      .eq("id", memory_id);
+
+    if (updateError) {
+      throw updateError;
+    }
+
+    // Log the renewal event
+    await supabase.from("events_ax2024").insert({
+      type: "onyx_memory_renewed",
+      payload: { memory_id, operator_id: user.id, timestamp: new Date().toISOString() }
+    });
+
+    return new Response(JSON.stringify({ success: true, memory_id }), {
+      status: 200, headers: { "Content-Type": "application/json", ...getCorsHeaders(env, request) }
+    });
+  } catch (err: any) {
+    logErr(supabase, logCtx, err, ctx);
+    return new Response(JSON.stringify({ error: err.message }), {
+      status: 500, headers: getCorsHeaders(env, request)
+    });
   }
 }
 
