@@ -3497,9 +3497,15 @@ ${notes}`,
     }
 
 
+
+    if (url.pathname === "/api/v1/analytics/leaderboard" && request.method === "GET") {
+      return handleLeaderboardAnalytics(request, env, ctx);
+    }
+
     if (url.pathname === "/health" || url.pathname === "/api/v1/health") {
       return handleHealthCheck(env, request, ctx);
     }
+
 
     // Default route (ticket ingestion)
     return handleTicketIngestion(request, env, ctx);
@@ -6337,6 +6343,108 @@ async function handleOnyxMemoryContribute(request: Request, env: Env, ctx: any):
 
     return new Response(JSON.stringify({ success: true }), {
       status: 200, headers: { "Content-Type": "application/json", ...getCorsHeaders(env, request) }
+    });
+
+  } catch (err: any) {
+    logErr(supabase, logCtx, err, ctx);
+    return new Response(JSON.stringify({ error: err.message }), {
+      status: 500, headers: getCorsHeaders(env, request)
+    });
+  }
+}
+
+
+async function handleLeaderboardAnalytics(request: Request, env: Env, ctx: any): Promise<Response> {
+  const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
+  const logCtx = createLogContext(request);
+
+  const authHeader = request.headers.get("Authorization") || "";
+  const token = authHeader.replace("Bearer ", "").trim();
+  if (!token) {
+    return new Response(JSON.stringify({ error: "UNAUTHORIZED_ANALYTICS" }), {
+      status: 401, headers: getCorsHeaders(env, request)
+    });
+  }
+
+  const supabaseAuth = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY, {
+    global: { headers: { Authorization: `Bearer ${token}` } }
+  });
+
+  const { data: { user }, error: authError } = await supabaseAuth.auth.getUser();
+  if (authError || !user) {
+    return new Response(JSON.stringify({ error: "INVALID_SESSION" }), {
+      status: 403, headers: getCorsHeaders(env, request)
+    });
+  }
+
+  try {
+    const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+
+    // Fetch contribution and renewal events
+    const { data: events, error: fetchError } = await supabase
+      .from('events_ax2024')
+      .select('type, payload')
+      .in('type', ['onyx_memory_bank_contributed', 'onyx_memory_renewed'])
+      .gte('timestamp', thirtyDaysAgo);
+
+    if (fetchError) throw fetchError;
+
+    // Aggregate stats by author_id / operator_id
+    const leaderboardMap = new Map<string, { id: string, email: string, score: number, contributions: number, renewals: number }>();
+
+    if (events) {
+      for (const ev of events) {
+        const payload = ev.payload as any;
+        const operatorId = payload?.author_id || payload?.operator_id;
+
+        if (!operatorId) continue;
+
+        if (!leaderboardMap.has(operatorId)) {
+          leaderboardMap.set(operatorId, {
+            id: operatorId,
+            email: "Operator_" + operatorId.slice(0, 4), // Fallback if no email
+            score: 0,
+            contributions: 0,
+            renewals: 0
+          });
+        }
+
+        const stats = leaderboardMap.get(operatorId)!;
+
+        if (ev.type === 'onyx_memory_bank_contributed') {
+          stats.contributions += 1;
+          stats.score += 5;
+        } else if (ev.type === 'onyx_memory_renewed') {
+          stats.renewals += 1;
+          stats.score += 2;
+        }
+      }
+    }
+
+    // Attempt to enrich with actual emails if possible, but keep it within the 95/5 rule.
+    // For a drop-in that avoids complex joins, we can query auth.users if admin role is allowed.
+    // Alternatively, just query contacts_ax2024 or ticket table to guess emails.
+    // Let's query auth users to fetch emails if possible.
+    try {
+      const { data: usersData } = await supabaseAuth.auth.admin.listUsers();
+      if (usersData && usersData.users) {
+        for (const u of usersData.users) {
+          if (leaderboardMap.has(u.id)) {
+            leaderboardMap.get(u.id)!.email = u.email || u.id;
+          }
+        }
+      }
+    } catch (adminErr) {
+      console.warn("Could not fetch user emails from admin API", adminErr);
+    }
+
+    const sortedLeaderboard = Array.from(leaderboardMap.values())
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 10);
+
+    return new Response(JSON.stringify({ success: true, leaderboard: sortedLeaderboard }), {
+      status: 200,
+      headers: { "Content-Type": "application/json", ...getCorsHeaders(env, request) }
     });
 
   } catch (err: any) {

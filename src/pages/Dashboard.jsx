@@ -3,6 +3,8 @@ import { useTicketStore } from '../store/useTicketStore';
 import TicketList from '../components/TicketList';
 import TicketDetail from './TicketDetail';
 import SupportMetrics from '../components/analytics/SupportMetrics';
+import OperatorLeaderboard from '../components/analytics/OperatorLeaderboard';
+
 import DashboardQuickActions from '../components/DashboardQuickActions';
 import { FiRadio } from 'react-icons/fi';
 
@@ -40,8 +42,15 @@ export default function Dashboard() {
         <DashboardQuickActions/>
       </div>
 
-      {/* Analytics Overview Cards */}
-      <SupportMetrics/>
+      {/* Analytics Overview Cards & Gamification */}
+      <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
+        <div className="lg:col-span-3">
+          <SupportMetrics/>
+        </div>
+        <div className="lg:col-span-1">
+          <OperatorLeaderboard/>
+        </div>
+      </div>
 
       {/* Main HUD Split View */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 flex-1 min-h-[600px]">
