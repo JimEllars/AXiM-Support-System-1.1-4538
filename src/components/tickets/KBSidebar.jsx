@@ -7,6 +7,7 @@ import { FiRefreshCw } from 'react-icons/fi';
 
 export default function KBSidebar({ ticketId, onAttachPlaybook }) {
   const [searchQuery, setSearchQuery] = useState('');
+  const [selectedCategory, setSelectedCategory] = useState('All');
   const [articles, setArticles] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
   const [provenance, setProvenance] = useState(null);
@@ -36,10 +37,14 @@ export default function KBSidebar({ ticketId, onAttachPlaybook }) {
     setIsLoading(true);
     try {
       const workerUrl = getEdgeWorkerUrl();
-      const res = await fetch(`${workerUrl}/api/v1/kb/search`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ query: searchQuery.trim() })
+      const authHeader = localStorage.getItem('axim_session_token') || '';
+
+      const res = await fetch(`${workerUrl}/api/v1/onyx/memory/search?query=${encodeURIComponent(searchQuery.trim())}&category=${encodeURIComponent(selectedCategory)}`, {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${authHeader}`
+        }
       });
 
       if (res.ok) {
@@ -77,15 +82,33 @@ export default function KBSidebar({ ticketId, onAttachPlaybook }) {
         )}
       </div>
 
-      <form onSubmit={handleSearch} className="relative">
-        <input
-          type="text"
-          value={searchQuery}
-          onChange={(e) => setSearchQuery(e.target.value)}
-          placeholder="Search semantic playbooks..."
-          className="w-full pl-9 pr-3 py-2 rounded-xl bg-black/50 border border-zinc-800 text-xs text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-indigo-500/50 font-sans"
-        />
-        <FiSearch className="absolute left-3 top-2.5 text-zinc-500 text-xs"/>
+      <form onSubmit={handleSearch} className="space-y-2">
+        <div className="relative">
+          <input
+            type="text"
+            value={searchQuery}
+            onChange={(e) => {
+              setSearchQuery(e.target.value);
+              // In a real app we might debounce here
+            }}
+            placeholder="Search semantic playbooks..."
+            className="w-full pl-9 pr-3 py-2 rounded-xl bg-black/50 border border-zinc-800 text-xs text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-indigo-500/50 font-sans"
+          />
+          <FiSearch className="absolute left-3 top-2.5 text-zinc-500 text-xs"/>
+        </div>
+        <select
+          value={selectedCategory}
+          onChange={(e) => {
+             setSelectedCategory(e.target.value);
+             // Fire search immediately when category changes if query exists
+          }}
+          className="w-full py-1.5 px-3 rounded-lg bg-black/50 border border-zinc-800 text-xs text-zinc-300 focus:outline-none focus:border-indigo-500/50 font-mono"
+        >
+          <option value="All">All Categories</option>
+          <option value="Bug">Bug</option>
+          <option value="Feature">Feature</option>
+          <option value="Policy">Policy</option>
+        </select>
       </form>
 
       <div className="space-y-2.5 max-h-60 overflow-y-auto pr-1">

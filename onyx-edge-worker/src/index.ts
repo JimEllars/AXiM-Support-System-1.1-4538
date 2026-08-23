@@ -2688,6 +2688,10 @@ export default {
       return handleOnyxMemoryRenew(request, env, ctx);
     }
 
+    if (url.pathname === "/api/v1/onyx/memory/search" && request.method === "GET") {
+      return handleOnyxMemorySearch(request, env, ctx);
+    }
+
     if (url.pathname === "/api/v1/onyx/memory/contribute" && request.method === "POST") {
       return handleOnyxMemoryContribute(request, env, ctx);
     }
@@ -3808,7 +3812,7 @@ function sanitizePayload(obj: any): any {
     sanitized = sanitized.replace(/(\b(DROP|SELECT|DELETE|UPDATE|INSERT)\b.*?\bFROM\b.*?|\b(DROP|ALTER)\b.*?\bTABLE\b.*?)/gi, '[REDACTED SQL]');
     sanitized = sanitized.replace(/(\bOR\b\s+\d+\s*=\s*\d+|\bOR\b\s+'[^']+'\s*=\s*'[^']+')/gi, '[REDACTED SQL]');
     // Strip markdown shell hooks / executables
-    sanitized = sanitized.replace(/\$\([^)]+\)/g, '[REDACTED SHELL]');
+    sanitized = sanitized.replace(/$\([^)]+\)/g, '[REDACTED SHELL]');
     sanitized = sanitized.replace(/`[^`]+`/g, '[REDACTED MD]');
     return sanitized;
   }
@@ -5051,7 +5055,7 @@ async function handleToolCommand(request: Request, env: Env, ctx: any): Promise<
     if (!toolUsePayload) {
       // Mocking Claude's response for specific commands if live call failed/no key:
       if (command.toLowerCase().includes("refund")) {
-        const amountMatch = command.match(/\$?(\d+(\.\d{2})?)/);
+        const amountMatch = command.match(/$?(\d+(\.\d{2})?)/);
         const amount = amountMatch ? parseFloat(amountMatch[1]) : 50;
         toolUsePayload = {
           name: "issue_refund",
@@ -6643,5 +6647,70 @@ async function generateAndSendLeaderboardDigest(env: Env): Promise<void> {
 
   } catch (err: any) {
     console.error("Error generating leaderboard digest:", err);
+  }
+}
+
+async function handleOnyxMemorySearch(request: Request, env: Env, ctx: any): Promise<Response> {
+  const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
+  const logCtx = createLogContext(request);
+
+  const authHeader = request.headers.get("Authorization") || "";
+  const token = authHeader.replace("Bearer ", "").trim();
+  if (!token) {
+    return new Response(JSON.stringify({ error: "UNAUTHORIZED_SEARCH" }), {
+      status: 401, headers: getCorsHeaders(env, request)
+    });
+  }
+
+  const supabaseAuth = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY, {
+    global: { headers: { Authorization: `Bearer ${token}` } }
+  });
+
+  const { data: { user }, error: authError } = await supabaseAuth.auth.getUser();
+  if (authError || !user) {
+    return new Response(JSON.stringify({ error: "INVALID_SESSION" }), {
+      status: 403, headers: getCorsHeaders(env, request)
+    });
+  }
+
+  try {
+    const url = new URL(request.url);
+    const query = url.searchParams.get("query");
+    const category = url.searchParams.get("category");
+    const authorId = url.searchParams.get("author_id");
+    const tenantId = user.app_metadata?.organization_id || "system";
+
+    let dbQuery = supabase
+      .from('memory_banks')
+      .select('id, title, content, created_at, metadata, tenant_id')
+      .eq('tenant_id', tenantId)
+      .limit(50);
+
+    if (query) {
+      dbQuery = dbQuery.ilike('content', `%${query}%`);
+    }
+
+    if (category && category !== 'All') {
+      dbQuery = dbQuery.eq('metadata->>category', category);
+    }
+
+    if (authorId) {
+      dbQuery = dbQuery.eq('metadata->>author_id', authorId);
+    }
+
+    const { data: memoryBanks, error: searchError } = await dbQuery;
+
+    if (searchError) throw searchError;
+
+    return new Response(JSON.stringify({ success: true, articles: memoryBanks }), {
+      status: 200,
+      headers: { "Content-Type": "application/json", ...getCorsHeaders(env, request) }
+    });
+
+  } catch (err: any) {
+    logErr(supabase, logCtx, err, ctx);
+    return new Response(JSON.stringify({ error: err.message }), {
+      status: 500, headers: getCorsHeaders(env, request)
+    });
   }
 }
