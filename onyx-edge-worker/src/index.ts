@@ -1058,6 +1058,11 @@ async function sendDailySystemProgressReport(env: Env): Promise<boolean> {
 export default {
 
   async scheduled(event: ScheduledEvent, env: Env, ctx: ExecutionContext): Promise<void> {
+
+    if (event.cron === "0 17 * * 5") {
+      ctx.waitUntil(generateAndSendLeaderboardDigest(env));
+    }
+
     if (event.cron === "0 10 * * *") {
       ctx.waitUntil(generateAndSendExecutiveDigest(env));
     }
@@ -3497,6 +3502,11 @@ ${notes}`,
     }
 
 
+
+
+    if (url.pathname === "/api/v1/analytics/leaderboard/dispatch" && request.method === "POST") {
+      return handleManualLeaderboardDispatch(request, env, ctx);
+    }
 
     if (url.pathname === "/api/v1/analytics/leaderboard" && request.method === "GET") {
       return handleLeaderboardAnalytics(request, env, ctx);
@@ -6452,5 +6462,186 @@ async function handleLeaderboardAnalytics(request: Request, env: Env, ctx: any):
     return new Response(JSON.stringify({ error: err.message }), {
       status: 500, headers: getCorsHeaders(env, request)
     });
+  }
+}
+
+
+async function handleManualLeaderboardDispatch(request: Request, env: Env, ctx: any): Promise<Response> {
+  const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
+  const logCtx = createLogContext(request);
+
+  const authHeader = request.headers.get("Authorization") || "";
+  const token = authHeader.replace("Bearer ", "").trim();
+  if (!token) {
+    return new Response(JSON.stringify({ error: "UNAUTHORIZED" }), {
+      status: 401, headers: getCorsHeaders(env, request)
+    });
+  }
+
+  const supabaseAuth = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY, {
+    global: { headers: { Authorization: `Bearer ${token}` } }
+  });
+
+  const { data: { user }, error: authError } = await supabaseAuth.auth.getUser();
+  if (authError || !user) {
+    return new Response(JSON.stringify({ error: "INVALID_SESSION" }), {
+      status: 403, headers: getCorsHeaders(env, request)
+    });
+  }
+
+  try {
+    // Check if user has admin/lead privileges based on metadata or team_profiles
+    const { data: profile } = await supabase.from('team_profiles').select('role').eq('id', user.id).single();
+    if (!profile || (profile.role !== 'admin' && profile.role !== 'lead')) {
+      return new Response(JSON.stringify({ error: "INSUFFICIENT_PERMISSIONS" }), {
+        status: 403, headers: getCorsHeaders(env, request)
+      });
+    }
+
+    await generateAndSendLeaderboardDigest(env);
+
+    return new Response(JSON.stringify({ success: true, message: "Leaderboard digest dispatched successfully" }), {
+      status: 200, headers: { "Content-Type": "application/json", ...getCorsHeaders(env, request) }
+    });
+  } catch (err: any) {
+    logErr(supabase, logCtx, err, ctx);
+    return new Response(JSON.stringify({ error: err.message }), {
+      status: 500, headers: getCorsHeaders(env, request)
+    });
+  }
+}
+
+async function generateAndSendLeaderboardDigest(env: Env): Promise<void> {
+  const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
+
+  try {
+    const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+
+    const { data: events, error: fetchError } = await supabase
+      .from('events_ax2024')
+      .select('type, payload')
+      .in('type', ['onyx_memory_bank_contributed', 'onyx_memory_renewed'])
+      .gte('timestamp', thirtyDaysAgo);
+
+    if (fetchError) throw fetchError;
+
+    const leaderboardMap = new Map<string, { id: string, email: string, score: number, contributions: number, renewals: number }>();
+
+    if (events) {
+      for (const ev of events) {
+        const payload = ev.payload as any;
+        const operatorId = payload?.author_id || payload?.operator_id;
+
+        if (!operatorId) continue;
+
+        if (!leaderboardMap.has(operatorId)) {
+          leaderboardMap.set(operatorId, {
+            id: operatorId,
+            email: "Operator_" + operatorId.slice(0, 4),
+            score: 0,
+            contributions: 0,
+            renewals: 0
+          });
+        }
+
+        const stats = leaderboardMap.get(operatorId)!;
+
+        if (ev.type === 'onyx_memory_bank_contributed') {
+          stats.contributions += 1;
+          stats.score += 5;
+        } else if (ev.type === 'onyx_memory_renewed') {
+          stats.renewals += 1;
+          stats.score += 2;
+        }
+      }
+    }
+
+    try {
+      const { data: usersData } = await supabase.auth.admin.listUsers();
+      if (usersData && usersData.users) {
+        for (const u of usersData.users) {
+          if (leaderboardMap.has(u.id)) {
+            leaderboardMap.get(u.id)!.email = u.email || u.id;
+          }
+        }
+      }
+    } catch (adminErr) {
+      console.warn("Could not fetch user emails from admin API", adminErr);
+    }
+
+    const sortedLeaderboard = Array.from(leaderboardMap.values())
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 10);
+
+    let tableHtml = `
+      <table style="width: 100%; border-collapse: collapse; margin-top: 20px; font-family: sans-serif;">
+        <thead>
+          <tr style="background-color: #f3f4f6; border-bottom: 2px solid #e5e7eb;">
+            <th style="padding: 12px; text-align: left; color: #374151;">Rank</th>
+            <th style="padding: 12px; text-align: left; color: #374151;">Operator</th>
+            <th style="padding: 12px; text-align: center; color: #374151;">Score</th>
+            <th style="padding: 12px; text-align: center; color: #374151;">Contributions</th>
+            <th style="padding: 12px; text-align: center; color: #374151;">Renewals</th>
+          </tr>
+        </thead>
+        <tbody>
+    `;
+
+    sortedLeaderboard.forEach((op, index) => {
+      tableHtml += `
+        <tr style="border-bottom: 1px solid #e5e7eb;">
+          <td style="padding: 12px; text-align: left; font-weight: bold; color: #111827;">#${index + 1}</td>
+          <td style="padding: 12px; text-align: left; color: #4b5563;">${op.email}</td>
+          <td style="padding: 12px; text-align: center; font-weight: bold; color: #4f46e5;">${op.score}</td>
+          <td style="padding: 12px; text-align: center; color: #4b5563;">${op.contributions}</td>
+          <td style="padding: 12px; text-align: center; color: #4b5563;">${op.renewals}</td>
+        </tr>
+      `;
+    });
+
+    tableHtml += `
+        </tbody>
+      </table>
+    `;
+
+    const htmlContent = `
+      <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto;">
+        <h2 style="color: #111827;">Weekly Operator Leaderboard Digest</h2>
+        <p style="color: #4b5563;">Here is the 30-day snapshot of operator contributions and memory renewals.</p>
+        ${tableHtml}
+        <p style="margin-top: 30px; font-size: 12px; color: #9ca3af;">Automated by AXiM Support System</p>
+      </div>
+    `;
+
+    const emailPayload = {
+      to: "james.ellars@axim.us.com",
+      from: "support@axim.us.com",
+      subject: "Weekly Leaderboard Digest",
+      html: htmlContent
+    };
+
+    const resendReq = await fetch('https://api.emailit.com/v1/emails', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${env.EMAILIT_API_KEY || 'dummy_key'}`
+      },
+      body: JSON.stringify(emailPayload)
+    });
+
+    if (!resendReq.ok) {
+      console.error("[EmailIt] Failed to dispatch leaderboard digest:", await resendReq.text());
+    }
+
+    await supabase.from("events_ax2024").insert({
+      type: "leaderboard_summary_dispatched",
+      payload: {
+        timestamp: new Date().toISOString(),
+        top_operator: sortedLeaderboard.length > 0 ? sortedLeaderboard[0].email : null
+      }
+    });
+
+  } catch (err: any) {
+    console.error("Error generating leaderboard digest:", err);
   }
 }

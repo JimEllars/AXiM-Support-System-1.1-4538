@@ -1,10 +1,64 @@
 import React, { useState, useEffect } from 'react';
-import { FiAward, FiStar, FiRefreshCw } from 'react-icons/fi';
+import { FiAward, FiStar, FiRefreshCw, FiMail } from 'react-icons/fi';
 import { supabase } from '../../lib/supabaseClient';
+import { useAuthStore } from '../../store/useAuthStore';
+import toast from 'react-hot-toast';
 
 export default function OperatorLeaderboard() {
   const [leaderboard, setLeaderboard] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
+  const [isDispatching, setIsDispatching] = useState(false);
+  const { user } = useAuthStore();
+  const [canDispatch, setCanDispatch] = useState(false);
+
+  useEffect(() => {
+    const checkRole = async () => {
+      if (user) {
+        const { data } = await supabase.from('team_profiles').select('role').eq('id', user.id).single();
+        if (data && (data.role === 'admin' || data.role === 'lead')) {
+          setCanDispatch(true);
+        }
+      }
+    };
+    checkRole();
+  }, [user]);
+
+  const handleManualDispatch = async () => {
+    setIsDispatching(true);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const token = session?.access_token;
+      if (!token) return;
+
+      const apiUrl = import.meta.env.VITE_ONYX_WORKER_URL || 'http://localhost:54321/functions/v1/onyx-bridge';
+      const res = await fetch(`${apiUrl}/api/v1/analytics/leaderboard/dispatch`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+      });
+
+      const result = await res.json();
+      if (res.ok) {
+        if (toast && toast.success) {
+          toast.success("Leaderboard email dispatched successfully");
+        } else {
+          // Fallback if toast isn't available
+          console.log("Leaderboard email dispatched successfully");
+        }
+      } else {
+        if (toast && toast.error) {
+          toast.error(result.error || "Failed to dispatch email");
+        }
+      }
+    } catch (err) {
+      console.error('Failed to dispatch leaderboard email:', err);
+      if (toast && toast.error) toast.error("Failed to dispatch email");
+    } finally {
+      setIsDispatching(false);
+    }
+  };
 
   useEffect(() => {
     const fetchLeaderboard = async () => {
@@ -43,7 +97,19 @@ export default function OperatorLeaderboard() {
         <h3 className="text-xs font-mono font-bold text-zinc-300 uppercase flex items-center gap-2">
           <FiAward className="text-indigo-400 text-sm" /> Operator Leaderboard
         </h3>
-        <span className="text-[10px] text-zinc-500 uppercase">30-Day Metrics</span>
+        <div className="flex items-center gap-2">
+          {canDispatch && (
+            <button
+              onClick={handleManualDispatch}
+              disabled={isDispatching}
+              title="Email Summary"
+              className="text-zinc-400 hover:text-indigo-400 disabled:opacity-50 transition-colors p-1"
+            >
+              <FiMail className={isDispatching ? 'animate-pulse' : ''} />
+            </button>
+          )}
+          <span className="text-[10px] text-zinc-500 uppercase">30-Day Metrics</span>
+        </div>
       </div>
 
       <div className="p-2 space-y-1 overflow-y-auto flex-1">

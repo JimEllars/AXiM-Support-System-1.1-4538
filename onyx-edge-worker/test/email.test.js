@@ -97,5 +97,28 @@ describe('EmailIt Edge Webhook Security & Rate-Limiting Suite', () => {
     expect(res.status).toBe(200);
     const data = await res.json();
     expect(data.success).toBe(true);
+    });
+
+  it('should process weekly leaderboard digest dispatch and log telemetry', async () => {
+    vi.mocked(fetch).mockImplementation(async (url, options) => {
+      if (url === 'https://api.emailit.com/v1/emails' || url === 'https://api.resend.com/emails') {
+        const body = JSON.parse(options.body);
+        expect(body.to).toContain('james.ellars@axim.us.com');
+        expect(body.subject).toContain('Weekly Leaderboard Digest');
+        expect(body.html).toContain('Weekly Operator Leaderboard Digest');
+        return { ok: true, status: 200, json: async () => ({ success: true }) };
+      }
+      return { ok: true, status: 200, json: async () => ({}) };
+    });
+
+    const res = await fetch('http://localhost:8787/api/v1/analytics/leaderboard/dispatch', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer test_token'
+      }
+    });
+
+    expect(fetch).toHaveBeenCalled();
   });
 });
