@@ -2824,7 +2824,7 @@ export default {
     }
 
     if (url.pathname === "/api/v1/webhooks/public-intake") {
-      return handlePublicWebIngress(request, env, ctx);
+      return handleWebhookIntake(request, env, ctx);
     }
 
     if (url.pathname === "/api/v1/webhooks/egress") {
@@ -5770,24 +5770,10 @@ async function handleMessageEgress(request: Request, env: Env, ctx: any): Promis
           finalBody += `\n\n---\nThis case has been marked as closed. How did we do? Please let us know by visiting: https://axim.us.com/feedback?ticket_id=${record.ticket_id}`;
         }
 
-        const emailPayload = {
-          from: env.RESEND_FROM_EMAIL || "support@axim.us.com",
-          to: contact.email,
-          subject: `Re: ${ticket.subject}`,
-          text: finalBody,
-        };
+        const emailSent = await sendEmailItNotification(contact.email, `Re: ${ticket.subject}`, finalBody.replace(/\n/g, "<br>"), env);
 
-        const resendRes = await fetch("https://api.resend.com/emails", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "Authorization": `Bearer ${env.RESEND_API_KEY}`,
-          },
-          body: JSON.stringify(emailPayload),
-        });
-
-        if (!resendRes.ok) {
-           const errText = await resendRes.text();
+        if (!emailSent) {
+           const errText = "EmailIt dispatch failed";
            console.error("Email dispatch failed:", errText);
            await supabase.from("events_ax2024").insert({
               type: "error",
@@ -6275,7 +6261,8 @@ async function dispatchSecureEgressWebhook(
     const res = await fetch(targetUrl, {
       method: "POST",
       headers,
-      body: bodyString
+      body: bodyString,
+      signal: AbortSignal.timeout(5000) // 5 seconds timeout
     });
 
     // Log outbound dispatch trace into central events table
@@ -6288,8 +6275,21 @@ async function dispatchSecureEgressWebhook(
         timestamp: new Date().toISOString()
       }
     });
+    if (!res.ok) {
+        throw new Error(`Webhook returned ${res.status}`);
+    }
   } catch (fetchErr: any) {
     console.error(`[EGRESS TRANSPORT DROP] Failed to reach destination ${targetUrl}:`, fetchErr.message);
+
+    // Log failure
+    await supabase.from("events_ax2024").insert({
+      type: "egress_webhook_failed",
+      payload: {
+        destination: targetUrl,
+        error: fetchErr.message,
+        timestamp: new Date().toISOString()
+      }
+    });
   }
 }
 
