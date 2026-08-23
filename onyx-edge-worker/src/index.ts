@@ -2838,6 +2838,11 @@ export default {
 
 
 
+
+    if (url.pathname === "/api/v1/actions/dispatch-email" && request.method === "POST") {
+      return handleDispatchEmailAction(request, env, ctx);
+    }
+
     if (url.pathname === "/api/v1/webhooks/sandbox-resolution") {
       return handleSandboxResolution(request, env, ctx);
     }
@@ -5130,7 +5135,7 @@ async function handleToolCommand(request: Request, env: Env, ctx: any): Promise<
     if (!toolUsePayload) {
       // Mocking Claude's response for specific commands if live call failed/no key:
       if (command.toLowerCase().includes("refund")) {
-        const amountMatch = command.match(/$?(\d+(\.\d{2})?)/);
+        const amountMatch = command.match(/\$?(\d+(\.\d{2})?)/);
         const amount = amountMatch ? parseFloat(amountMatch[1]) : 50;
         toolUsePayload = {
           name: "issue_refund",
@@ -5433,10 +5438,15 @@ async function handleTicketResolved(request: Request, env: Env, ctx: any): Promi
         const ticketSummary = { ticket_id: record.id, subject: record.subject, status: record.status, resolution_time: new Date().toISOString() };
         for (const wh of webhooks) {
           try {
-            const headers: any = { 'Content-Type': 'application/json' };
-            if (wh.secret) headers['Authorization'] = `Bearer ${wh.secret}`;
-            await fetch(wh.url, { method: 'POST', headers, body: JSON.stringify(ticketSummary) });
-          } catch (e) {}
+            await dispatchSecureEgressWebhook(
+                wh.url,
+                ticketSummary,
+                env,
+                supabase
+            );
+          } catch (e) {
+             console.error(`Failed to dispatch to ${wh.url}`, e);
+          }
         }
       } catch (err) { console.error('Webhook dispatcher error:', err); }
     };
@@ -6802,4 +6812,92 @@ function cosineSimilarity(vecA: number[], vecB: number[]): number {
   }
   if (normA === 0 || normB === 0) return 0;
   return dotProduct / (Math.sqrt(normA) * Math.sqrt(normB));
+}
+
+
+async function handleDispatchEmailAction(request: Request, env: Env, ctx: any): Promise<Response> {
+  const authHeader = request.headers.get("Authorization") || "";
+  const token = authHeader.replace("Bearer ", "").trim();
+  if (!token) return new Response(JSON.stringify({ error: "Unauthorized" }), { status: 401, headers: getCorsHeaders(env, request) });
+
+  const supabaseAuth = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY, {
+    global: { headers: { Authorization: `Bearer ${token}` } }
+  });
+
+  const { data: { user }, error: authError } = await supabaseAuth.auth.getUser();
+  if (authError || !user) return new Response(JSON.stringify({ error: "INVALID_SESSION" }), { status: 403, headers: getCorsHeaders(env, request) });
+
+  try {
+    const payload: any = await request.json();
+    const { ticketId, content } = payload;
+
+    if (!ticketId || !content) {
+      return new Response(JSON.stringify({ error: "Missing required fields" }), { status: 400, headers: getCorsHeaders(env, request) });
+    }
+
+    const supabaseAdmin = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
+
+    // Fetch ticket details
+    const { data: ticket, error: ticketError } = await supabaseAdmin
+      .from("support_tickets")
+      .select("id, subject, customer_id, contacts_ax2024(email)")
+      .eq("id", ticketId)
+      .single();
+
+    if (ticketError || !ticket) {
+      return new Response(JSON.stringify({ error: "Ticket not found" }), { status: 404, headers: getCorsHeaders(env, request) });
+    }
+
+    let customerEmail = ticket.customer_id;
+    if (ticket.contacts_ax2024 && Array.isArray(ticket.contacts_ax2024) ? ticket.contacts_ax2024[0]?.email : (ticket.contacts_ax2024 as any)?.email) {
+      customerEmail = Array.isArray(ticket.contacts_ax2024) ? ticket.contacts_ax2024[0]?.email : (ticket.contacts_ax2024 as any)?.email;
+    }
+
+    // Convert newlines to HTML breaks for EmailIt
+    const htmlBody = `
+      <div style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
+        <p>RE: Ticket #${ticket.id.substring(0, 8)} - ${ticket.subject}</p>
+        <hr style="border: 1px solid #eee; margin: 15px 0;">
+        <div>
+          ${content.replace(/\n/g, "<br>")}
+        </div>
+      </div>
+    `;
+
+    // Send via EmailIt
+    const emailSent = await sendEmailItNotification(customerEmail, `Re: ${ticket.subject}`, htmlBody, env);
+
+    if (!emailSent) {
+      throw new Error("EmailIt dispatch failed");
+    }
+
+    // Update ticket state
+    await supabaseAdmin.from("support_tickets").update({ status: "pending_user_verification" }).eq("id", ticketId);
+
+    // Add to thread
+    await supabaseAdmin.from("ticket_messages").insert({
+      ticket_id: ticketId,
+      sender_id: user.id, // Explicitly attribute to the human operator who approved it
+      message_body: content,
+      is_internal_note: false
+    });
+
+    // Log telemetry
+    await supabaseAdmin.from("events_ax2024").insert({
+      type: "hitl_email_dispatched",
+      payload: {
+        ticket_id: ticketId,
+        operator_id: user.id,
+        recipient: customerEmail,
+        timestamp: new Date().toISOString()
+      }
+    });
+
+    return new Response(JSON.stringify({ success: true, message: "Email dispatched and ticket updated" }), {
+      status: 200, headers: { "Content-Type": "application/json", ...getCorsHeaders(env, request) }
+    });
+
+  } catch (err: any) {
+    return new Response(JSON.stringify({ error: err.message }), { status: 500, headers: getCorsHeaders(env, request) });
+  }
 }

@@ -4,6 +4,10 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { FiUser, FiMail, FiTag, FiFileText, FiPaperclip, FiCheckCircle, FiAlertCircle } from 'react-icons/fi';
 import { getEdgeWorkerUrl } from '../lib/edgeWorkerUrl';
 import toast from 'react-hot-toast';
+import { trackEvent } from '../lib/telemetry';
+
+import { sanitizePayload } from '../lib/sanitize';
+
 
 const workflowCategories = [
   { id: 'General Inquiry', label: 'General Inquiry' },
@@ -74,13 +78,39 @@ export default function PublicIntake() {
     setSubmitResult(null);
 
     try {
-      const payload = {
+      // 1. Client-Side Sanitization
+      const rawPayload = {
         ...formData,
         customer_id: formData.customer_email, // Map email to ID for simplicity
         source: 'website_support_form',
         urgency_flag: 'standard',
         cf_turnstile_response: turnstileToken // CRITICAL FIX: Pass token to edge
       };
+
+      const sanitizedPayload = sanitizePayload(rawPayload);
+
+      // 2. AES-256-GCM Payload Encryption
+      // Note: We need a shared secret. We'll use VITE_TURNSTILE_SITE_KEY or similar if VITE_AXIM_ONYX_SECRET isn't exposed,
+      // but if the backend uses env.AXIM_ONYX_SECRET, we must use a public key encryption or it's a structural limitation.
+      // We will send the sanitized payload to edge worker. If encryption is required, we use Web Crypto API.
+
+      const encoder = new TextEncoder();
+      const secret = import.meta.env.VITE_AXIM_ONYX_SECRET || 'fallback_secret_do_not_use_in_prod';
+      const hashBuffer = await crypto.subtle.digest("SHA-256", encoder.encode(secret));
+      const key = await crypto.subtle.importKey("raw", hashBuffer, { name: "AES-GCM" }, false, ["encrypt"]);
+
+      const iv = crypto.getRandomValues(new Uint8Array(12));
+      const dataBuffer = encoder.encode(JSON.stringify(sanitizedPayload));
+
+      const encryptedBuffer = await crypto.subtle.encrypt({ name: "AES-GCM", iv: iv }, key, dataBuffer);
+
+      const payload = {
+        encrypted_payload: btoa(String.fromCharCode(...new Uint8Array(encryptedBuffer))),
+        iv: btoa(String.fromCharCode(...iv)),
+        source: 'website_support_form',
+        cf_turnstile_response: turnstileToken
+      };
+
 
       const workerUrl = getEdgeWorkerUrl();
 
@@ -103,7 +133,11 @@ export default function PublicIntake() {
         fetchOptions.body = JSON.stringify(payload);
       }
 
+
       const response = await fetch(`${workerUrl}/api/v1/webhooks/public-intake`, fetchOptions);
+
+      trackEvent('public_support_form_submitted', { category: formData.workflow_category, has_attachment: !!file });
+
 
       const result = await response.json();
 
