@@ -3898,7 +3898,17 @@ async function handlePublicWebIngress(request: Request, env: Env, ctx: any): Pro
     return new Response(JSON.stringify({ error: "Forbidden: Invalid Origin" }), { status: 403, headers: getCorsHeaders(env, request) });
   }
 
+
+  const clientIP = request.headers.get("CF-Connecting-IP") || "unknown";
+  const isAllowed = await checkRateLimit(clientIP, 5, env);
+  if (!isAllowed) {
+    return new Response(JSON.stringify({ error: "Rate limit exceeded. Request throttled by Cloudflare KV." }), {
+      status: 429, headers: { "Content-Type": "application/json", ...getCorsHeaders(env, request) }
+    });
+  }
+
   let decryptedPayload: any = null;
+
   let pendingAttachmentFile: any = null;
   const contentType = request.headers.get("content-type") || "";
 
@@ -4012,7 +4022,7 @@ async function handlePublicWebIngress(request: Request, env: Env, ctx: any): Pro
             };
 
             await supabaseAdmin.from("events_ax2024").insert({
-              type: "turnstile_verification_failed",
+              type: "intake_spam_blocked",
               payload: JSON.parse(JSON.stringify(flatThreatPayload)) // Enforce structural clean copy serialization
             });
           } catch (e) { /* background failsafe block pass */ }
