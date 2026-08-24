@@ -11,6 +11,7 @@ import DLQPayloadEditorModal from './modals/DLQPayloadEditorModal';
 
 export default function DashboardQuickActions() {
   const [isSendingDigest, setIsSendingDigest] = useState(false);
+  const [isSendingHandover, setIsSendingHandover] = useState(false);
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
   const [isBroadcastOpen, setIsBroadcastOpen] = useState(false);
   const [isDlqOpen, setIsDlqOpen] = useState(false);
@@ -157,6 +158,16 @@ export default function DashboardQuickActions() {
 
         {isPrivileged && (
           <>
+            <button
+              onClick={handleSendShiftHandover}
+              disabled={isSendingHandover}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-[11px] font-bold uppercase text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 hover:bg-emerald-500/20 transition-all disabled:opacity-50"
+              title="Generate Shift Report"
+            >
+              <FiMail className={isSendingHandover ? 'animate-spin' : ''}/>
+              <span>{isSendingHandover ? 'Generating...' : 'Generate Shift Report'}</span>
+            </button>
+
             <button
               onClick={() => setIsDlqOpen(true)}
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-[11px] font-bold uppercase text-rose-400 bg-rose-500/10 border border-rose-500/20 hover:bg-rose-500/20 transition-all"
