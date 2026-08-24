@@ -5445,7 +5445,12 @@ async function handleTicketResolved(request: Request, env: Env, ctx: any): Promi
         const { data: webhooks } = await supabase.from('tenant_webhooks').select('url, secret').eq('tenant_id', tenantId);
         if (!webhooks || webhooks.length === 0) return;
 
-        const ticketSummary = { ticket_id: record.id, subject: record.subject, status: record.status, resolution_time: new Date().toISOString() };
+        const firmographics = {
+          company_tier: record.metadata?.company_tier || "Unassigned",
+          lifetime_value_ltv: record.metadata?.lifetime_value_ltv || null,
+          account_owner: record.metadata?.account_owner || "Unassigned"
+        };
+        const ticketSummary = { ticket_id: record.id, subject: record.subject, status: record.status, resolution_time: new Date().toISOString(), firmographics };
         for (const wh of webhooks) {
           try {
             await dispatchSecureEgressWebhook(
@@ -5908,7 +5913,12 @@ async function handleSandboxResolution(request: Request, env: Env, ctx: any): Pr
           if (!tenantId) return;
           const { data: webhooks } = await supabase.from('tenant_webhooks').select('url, secret').eq('tenant_id', tenantId);
           if (webhooks && webhooks.length > 0) {
-            const webhookPayload = { ticket_id, subject: ticket.subject, status: ticket.status };
+            const firmographics = {
+              company_tier: ticket.metadata?.company_tier || "Unassigned",
+              lifetime_value_ltv: ticket.metadata?.lifetime_value_ltv || null,
+              account_owner: ticket.metadata?.account_owner || "Unassigned"
+            };
+            const webhookPayload = { ticket_id, subject: ticket.subject, status: ticket.status, firmographics };
             for (const wh of webhooks) {
               const headers: any = { 'Content-Type': 'application/json' };
               if (wh.secret) headers['Authorization'] = `Bearer ${wh.secret}`;
