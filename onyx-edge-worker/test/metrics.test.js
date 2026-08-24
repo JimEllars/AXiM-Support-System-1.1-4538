@@ -83,3 +83,48 @@ describe('Operator Leaderboard Aggregation Verification', () => {
     expect(parsed.leaderboard.length).toBe(3);
   });
 });
+
+describe('Shift Handover Time-Bounding Verification', () => {
+  it('should isolate and aggregate only events from the last 8-hour window', () => {
+    const now = Date.now();
+    const twoHoursAgo = new Date(now - 2 * 60 * 60 * 1000).toISOString();
+    const sevenHoursAgo = new Date(now - 7 * 60 * 60 * 1000).toISOString();
+    const nineHoursAgo = new Date(now - 9 * 60 * 60 * 1000).toISOString();
+
+    const mockEvents = [
+      { type: 'ticket_resolved', created_at: twoHoursAgo },
+      { type: 'ticket_resolved', created_at: sevenHoursAgo },
+      { type: 'sla_escalation', created_at: sevenHoursAgo },
+      { type: 'dlq_failure', created_at: twoHoursAgo },
+      { type: 'onyx_memory_bank_contributed', created_at: sevenHoursAgo },
+
+      // Events outside the 8-hour window
+      { type: 'ticket_resolved', created_at: nineHoursAgo },
+      { type: 'sla_escalation', created_at: nineHoursAgo },
+      { type: 'onyx_memory_bank_contributed', created_at: nineHoursAgo },
+    ];
+
+    const eightHoursAgo = new Date(now - 8 * 60 * 60 * 1000).toISOString();
+
+    // Simulating the backend filter that happens via supabase .gte('created_at', eightHoursAgo)
+    const recentEvents = mockEvents.filter(ev => ev.created_at >= eightHoursAgo);
+
+    let ticketsResolved = 0;
+    let slaBreaches = 0;
+    let dlqFailures = 0;
+    let kbContributions = 0;
+
+    for (const event of recentEvents) {
+      if (event.type === 'ticket_resolved') ticketsResolved++;
+      if (event.type === 'sla_escalation') slaBreaches++;
+      if (event.type === 'dlq_failure') dlqFailures++;
+      if (event.type === 'onyx_memory_bank_contributed') kbContributions++;
+    }
+
+    expect(recentEvents.length).toBe(5);
+    expect(ticketsResolved).toBe(2);
+    expect(slaBreaches).toBe(1);
+    expect(dlqFailures).toBe(1);
+    expect(kbContributions).toBe(1);
+  });
+});

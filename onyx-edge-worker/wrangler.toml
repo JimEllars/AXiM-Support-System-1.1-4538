@@ -22,7 +22,7 @@ SUPABASE_URL = "https://your-supabase-project.supabase.co"
 
 # 10:00 AM UTC executes at 4:00 AM CST / 5:00 AM CDT (Guarantees delivery before 5 AM CST)
 [triggers]
-crons = ["0 0 * * *", "*/15 * * * *", "0 10 * * *", "0 17 * * 5"] # Daily digest, 15-minute SLA sweeps, and 10:00 AM UTC executes at 4:00 AM CST / 5:00 AM CDT
+crons = ["0 0 * * *", "*/15 * * * *", "0 10 * * *", "0 17 * * 5", "0 */8 * * *"] # Daily digest, 15-minute SLA sweeps, 10:00 AM UTC, 17:00 Friday, 8-hour shift handover
 
 # --- KV NAMESPACE BINDINGS ---
 
