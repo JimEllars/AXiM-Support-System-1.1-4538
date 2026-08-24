@@ -86,7 +86,39 @@ export default function DashboardQuickActions() {
     }
   };
 
-  const handleSendDigest = async () => {
+
+  const handleSendShiftHandover = async () => {
+    if (isSendingHandover) return;
+    setIsSendingHandover(true);
+
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const token = session?.access_token;
+      if (!token) throw new Error("Active session required.");
+
+      const workerUrl = getEdgeWorkerUrl();
+      const res = await fetch(`${workerUrl}/api/v1/analytics/handover/dispatch`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${token}`
+        }
+      });
+
+      const data = await res.json();
+      if (!res.ok || !data.success) throw new Error(data.error || "Failed to dispatch shift handover.");
+
+      toast.success("Shift Handover Report generated and sent!", {
+        style: { background: "#09090b", color: "#10b981", border: "1px solid rgba(16,185,129,0.3)" }
+      });
+    } catch (err) {
+      toast.error(`Handover Dispatch Error: ${err.message}`);
+    } finally {
+      setIsSendingHandover(false);
+    }
+  };
+
+const handleSendDigest = async () => {
     if (isSendingDigest) return;
     setIsSendingDigest(true);
 

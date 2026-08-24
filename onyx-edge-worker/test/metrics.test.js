@@ -92,22 +92,22 @@ describe('Shift Handover Time-Bounding Verification', () => {
     const nineHoursAgo = new Date(now - 9 * 60 * 60 * 1000).toISOString();
 
     const mockEvents = [
-      { type: 'ticket_resolved', created_at: twoHoursAgo },
-      { type: 'ticket_resolved', created_at: sevenHoursAgo },
-      { type: 'sla_escalation', created_at: sevenHoursAgo },
-      { type: 'dlq_failure', created_at: twoHoursAgo },
-      { type: 'onyx_memory_bank_contributed', created_at: sevenHoursAgo },
+      { type: 'ticket_resolved', timestamp: twoHoursAgo },
+      { type: 'ticket_resolved', timestamp: sevenHoursAgo },
+      { type: 'sla_escalation', timestamp: sevenHoursAgo },
+      { type: 'dlq_failure', timestamp: twoHoursAgo },
+      { type: 'onyx_memory_bank_contributed', timestamp: sevenHoursAgo },
 
       // Events outside the 8-hour window
-      { type: 'ticket_resolved', created_at: nineHoursAgo },
-      { type: 'sla_escalation', created_at: nineHoursAgo },
-      { type: 'onyx_memory_bank_contributed', created_at: nineHoursAgo },
+      { type: 'ticket_resolved', timestamp: nineHoursAgo },
+      { type: 'sla_escalation', timestamp: nineHoursAgo },
+      { type: 'onyx_memory_bank_contributed', timestamp: nineHoursAgo },
     ];
 
     const eightHoursAgo = new Date(now - 8 * 60 * 60 * 1000).toISOString();
 
-    // Simulating the backend filter that happens via supabase .gte('created_at', eightHoursAgo)
-    const recentEvents = mockEvents.filter(ev => ev.created_at >= eightHoursAgo);
+    // Simulating the backend filter that happens via supabase .gte('timestamp', eightHoursAgo)
+    const recentEvents = mockEvents.filter(ev => ev.timestamp >= eightHoursAgo);
 
     let ticketsResolved = 0;
     let slaBreaches = 0;

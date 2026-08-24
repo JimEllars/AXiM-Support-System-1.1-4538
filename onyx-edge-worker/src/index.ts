@@ -6955,7 +6955,7 @@ async function generateAndSendShiftHandover(env: Env) {
     const { data: recentEvents, error: eventsError } = await supabase
       .from('events_ax2024')
       .select('*')
-      .gte('created_at', eightHoursAgo);
+      .gte('timestamp', eightHoursAgo);
 
     if (eventsError) throw eventsError;
 
