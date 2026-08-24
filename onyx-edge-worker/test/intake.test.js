@@ -77,7 +77,29 @@ describe('Onyx Edge Worker - Public Intake Validation', () => {
     });
     expect(res.status).toBe(200);
   });
+
+  it('should reject a burst of 6 rapid intake requests from the same IP with a 429 error', async () => {
+    vi.mocked(fetch).mockResolvedValue({
+      status: 429,
+      json: async () => ({ error: 'Rate limit exceeded. Request throttled by Cloudflare KV.' })
+    });
+
+    // Simulate 6th request
+    const res = await fetch('http://localhost:8787/api/v1/webhooks/public-intake', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'CF-Connecting-IP': '192.168.1.100'
+      },
+      body: JSON.stringify({ encrypted_payload: 'test', iv: 'test', cf_turnstile_response: 'valid-token' })
+    });
+
+    expect(res.status).toBe(429);
+    const data = await res.json();
+    expect(data.error).toContain('Rate limit exceeded');
+  });
 });
+
 
   it('should trigger ingestion executive email dispatch and log support_ticket_ingested_and_notified event', async () => {
     vi.mocked(fetch).mockResolvedValueOnce({ status: 200, json: async () => ({ success: true, ticket_id: "test-ticket" }) });
