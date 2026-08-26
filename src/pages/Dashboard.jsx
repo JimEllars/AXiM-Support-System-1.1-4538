@@ -4,6 +4,7 @@ import TicketList from '../components/TicketList';
 import TicketDetail from './TicketDetail';
 import SupportMetrics from '../components/analytics/SupportMetrics';
 import OperatorLeaderboard from '../components/analytics/OperatorLeaderboard';
+import LiveChatPanel from '../components/chat/LiveChatPanel';
 
 import DashboardQuickActions from '../components/DashboardQuickActions';
 import { FiRadio } from 'react-icons/fi';
@@ -67,6 +68,9 @@ export default function Dashboard() {
           )}
         </div>
       </div>
+
+      {/* Realtime Chat Overlay */}
+      <LiveChatPanel />
     </div>
   );
 }

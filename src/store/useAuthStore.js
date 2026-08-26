@@ -6,6 +6,9 @@ export const useAuthStore = create((set) => ({
   session: null,
   activeOrganization: null, // NEW
   isAuthenticated: false,
+  isChatOnline: false,
+
+  setChatOnline: (status) => set({ isChatOnline: status }),
 
   setSession: async (session) => {
     if (!session) {
@@ -84,6 +87,6 @@ export const useAuthStore = create((set) => ({
 
   logout: async () => {
     await supabase.auth.signOut();
-    set({ user: null, session: null, activeOrganization: null, isAuthenticated: false });
+    set({ user: null, session: null, activeOrganization: null, isAuthenticated: false, isChatOnline: false });
   }
 }));

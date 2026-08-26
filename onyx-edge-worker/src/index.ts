@@ -3546,6 +3546,10 @@ ${notes}`,
       return handleLeaderboardAnalytics(request, env, ctx);
     }
 
+    if (url.pathname === "/api/v1/chat/connect") {
+      return handleChatConnect(request, env);
+    }
+
     if (url.pathname === "/health" || url.pathname === "/api/v1/health") {
       return handleHealthCheck(env, request, ctx);
     }
@@ -7000,4 +7004,50 @@ async function generateAndSendShiftHandover(env: Env) {
   } catch (err) {
     console.error("Error generating shift handover:", err);
   }
+}
+
+// --- Live Chat WebSocket Handler ---
+
+function handleChatConnect(request: Request, env: Env): Response {
+  if (request.headers.get("Upgrade") !== "websocket") {
+    return new Response("Expected WebSocket", { status: 426 });
+  }
+
+  // @ts-ignore - Cloudflare Workers specific API
+  const { 0: client, 1: server } = new WebSocketPair();
+
+  server.accept();
+
+  server.addEventListener("message", (event) => {
+    try {
+      const data = typeof event.data === 'string' ? JSON.parse(event.data) : null;
+      if (data && data.type === "ping") {
+        server.send(JSON.stringify({ type: "pong", timestamp: Date.now() }));
+      } else if (data && data.type === "chat_message") {
+         // Echo back for now or broadcast to other clients in a real implementation
+         // server.send(JSON.stringify(data));
+      }
+    } catch (e) {
+      console.error("WebSocket message parse error:", e);
+    }
+  });
+
+  server.addEventListener("close", () => {
+    console.log("WebSocket client disconnected");
+  });
+
+  server.addEventListener("error", (error) => {
+    console.error("WebSocket error:", error);
+  });
+
+  // Send initial connection establishment payload
+  server.send(JSON.stringify({
+    type: "connection_established",
+    timestamp: Date.now()
+  }));
+
+  return new Response(null, {
+    status: 101,
+    webSocket: client
+  });
 }
