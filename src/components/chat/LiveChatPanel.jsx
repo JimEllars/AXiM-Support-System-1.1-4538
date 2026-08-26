@@ -1,0 +1,279 @@
+import React, { useState, useEffect, useRef } from 'react';
+import { FiX, FiSend, FiMinimize2, FiMaximize2, FiMessageCircle } from 'react-icons/fi';
+import { useAuthStore } from '../../store/useAuthStore';
+import { getEdgeWorkerUrl } from '../../lib/edgeWorkerUrl';
+import toast from 'react-hot-toast';
+
+export default function LiveChatPanel() {
+  const { isChatOnline, user } = useAuthStore();
+  const [isExpanded, setIsExpanded] = useState(false);
+  const [messages, setMessages] = useState([]);
+  const [inputValue, setInputValue] = useState('');
+  const [isConnected, setIsConnected] = useState(false);
+
+  const wsRef = useRef(null);
+  const messagesEndRef = useRef(null);
+
+  const scrollToBottom = () => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  };
+
+  useEffect(() => {
+    if (isChatOnline) {
+       connectWebSocket();
+    } else {
+       disconnectWebSocket();
+       setMessages([]);
+       setIsExpanded(false);
+    }
+
+    return () => {
+      disconnectWebSocket();
+    };
+  }, [isChatOnline]);
+
+  useEffect(() => {
+    if (isExpanded) {
+       scrollToBottom();
+    }
+  }, [messages, isExpanded]);
+
+  const connectWebSocket = () => {
+    if (wsRef.current) return;
+
+    // Connect to edge worker
+    const wsUrl = getEdgeWorkerUrl().replace('http', 'ws') + '/api/v1/chat/connect';
+
+    try {
+      const ws = new WebSocket(wsUrl);
+
+      ws.onopen = () => {
+        setIsConnected(true);
+        console.log('[LiveChat] Connected to WebSocket');
+      };
+
+      ws.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data);
+
+          if (data.type === 'connection_established') {
+             toast.success('Live Chat connection established.', {
+                style: { background: '#09090b', color: '#10b981', border: '1px solid rgba(16,185,129,0.3)' }
+             });
+             setMessages(prev => [...prev, {
+                id: 'system-' + Date.now(),
+                sender: 'System',
+                text: 'Connection established. Waiting for incoming customer queries...',
+                timestamp: new Date().toISOString(),
+                isSystem: true
+             }]);
+          } else if (data.type === 'chat_message') {
+             setMessages(prev => [...prev, {
+                id: data.id || 'msg-' + Date.now(),
+                sender: data.sender || 'Customer',
+                text: data.text,
+                timestamp: data.timestamp || new Date().toISOString(),
+                isSystem: false,
+                isIncoming: true
+             }]);
+             if (!isExpanded) {
+               setIsExpanded(true);
+               toast('New live chat message received!', {
+                 icon: '💬',
+                 style: { background: '#09090b', color: '#60a5fa', border: '1px solid rgba(96,165,250,0.3)' }
+               });
+             }
+          } else if (data.type === 'pong') {
+             // Keep-alive heartbeat received
+          }
+        } catch (e) {
+          console.error('[LiveChat] Error parsing message:', e);
+        }
+      };
+
+      ws.onclose = () => {
+        setIsConnected(false);
+        wsRef.current = null;
+        console.log('[LiveChat] WebSocket disconnected');
+
+        // Auto-reconnect if we should be online
+        if (useAuthStore.getState().isChatOnline) {
+          setTimeout(() => {
+            console.log('[LiveChat] Attempting to reconnect...');
+            connectWebSocket();
+          }, 3000);
+        }
+      };
+
+      ws.onerror = (error) => {
+        console.error('[LiveChat] WebSocket error:', error);
+      };
+
+      wsRef.current = ws;
+
+      // Keep-alive interval
+      const pingInterval = setInterval(() => {
+         if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+            wsRef.current.send(JSON.stringify({ type: 'ping' }));
+         } else {
+            clearInterval(pingInterval);
+         }
+      }, 25000);
+
+    } catch (err) {
+      console.error('[LiveChat] Failed to create WebSocket connection:', err);
+    }
+  };
+
+  const disconnectWebSocket = () => {
+    if (wsRef.current) {
+      wsRef.current.close();
+      wsRef.current = null;
+      setIsConnected(false);
+    }
+  };
+
+  const handleSendMessage = (e) => {
+    e.preventDefault();
+    if (!inputValue.trim() || !isConnected) return;
+
+    const newMessage = {
+      type: 'chat_message',
+      text: inputValue.trim(),
+      sender: user?.email || 'Operator',
+      timestamp: new Date().toISOString()
+    };
+
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+       wsRef.current.send(JSON.stringify(newMessage));
+
+       setMessages(prev => [...prev, {
+          id: 'local-' + Date.now(),
+          sender: newMessage.sender,
+          text: newMessage.text,
+          timestamp: newMessage.timestamp,
+          isSystem: false,
+          isIncoming: false
+       }]);
+
+       setInputValue('');
+    } else {
+       toast.error("Not connected to chat server.");
+    }
+  };
+
+  if (!isChatOnline) return null;
+
+  if (!isExpanded) {
+    return (
+      <div
+        className="fixed bottom-6 right-6 z-50 animate-bounce"
+        style={{ animationDuration: '3s' }}
+      >
+        <button
+          onClick={() => setIsExpanded(true)}
+          className="flex items-center gap-3 px-5 py-3 rounded-full bg-indigo-600 hover:bg-indigo-500 text-white shadow-lg border border-indigo-400/30 transition-all group"
+        >
+          <div className="relative">
+             <FiMessageCircle className="text-xl" />
+             <div className="absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full bg-emerald-400 border border-indigo-600 animate-ping"></div>
+             <div className="absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full bg-emerald-400 border border-indigo-600"></div>
+          </div>
+          <span className="font-mono font-bold text-sm tracking-wide">Live Chat {messages.length > 0 ? `(${messages.length})` : 'Active'}</span>
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="fixed bottom-0 right-6 z-50 w-96 flex flex-col shadow-2xl rounded-t-2xl bg-zinc-950 border border-zinc-800 transition-all duration-300 transform origin-bottom" style={{ height: '500px' }}>
+
+      {/* Header */}
+      <div className="flex items-center justify-between px-4 py-3 bg-zinc-900 border-b border-zinc-800 rounded-t-2xl">
+        <div className="flex items-center gap-2">
+          <div className={`w-2 h-2 rounded-full ${isConnected ? 'bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.6)]' : 'bg-rose-500'}`}></div>
+          <span className="font-mono font-bold text-xs uppercase text-zinc-200 tracking-wider">
+            Live Comms {isConnected ? '' : '(Reconnecting)'}
+          </span>
+        </div>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setIsExpanded(false)}
+            className="p-1.5 rounded-md text-zinc-400 hover:bg-zinc-800 hover:text-white transition-colors"
+          >
+            <FiMinimize2 size={14} />
+          </button>
+        </div>
+      </div>
+
+      {/* Messages Area */}
+      <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-zinc-950/50">
+        {messages.length === 0 ? (
+          <div className="h-full flex flex-col items-center justify-center text-zinc-500 font-mono text-xs text-center space-y-2">
+             <FiMessageCircle size={24} className="text-zinc-700" />
+             <p>Connection active.<br/>Waiting for incoming sessions...</p>
+          </div>
+        ) : (
+          messages.map((msg, i) => (
+            <div
+              key={msg.id || i}
+              className={`flex flex-col ${msg.isSystem ? 'items-center' : msg.isIncoming ? 'items-start' : 'items-end'} animate-in fade-in slide-in-from-bottom-2 duration-300`}
+            >
+              {msg.isSystem ? (
+                 <div className="px-3 py-1 rounded-full bg-zinc-900 border border-zinc-800 text-[10px] text-zinc-400 font-mono text-center my-2">
+                   {msg.text}
+                 </div>
+              ) : (
+                <div className={`max-w-[85%] rounded-2xl p-3 ${
+                  msg.isIncoming
+                    ? 'bg-zinc-800 text-zinc-200 rounded-tl-sm'
+                    : 'bg-indigo-600 text-white rounded-tr-sm'
+                }`}>
+                  <div className="text-[10px] font-mono opacity-60 mb-1 flex justify-between">
+                    <span>{msg.isIncoming ? 'Customer' : 'You'}</span>
+                    <span>{new Date(msg.timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</span>
+                  </div>
+                  <div className="text-sm font-sans whitespace-pre-wrap break-words leading-snug">
+                    {msg.text}
+                  </div>
+                </div>
+              )}
+            </div>
+          ))
+        )}
+        <div ref={messagesEndRef} />
+      </div>
+
+      {/* Input Area */}
+      <div className="p-3 bg-zinc-900 border-t border-zinc-800">
+        <form onSubmit={handleSendMessage} className="flex items-end gap-2">
+          <textarea
+            value={inputValue}
+            onChange={(e) => setInputValue(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                handleSendMessage(e);
+              }
+            }}
+            placeholder={isConnected ? "Type a message..." : "Reconnecting..."}
+            disabled={!isConnected}
+            className="flex-1 max-h-32 min-h-[40px] bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-sm text-zinc-200 placeholder-zinc-500 focus:outline-none focus:border-indigo-500 transition-colors resize-none font-sans disabled:opacity-50"
+            rows={1}
+          />
+          <button
+            type="submit"
+            disabled={!inputValue.trim() || !isConnected}
+            className="p-2.5 rounded-xl bg-indigo-600 text-white hover:bg-indigo-500 disabled:opacity-50 disabled:hover:bg-indigo-600 transition-colors flex-shrink-0 flex items-center justify-center"
+          >
+            <FiSend size={16} />
+          </button>
+        </form>
+        <div className="mt-1 text-[9px] text-zinc-500 text-center font-mono">
+           Powered by AXiM Edge Realtime
+        </div>
+      </div>
+
+    </div>
+  );
+}
