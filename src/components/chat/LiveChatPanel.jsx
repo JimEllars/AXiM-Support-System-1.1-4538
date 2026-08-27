@@ -10,6 +10,7 @@ export default function LiveChatPanel() {
   const [messages, setMessages] = useState([]);
   const [inputValue, setInputValue] = useState('');
   const [isConnected, setIsConnected] = useState(false);
+  const [aiSuggestion, setAiSuggestion] = useState(null);
 
   const wsRef = useRef(null);
   const messagesEndRef = useRef(null);
@@ -83,6 +84,9 @@ export default function LiveChatPanel() {
                  style: { background: '#09090b', color: '#60a5fa', border: '1px solid rgba(96,165,250,0.3)' }
                });
              }
+          } else if (data.type === 'ai_suggestion') {
+             setAiSuggestion(data.text);
+             toast('AI Suggestion Available', { icon: '🤖', style: { background: '#09090b', color: '#a78bfa', border: '1px solid rgba(167,139,250,0.3)' } });
           } else if (data.type === 'pong') {
              // Keep-alive heartbeat received
           }
@@ -124,6 +128,43 @@ export default function LiveChatPanel() {
       console.error('[LiveChat] Failed to create WebSocket connection:', err);
     }
   };
+
+
+  const handleConvertToTicket = async () => {
+    if (messages.length === 0) {
+      toast.error("No messages to convert.");
+      return;
+    }
+
+    try {
+      const edgeUrl = getEdgeWorkerUrl();
+      const res = await fetch(`${edgeUrl}/api/v1/chat/convert`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${useAuthStore.getState().session?.access_token || ''}`
+        },
+        body: JSON.stringify({
+          chat_messages: messages.filter(m => !m.isSystem),
+          customer_email: user?.email || ""
+        })
+      });
+
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to convert");
+
+      toast.success(`Converted to Ticket #${data.ticket_id.substring(0,8)}`);
+
+      disconnectWebSocket();
+      setMessages([]);
+      setIsExpanded(false);
+      setAiSuggestion(null);
+    } catch (err) {
+      console.error("[LiveChat] Conversion error:", err);
+      toast.error(err.message || "Conversion failed.");
+    }
+  };
+
 
   const disconnectWebSocket = () => {
     if (wsRef.current) {
@@ -198,6 +239,14 @@ export default function LiveChatPanel() {
         </div>
         <div className="flex items-center gap-2">
           <button
+            onClick={handleConvertToTicket}
+            className="flex items-center gap-1 px-2 py-1 text-[10px] font-mono rounded bg-zinc-800 text-zinc-300 hover:bg-indigo-600 hover:text-white transition-colors"
+            title="Convert to Ticket"
+          >
+            <FiExternalLink size={10} />
+            <span>CONVERT</span>
+          </button>
+          <button
             onClick={() => setIsExpanded(false)}
             className="p-1.5 rounded-md text-zinc-400 hover:bg-zinc-800 hover:text-white transition-colors"
           >
@@ -243,6 +292,30 @@ export default function LiveChatPanel() {
         )}
         <div ref={messagesEndRef} />
       </div>
+
+      {/* AI Suggestion Area */}
+      {aiSuggestion && (
+        <div className="px-3 py-2 bg-zinc-900 border-t border-zinc-800 animate-in fade-in slide-in-from-bottom-2">
+           <div className="text-[10px] font-mono text-indigo-400 mb-1 flex items-center gap-1">
+             <span className="w-1.5 h-1.5 rounded-full bg-indigo-400 animate-pulse"></span>
+             Onyx Auto-Suggest
+           </div>
+           <div className="flex gap-2 items-start">
+             <div className="flex-1 text-xs text-zinc-300 italic bg-zinc-950 p-2 rounded-lg border border-zinc-800">
+               {aiSuggestion}
+             </div>
+             <button
+               onClick={() => {
+                 setInputValue(aiSuggestion);
+                 setAiSuggestion(null);
+               }}
+               className="text-[10px] font-mono bg-indigo-600/20 text-indigo-300 hover:bg-indigo-600 hover:text-white px-2 py-1 rounded transition-colors"
+             >
+               USE
+             </button>
+           </div>
+        </div>
+      )}
 
       {/* Input Area */}
       <div className="p-3 bg-zinc-900 border-t border-zinc-800">
