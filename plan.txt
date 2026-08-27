@@ -1,0 +1,20 @@
+1. **Update `onyx-edge-worker/src/index.ts`**
+   - Add `handleChatConvert` to create a support ticket and return its ID.
+   - Wire `POST /api/v1/chat/convert` to `handleChatConvert`.
+   - Update `handleChatConnect` to keep track of chat history, call `env.AI.run` (e.g., `@cf/meta/llama-3-8b-instruct`) when `data.type === "chat_message"`, generate a suggestion, and send `{ type: "ai_suggestion", text: "..." }` to the client.
+
+2. **Update `src/components/chat/LiveChatPanel.jsx`**
+   - Add "Convert to Ticket" button in the header.
+   - `handleConvert` function calls `/api/v1/chat/convert` with `messages` and `user.email`. Shows toast on success, closes WS.
+   - Listen for `ai_suggestion` WebSocket events and store in state.
+   - Display `ai_suggestion` in the UI (with click-to-fill/send).
+
+3. **Update `onyx-edge-worker/test/action.test.js`**
+   - Mock fetch to return success.
+   - Make a test POST to `/api/v1/chat/convert`.
+   - Verify status 200 and successful ticket insertion logic is tested.
+
+4. **Run Pre-Commit Checks**
+   - Compile `onyx-edge-worker`.
+   - Build frontend.
+   - Run tests.
