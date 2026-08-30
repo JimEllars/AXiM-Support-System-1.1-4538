@@ -16,10 +16,13 @@ export default function LiveChatPanel() {
   const [timeoutSeconds, setTimeoutSeconds] = useState(0);
   const [isReadOnly, setIsReadOnly] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
+  const [isPeerTyping, setIsPeerTyping] = useState(false);
+  const [readReceipts, setReadReceipts] = useState({});
   const fileInputRef = useRef(null);
 
   const wsRef = useRef(null);
   const messagesEndRef = useRef(null);
+  const typingTimeoutRef = useRef(null);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -99,6 +102,14 @@ export default function LiveChatPanel() {
                 isSystem: false,
                 isIncoming: true
              }]);
+             if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+               wsRef.current.send(JSON.stringify({
+                 type: "read_receipt",
+                 sender: useAuthStore.getState().user?.email || 'Operator',
+                 messageId: data.id || 'msg-' + Date.now(),
+                 timestamp: Date.now()
+               }));
+             }
              if (!isExpanded) {
                setIsExpanded(true);
                toast('New live chat message received!', {
@@ -123,6 +134,18 @@ export default function LiveChatPanel() {
                icon: '⚠️',
                style: { background: '#09090b', color: '#ef4444', border: '1px solid rgba(239,68,68,0.3)' }
              });
+          } else if (data.type === 'typing_start') {
+             if (data.sender !== (useAuthStore.getState().user?.email || 'Operator')) {
+               setIsPeerTyping(true);
+             }
+          } else if (data.type === 'typing_stop') {
+             if (data.sender !== (useAuthStore.getState().user?.email || 'Operator')) {
+               setIsPeerTyping(false);
+             }
+          } else if (data.type === 'read_receipt') {
+             if (data.sender !== (useAuthStore.getState().user?.email || 'Operator') && data.messageId) {
+               setReadReceipts(prev => ({ ...prev, [data.messageId]: data.timestamp }));
+             }
           } else if (data.type === 'pong') {
              // Keep-alive heartbeat received
           }
@@ -414,7 +437,7 @@ export default function LiveChatPanel() {
                 }`}>
                   <div className="text-[10px] font-mono opacity-60 mb-1 flex justify-between">
                     <span>{msg.isIncoming ? 'Customer' : 'You'}</span>
-                    <span>{new Date(msg.timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</span>
+                    <span>{new Date(msg.timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})} {readReceipts[msg.id] && !msg.isIncoming && <span className="ml-1 text-emerald-400 font-bold" title="Seen">✓</span>}</span>
                   </div>
                                     <div className="text-sm font-sans whitespace-pre-wrap break-words leading-snug">
                     {msg.text}
@@ -465,6 +488,18 @@ export default function LiveChatPanel() {
       )}
 
 
+      {/* Typing Indicator */}
+      {isPeerTyping && (
+        <div className="px-3 py-1 bg-zinc-950 text-[10px] font-mono text-zinc-400 italic flex items-center gap-1 animate-in fade-in slide-in-from-bottom-1">
+          <div className="flex space-x-1">
+            <div className="w-1 h-1 bg-zinc-500 rounded-full animate-bounce" style={{ animationDelay: '0ms' }}></div>
+            <div className="w-1 h-1 bg-zinc-500 rounded-full animate-bounce" style={{ animationDelay: '150ms' }}></div>
+            <div className="w-1 h-1 bg-zinc-500 rounded-full animate-bounce" style={{ animationDelay: '300ms' }}></div>
+          </div>
+          <span>Customer is typing...</span>
+        </div>
+      )}
+
       {/* Timeout Warning Area */}
       {timeoutWarning && (
         <div className="px-3 py-2 bg-rose-950 border-t border-rose-800 animate-in fade-in slide-in-from-bottom-2 flex items-center justify-between">
@@ -509,7 +544,18 @@ export default function LiveChatPanel() {
           <textarea
 
             value={inputValue}
-            onChange={(e) => setInputValue(e.target.value)}
+            onChange={(e) => {
+              setInputValue(e.target.value);
+              if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+                wsRef.current.send(JSON.stringify({ type: 'typing_start', sender: user?.email || 'Operator' }));
+                if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+                typingTimeoutRef.current = setTimeout(() => {
+                  if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+                    wsRef.current.send(JSON.stringify({ type: 'typing_stop', sender: user?.email || 'Operator' }));
+                  }
+                }, 2000);
+              }
+            }}
             onKeyDown={(e) => {
               if (e.key === 'Enter' && !e.shiftKey) {
                 e.preventDefault();
