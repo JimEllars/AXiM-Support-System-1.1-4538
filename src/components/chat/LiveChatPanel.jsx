@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { FiX, FiSend, FiMinimize2, FiMaximize2, FiMessageCircle } from 'react-icons/fi';
+import { FiX, FiSend, FiMinimize2, FiMaximize2, FiMessageCircle, FiPaperclip } from 'react-icons/fi';
 import { useAuthStore } from '../../store/useAuthStore';
 import { getEdgeWorkerUrl } from '../../lib/edgeWorkerUrl';
 import toast from 'react-hot-toast';
@@ -15,6 +15,8 @@ export default function LiveChatPanel() {
   const [timeoutWarning, setTimeoutWarning] = useState(false);
   const [timeoutSeconds, setTimeoutSeconds] = useState(0);
   const [isReadOnly, setIsReadOnly] = useState(false);
+  const [isUploading, setIsUploading] = useState(false);
+  const fileInputRef = useRef(null);
 
   const wsRef = useRef(null);
   const messagesEndRef = useRef(null);
@@ -218,6 +220,88 @@ export default function LiveChatPanel() {
     }
   };
 
+
+  const handleFileAttachment = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (file.size > 5 * 1024 * 1024) {
+      toast.error('File size exceeds 5MB limit');
+      e.target.value = '';
+      return;
+    }
+
+    const allowedTypes = ['image/png', 'image/jpeg', 'application/pdf'];
+    if (!allowedTypes.includes(file.type)) {
+      toast.error('Unsupported file type. Please upload PNG, JPEG, or PDF.');
+      e.target.value = '';
+      return;
+    }
+
+    setIsUploading(true);
+    try {
+      // 1. Get presigned URL
+      const authHeader = useAuthStore.getState().session?.access_token || '';
+      const response = await fetch(`${getEdgeWorkerUrl()}/api/v1/chat/upload-auth`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${authHeader}`
+        },
+        body: JSON.stringify({
+          filename: file.name,
+          file_size: file.size,
+          mime_type: file.type
+        })
+      });
+
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || 'Failed to authorize upload');
+
+      // 2. PUT file directly to Supabase storage
+      const uploadRes = await fetch(data.uploadUrl, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': file.type,
+        },
+        body: file
+      });
+
+      if (!uploadRes.ok) throw new Error('Failed to upload file');
+
+      // 3. Send message with attachment
+      if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+        const newMessage = {
+          type: 'chat_message',
+          text: 'Attachment sent',
+          sender: user?.email || 'Operator',
+          timestamp: new Date().toISOString(),
+          attachment_url: data.publicUrl
+        };
+
+        wsRef.current.send(JSON.stringify(newMessage));
+
+        setMessages(prev => [...prev, {
+          id: 'local-' + Date.now(),
+          sender: newMessage.sender,
+          text: newMessage.text,
+          timestamp: newMessage.timestamp,
+          isSystem: false,
+          isIncoming: false,
+          attachment_url: data.publicUrl
+        }]);
+      } else {
+        toast.error("Not connected to chat server.");
+      }
+    } catch (err) {
+      console.error('[LiveChat] Attachment error:', err);
+      toast.error(err.message || 'File upload failed');
+    } finally {
+      setIsUploading(false);
+      e.target.value = '';
+    }
+  };
+
   const handleSendMessage = (e) => {
     e.preventDefault();
     if (!inputValue.trim() || !isConnected || isReadOnly) return;
@@ -332,8 +416,21 @@ export default function LiveChatPanel() {
                     <span>{msg.isIncoming ? 'Customer' : 'You'}</span>
                     <span>{new Date(msg.timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</span>
                   </div>
-                  <div className="text-sm font-sans whitespace-pre-wrap break-words leading-snug">
+                                    <div className="text-sm font-sans whitespace-pre-wrap break-words leading-snug">
                     {msg.text}
+                    {msg.attachment_url && (
+                      <div className="mt-2">
+                        {msg.attachment_url.toLowerCase().endsWith('.pdf') ? (
+                          <a href={msg.attachment_url} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1 text-xs text-blue-400 hover:underline">
+                            <FiPaperclip size={12} /> View PDF Attachment
+                          </a>
+                        ) : (
+                          <a href={msg.attachment_url} target="_blank" rel="noopener noreferrer">
+                            <img src={msg.attachment_url} alt="Attachment" className="max-w-full h-auto rounded-lg mt-1 border border-zinc-700 max-h-48 object-contain" />
+                          </a>
+                        )}
+                      </div>
+                    )}
                   </div>
                 </div>
               )}
@@ -389,10 +486,28 @@ export default function LiveChatPanel() {
         </div>
       )}
 
+
       {/* Input Area */}
       <div className="p-3 bg-zinc-900 border-t border-zinc-800">
         <form onSubmit={handleSendMessage} className="flex items-end gap-2">
+          <input
+            type="file"
+            ref={fileInputRef}
+            onChange={handleFileAttachment}
+            className="hidden"
+            accept="image/png,image/jpeg,application/pdf"
+          />
+          <button
+            type="button"
+            onClick={() => fileInputRef.current?.click()}
+            disabled={!isConnected || isReadOnly || isUploading}
+            className="p-2.5 rounded-xl bg-zinc-800 text-zinc-400 hover:text-white hover:bg-zinc-700 disabled:opacity-50 disabled:hover:bg-zinc-800 transition-colors flex-shrink-0 flex items-center justify-center"
+            title="Attach File"
+          >
+            <FiPaperclip size={16} />
+          </button>
           <textarea
+
             value={inputValue}
             onChange={(e) => setInputValue(e.target.value)}
             onKeyDown={(e) => {
@@ -408,7 +523,7 @@ export default function LiveChatPanel() {
           />
           <button
             type="submit"
-            disabled={!inputValue.trim() || !isConnected}
+            disabled={!inputValue.trim() || !isConnected || isUploading}
             className="p-2.5 rounded-xl bg-indigo-600 text-white hover:bg-indigo-500 disabled:opacity-50 disabled:hover:bg-indigo-600 transition-colors flex-shrink-0 flex items-center justify-center"
           >
             <FiSend size={16} />

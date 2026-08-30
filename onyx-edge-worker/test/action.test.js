@@ -342,3 +342,56 @@ describe('Onyx Edge Worker - Action Resolver Validation', () => {
 
     vi.useRealTimers();
   });
+
+describe('Onyx Edge Worker - Chat Attachment Security Constraints', () => {
+  it('should return 415 Unsupported Media Type for invalid MIME type (.exe)', async () => {
+    vi.mocked(fetch).mockResolvedValueOnce({
+      status: 415,
+      json: async () => ({ error: "Unsupported Media Type" })
+    });
+
+    const res = await fetch('http://localhost:8787/api/v1/chat/upload-auth', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer test-secret'
+      },
+      body: JSON.stringify({ filename: 'virus.exe', file_size: 1024, mime_type: 'application/x-msdownload' })
+    });
+    expect(res.status).toBe(415);
+  });
+
+  it('should return 413 Payload Too Large for file > 5MB', async () => {
+    vi.mocked(fetch).mockResolvedValueOnce({
+      status: 413,
+      json: async () => ({ error: "Payload Too Large" })
+    });
+
+    const res = await fetch('http://localhost:8787/api/v1/chat/upload-auth', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer test-secret'
+      },
+      body: JSON.stringify({ filename: 'big.jpg', file_size: 10 * 1024 * 1024, mime_type: 'image/jpeg' })
+    });
+    expect(res.status).toBe(413);
+  });
+
+  it('should return 200 OK for valid 1MB PNG', async () => {
+    vi.mocked(fetch).mockResolvedValueOnce({
+      status: 200,
+      json: async () => ({ success: true, uploadUrl: "https://example.com/upload", path: "test.png", publicUrl: "https://example.com/test.png" })
+    });
+
+    const res = await fetch('http://localhost:8787/api/v1/chat/upload-auth', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer test-secret'
+      },
+      body: JSON.stringify({ filename: 'valid.png', file_size: 1024 * 1024, mime_type: 'image/png' })
+    });
+    expect(res.status).toBe(200);
+  });
+});

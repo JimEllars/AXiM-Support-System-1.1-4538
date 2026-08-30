@@ -3546,6 +3546,10 @@ ${notes}`,
       return handleLeaderboardAnalytics(request, env, ctx);
     }
 
+
+    if (url.pathname === "/api/v1/chat/upload-auth" && request.method === "POST") {
+      return handleChatUploadAuth(request, env);
+    }
     if (url.pathname === "/api/v1/chat/convert" && request.method === "POST") {
       return handleChatConvert(request, env);
     }
@@ -7011,6 +7015,70 @@ async function generateAndSendShiftHandover(env: Env) {
 }
 
 // --- Live Chat WebSocket Handler ---
+
+async function handleChatUploadAuth(request: Request, env: Env): Promise<Response> {
+  const authHeader = request.headers.get("Authorization") || "";
+  const token = authHeader.replace("Bearer ", "").trim();
+  if (!token) return new Response(JSON.stringify({ error: "Unauthorized" }), { status: 401, headers: getCorsHeaders(env, request) });
+
+  const supabaseAuth = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY, {
+    global: { headers: { Authorization: `Bearer ${token}` } }
+  });
+
+  const { data: { user }, error: authError } = await supabaseAuth.auth.getUser();
+  if (authError || !user) return new Response(JSON.stringify({ error: "INVALID_SESSION" }), { status: 403, headers: getCorsHeaders(env, request) });
+
+  try {
+    const payload: any = await request.json();
+    const { filename, file_size, mime_type } = payload;
+
+    if (!filename || !file_size || !mime_type) {
+      return new Response(JSON.stringify({ error: "Missing required fields" }), { status: 400, headers: getCorsHeaders(env, request) });
+    }
+
+    if (file_size > 5 * 1024 * 1024) {
+      return new Response(JSON.stringify({ error: "Payload Too Large" }), { status: 413, headers: getCorsHeaders(env, request) });
+    }
+
+    const allowedMimeTypes = ['image/png', 'image/jpeg', 'application/pdf'];
+    if (!allowedMimeTypes.includes(mime_type)) {
+      return new Response(JSON.stringify({ error: "Unsupported Media Type" }), { status: 415, headers: getCorsHeaders(env, request) });
+    }
+
+    const supabaseAdmin = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
+    const path = `${user.id}/${Date.now()}-${filename.replace(/[^a-zA-Z0-9.-]/g, '_')}`;
+
+    // Note: We're using createSignedUploadUrl logic
+    const { data, error } = await supabaseAdmin.storage.from('support-attachments').createSignedUploadUrl(path);
+
+    if (error) throw error;
+
+    const { data: publicUrlData } = supabaseAdmin.storage.from('support-attachments').getPublicUrl(path);
+
+    await supabaseAdmin.from("events_ax2024").insert({
+      type: "chat_attachment_authorized",
+      payload: {
+        user_id: user.id,
+        filename,
+        file_size,
+        mime_type,
+        timestamp: new Date().toISOString()
+      }
+    });
+
+    return new Response(JSON.stringify({
+      success: true,
+      uploadUrl: data.signedUrl,
+      path: path,
+      publicUrl: publicUrlData.publicUrl
+    }), {
+      status: 200, headers: { "Content-Type": "application/json", ...getCorsHeaders(env, request) }
+    });
+  } catch (err: any) {
+    return new Response(JSON.stringify({ error: err.message }), { status: 500, headers: getCorsHeaders(env, request) });
+  }
+}
+
 
 async function handleChatConvert(request: Request, env: Env): Promise<Response> {
   const authHeader = request.headers.get("Authorization") || "";
