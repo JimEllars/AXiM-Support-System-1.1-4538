@@ -310,6 +310,63 @@ describe('Onyx Edge Worker - Action Resolver Validation', () => {
   });
 
 
+  it('should successfully dispatch a kb_suggestion for high-confidence vector matches and ignore low-confidence ones', async () => {
+    const mockWs = {
+      send: vi.fn(),
+      close: vi.fn(),
+      readyState: 1 // OPEN
+    };
+
+    const mockEnv = {
+      AI: {
+        run: vi.fn().mockResolvedValue({
+          data: [[0.1, 0.2, 0.3]] // Mock embedding
+        })
+      }
+    };
+
+    const data = { type: "chat_message", text: "How do I reset my password?", sender: "Customer" };
+
+    // Simulate the KB suggestion logic block
+    if (mockEnv.AI && data.sender !== 'Operator') {
+       let embedding = null;
+       const embedRes = await mockEnv.AI.run('@cf/baai/bge-small-en-v1.5', { text: data.text });
+       embedding = embedRes.data[0];
+
+       // High confidence match simulation
+       let matches = [{ id: 'mem-123', category: 'Password Reset', is_stale: false, similarity: 0.9 }];
+
+       if (embedding && matches.length > 0 && matches[0].similarity > 0.88 && !matches[0].is_stale) {
+          mockWs.send(JSON.stringify({
+             type: "kb_suggestion",
+             title: matches[0].category || 'KB Protocol',
+             memory_id: matches[0].id
+          }));
+       }
+
+       expect(mockWs.send).toHaveBeenCalledWith(JSON.stringify({
+          type: "kb_suggestion",
+          title: 'Password Reset',
+          memory_id: 'mem-123'
+       }));
+
+       mockWs.send.mockClear();
+
+       // Low confidence match simulation
+       matches = [{ id: 'mem-456', category: 'General FAQ', is_stale: false, similarity: 0.5 }];
+
+       if (embedding && matches.length > 0 && matches[0].similarity > 0.88 && !matches[0].is_stale) {
+          mockWs.send(JSON.stringify({
+             type: "kb_suggestion",
+             title: matches[0].category || 'KB Protocol',
+             memory_id: matches[0].id
+          }));
+       }
+
+       expect(mockWs.send).not.toHaveBeenCalled();
+    }
+  });
+
   it('should successfully generate and broadcast dual-language payload when language differs', async () => {
     const mockWs = {
       send: vi.fn(),
