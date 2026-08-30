@@ -9,6 +9,7 @@ export default function LiveChatPanel() {
   const [isExpanded, setIsExpanded] = useState(false);
   const [messages, setMessages] = useState([]);
   const [inputValue, setInputValue] = useState('');
+  const [isInternalNote, setIsInternalNote] = useState(false);
   const [isConnected, setIsConnected] = useState(false);
   const [aiSuggestion, setAiSuggestion] = useState(null);
   const [sentimentAlert, setSentimentAlert] = useState(null);
@@ -94,10 +95,11 @@ export default function LiveChatPanel() {
           } else if (data.type === 'timeout_warning') {
              setTimeoutWarning(true);
              setTimeoutSeconds(data.expiresIn || 60);
-          } else if (data.type === 'chat_message') {
+          } else if (data.type === 'chat_message' || data.type === 'internal_whisper') {
              setTimeoutWarning(false);
              setMessages(prev => [...prev, {
                 id: data.id || 'msg-' + Date.now(),
+                type: data.type,
                 sender: data.sender || 'Customer',
                 text: data.text,
                 timestamp: data.timestamp || new Date().toISOString(),
@@ -336,7 +338,7 @@ export default function LiveChatPanel() {
     setTimeoutWarning(false);
 
     const newMessage = {
-      type: 'chat_message',
+      type: isInternalNote ? 'internal_whisper' : 'chat_message',
       text: inputValue.trim(),
       sender: user?.email || 'Operator',
       timestamp: new Date().toISOString()
@@ -436,12 +438,15 @@ export default function LiveChatPanel() {
                  </div>
               ) : (
                 <div className={`max-w-[85%] rounded-2xl p-3 ${
-                  msg.isIncoming
-                    ? (msg.isEscalated ? 'bg-rose-950/80 text-rose-200 rounded-tl-sm border border-rose-500/50 shadow-[0_0_15px_rgba(225,29,72,0.2)]' : 'bg-zinc-800 text-zinc-200 rounded-tl-sm')
-                    : 'bg-indigo-600 text-white rounded-tr-sm'
+                  msg.type === 'internal_whisper'
+                    ? 'bg-yellow-600/20 text-yellow-100 border border-yellow-500/30 ' + (msg.isIncoming ? 'rounded-tl-sm' : 'rounded-tr-sm')
+                    : msg.isIncoming
+                      ? (msg.isEscalated ? 'bg-rose-950/80 text-rose-200 rounded-tl-sm border border-rose-500/50 shadow-[0_0_15px_rgba(225,29,72,0.2)]' : 'bg-zinc-800 text-zinc-200 rounded-tl-sm')
+                      : 'bg-indigo-600 text-white rounded-tr-sm'
                 }`}>
                   <div className="text-[10px] font-mono opacity-60 mb-1 flex justify-between">
-                    <span>{msg.isIncoming ? 'Customer' : 'You'}</span>
+                    <span>{msg.isIncoming ? (msg.type === 'internal_whisper' ? 'Operator (Internal)' : 'Customer') : (msg.type === 'internal_whisper' ? 'You (Internal)' : 'You')}</span>
+                    {msg.type === 'internal_whisper' && <span className="ml-2 px-1.5 py-0.5 rounded bg-yellow-500/20 text-yellow-500 text-[8px] uppercase tracking-wider">Internal Only</span>}
                     <span>{new Date(msg.timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})} {readReceipts[msg.id] && !msg.isIncoming && <span className="ml-1 text-emerald-400 font-bold" title="Seen">✓</span>}</span>
                   </div>
                                     <div className="text-sm font-sans whitespace-pre-wrap break-words leading-snug">
@@ -539,6 +544,22 @@ export default function LiveChatPanel() {
 
       {/* Input Area */}
       <div className="p-3 bg-zinc-900 border-t border-zinc-800 relative">
+        <div className="flex gap-2 mb-2 px-1">
+          <button
+            type="button"
+            onClick={() => setIsInternalNote(false)}
+            className={`text-[10px] px-3 py-1 rounded-full font-mono transition-colors ${!isInternalNote ? 'bg-indigo-600 text-white' : 'bg-zinc-800 text-zinc-400 hover:bg-zinc-700'}`}
+          >
+            Public Reply
+          </button>
+          <button
+            type="button"
+            onClick={() => setIsInternalNote(true)}
+            className={`text-[10px] px-3 py-1 rounded-full font-mono transition-colors flex items-center gap-1 ${isInternalNote ? 'bg-yellow-600/20 text-yellow-500 border border-yellow-600/50' : 'bg-zinc-800 text-zinc-400 hover:bg-zinc-700'}`}
+          >
+            <span className="w-2 h-2 rounded-full bg-current"></span> Internal Note
+          </button>
+        </div>
         {kbSuggestion && (
           <div className="absolute -top-10 left-3 right-3 flex items-center justify-between px-3 py-1.5 bg-amber-500/20 text-amber-300 border border-amber-500/30 rounded-full text-[10px] font-mono shadow-lg backdrop-blur-sm z-10 animate-in fade-in slide-in-from-bottom-2">
             <button
@@ -602,7 +623,7 @@ export default function LiveChatPanel() {
             }}
             placeholder={isReadOnly ? "Session Closed due to Inactivity" : isConnected ? "Type a message..." : "Reconnecting..."}
             disabled={!isConnected || isReadOnly}
-            className="flex-1 max-h-32 min-h-[40px] bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-sm text-zinc-200 placeholder-zinc-500 focus:outline-none focus:border-indigo-500 transition-colors resize-none font-sans disabled:opacity-50"
+            className={`flex-1 max-h-32 min-h-[40px] ${isInternalNote ? 'bg-yellow-950/20 border-yellow-600/30 text-yellow-100 placeholder-yellow-700/50 focus:border-yellow-500' : 'bg-zinc-950 border-zinc-800 text-zinc-200 placeholder-zinc-500 focus:border-indigo-500'} border rounded-xl px-3 py-2 text-sm transition-colors resize-none font-sans disabled:opacity-50`}
             rows={1}
           />
           <button

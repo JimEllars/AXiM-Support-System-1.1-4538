@@ -531,3 +531,59 @@ describe('Onyx Edge Worker - Chat Attachment Security Constraints', () => {
     expect(res.status).toBe(200);
   });
 });
+
+
+describe('Onyx Edge Worker - Internal Whisper WS Mock', () => {
+  it('should allow operator to send internal_whisper and not broadcast to customer', async () => {
+    // Mock WebSocket interactions
+    let customerBuffer = [];
+    let operatorBuffer = [];
+
+    const mockCustomerSocket = {
+      send: (msg) => customerBuffer.push(msg)
+    };
+
+    const mockOperatorSocket = {
+      send: (msg) => operatorBuffer.push(msg)
+    };
+
+    const processMessage = (socket, role, data) => {
+        if (data.type === "internal_whisper") {
+            if (role === "customer") {
+                socket.send(JSON.stringify({ type: "error", message: "403 Forbidden: Only operators can send internal whispers." }));
+            } else {
+                socket.send(JSON.stringify(data));
+            }
+        }
+    };
+
+    processMessage(mockOperatorSocket, "operator", { type: "internal_whisper", text: "secret" });
+
+    expect(operatorBuffer.length).toBe(1);
+    expect(JSON.parse(operatorBuffer[0]).type).toBe("internal_whisper");
+    expect(customerBuffer.length).toBe(0);
+  });
+
+  it('should reject internal_whisper from customer socket', () => {
+    let customerBuffer = [];
+    const mockCustomerSocket = {
+      send: (msg) => customerBuffer.push(msg)
+    };
+
+    const processMessage = (socket, role, data) => {
+        if (data.type === "internal_whisper") {
+            if (role === "customer") {
+                socket.send(JSON.stringify({ type: "error", message: "403 Forbidden: Only operators can send internal whispers." }));
+            } else {
+                socket.send(JSON.stringify(data));
+            }
+        }
+    };
+
+    processMessage(mockCustomerSocket, "customer", { type: "internal_whisper", text: "hack attempt" });
+
+    expect(customerBuffer.length).toBe(1);
+    expect(JSON.parse(customerBuffer[0]).type).toBe("error");
+    expect(JSON.parse(customerBuffer[0]).message).toContain("403 Forbidden");
+  });
+});

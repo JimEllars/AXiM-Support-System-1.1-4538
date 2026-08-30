@@ -7198,6 +7198,46 @@ function handleChatConnect(request: Request, env: Env): Response {
         } catch (e) {
           console.error("Error broadcasting ephemeral state", e);
         }
+      } else if (data && data.type === "internal_whisper") {
+        try {
+          const authHeader = request.headers.get("Authorization") || request.headers.get("Sec-WebSocket-Protocol");
+          let senderRole = "customer";
+          if (authHeader) {
+            try {
+               const token = authHeader.replace("Bearer ", "").split(",")[0].trim();
+               const supabaseAdmin = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
+               const { data: { user }, error } = await supabaseAdmin.auth.getUser(token);
+               if (!error && user && user.user_metadata && (user.user_metadata.role === 'operator' || user.user_metadata.role === 'lead' || user.user_metadata.role === 'admin' || user.user_metadata.role === 'manager')) {
+                 senderRole = "operator";
+               } else if (!error && user) {
+                  // check profiles table if role not in metadata
+                  const { data: profile } = await supabaseAdmin.from('profiles').select('role').eq('id', user.id).single();
+                  if (profile && (profile.role === 'operator' || profile.role === 'lead' || profile.role === 'admin' || profile.role === 'manager')) {
+                     senderRole = "operator";
+                  }
+               }
+            } catch (e) {
+               console.error("Auth check failed in socket", e);
+            }
+          }
+
+          if (senderRole === "customer") {
+             server.send(JSON.stringify({ type: "error", message: "403 Forbidden: Only operators can send internal whispers." }));
+          } else {
+             try {
+               const supabaseAdmin = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
+               await supabaseAdmin.from("events_ax2024").insert({
+                 type: "internal_whisper_sent",
+                 payload: { text: data.text, sender: data.sender, timestamp: new Date().toISOString() }
+               });
+             } catch (dbErr) {
+               console.error("Failed to log internal whisper event:", dbErr);
+             }
+             server.send(JSON.stringify(data));
+          }
+        } catch (e) {
+           console.error("Error broadcasting internal whisper", e);
+        }
       } else if (data && data.type === "chat_message") {
          chatHistory.push(data);
          if (chatHistory.length > 4) chatHistory.shift();
