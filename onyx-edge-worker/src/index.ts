@@ -7084,27 +7084,55 @@ function handleChatConnect(request: Request, env: Env): Response {
 
   server.accept();
   let chatHistory: any[] = [];
+  let lastActivity = Date.now();
+  let warningSent = false;
+
+  const idleInterval = setInterval(() => {
+    const now = Date.now();
+    const idleTime = now - lastActivity;
+
+    if (idleTime > 11 * 60 * 1000) {
+      clearInterval(idleInterval);
+      try {
+        server.close(1000, "Idle Timeout");
+        const supabaseAdmin = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
+        supabaseAdmin.from("events_ax2024").insert({
+          type: "active_chat_terminated_idle",
+          payload: { timestamp: new Date().toISOString() }
+        }).then(({ error }) => { if (error) console.error("Telemetry err:", error); });
+      } catch (e) {
+        console.error("Error closing socket", e);
+      }
+    } else if (idleTime > 10 * 60 * 1000 && !warningSent) {
+      warningSent = true;
+      try {
+        server.send(JSON.stringify({ type: "timeout_warning", expiresIn: 60 }));
+      } catch (e) {
+        console.error("Error sending warning", e);
+      }
+    }
+  }, 10000);
 
   server.addEventListener("message", async (event) => {
+    lastActivity = Date.now();
+    warningSent = false;
+
     try {
       const data = typeof event.data === 'string' ? JSON.parse(event.data) : null;
       if (data && data.type === "ping") {
         server.send(JSON.stringify({ type: "pong", timestamp: Date.now() }));
+      } else if (data && data.type === "keep_alive") {
+        // Just reset activity, already handled above
       } else if (data && data.type === "chat_message") {
          chatHistory.push(data);
          if (chatHistory.length > 4) chatHistory.shift();
 
-         // Echo back for now or broadcast to other clients in a real implementation
-         // server.send(JSON.stringify(data));
-
          if (env.AI && data.sender !== 'Operator') {
-           // 1. Text Classification for Sentiment Alert
            try {
              const sentimentResponse = await env.AI.run('@cf/huggingface/distilbert-sst-2-int8', {
                text: data.text
              });
 
-             // The model typically returns an array of label/score pairs. e.g., [{label: "NEGATIVE", score: 0.98}, {label: "POSITIVE", score: 0.02}]
              if (Array.isArray(sentimentResponse)) {
                 const negativeResult = sentimentResponse.find(r => r.label === 'NEGATIVE');
                 if (negativeResult && negativeResult.score > 0.85) {
@@ -7134,7 +7162,6 @@ function handleChatConnect(request: Request, env: Env): Response {
              console.error("AI sentiment analysis error:", sentimentErr);
            }
 
-           // 2. Suggestion Generation
            const messagesContext = chatHistory.map(msg => `${msg.sender}: ${msg.text}`).join('\n');
            const prompt = `You are a helpful customer support agent. Provide a concise, professional reply suggestion to the customer's last message.\n\nChat history:\n${messagesContext}\n\nReply suggestion:`;
 
@@ -7157,10 +7184,12 @@ function handleChatConnect(request: Request, env: Env): Response {
   });
 
   server.addEventListener("close", () => {
+    clearInterval(idleInterval);
     console.log("WebSocket client disconnected");
   });
 
   server.addEventListener("error", (error) => {
+    clearInterval(idleInterval);
     console.error("WebSocket error:", error);
   });
 

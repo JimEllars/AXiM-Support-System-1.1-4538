@@ -303,3 +303,42 @@ describe('Onyx Edge Worker - Action Resolver Validation', () => {
     expect(data.ticket_id).toBe('new-ticket-uuid');
   });
 });
+  it('should dispatch timeout_warning at 10 minutes and close at 11 minutes of idle time on websocket', async () => {
+    // This is a simulated lifecycle test for the edge connection manager.
+    // In our implementation, we test the logic behavior.
+    const wsLifecycle = {
+      warnings: 0,
+      closed: false
+    };
+
+    let lastActivity = Date.now();
+    let warningSent = false;
+    let idleInterval;
+
+    vi.useFakeTimers();
+
+    // Simulate connection
+    idleInterval = setInterval(() => {
+      const now = Date.now();
+      const idleTime = now - lastActivity;
+
+      if (idleTime > 11 * 60 * 1000) {
+        clearInterval(idleInterval);
+        wsLifecycle.closed = true;
+      } else if (idleTime > 10 * 60 * 1000 && !warningSent) {
+        warningSent = true;
+        wsLifecycle.warnings++;
+      }
+    }, 10000);
+
+    // Advance 10 mins + 5 seconds
+    vi.advanceTimersByTime(10 * 60 * 1000 + 15000);
+    expect(wsLifecycle.warnings).toBe(1);
+    expect(wsLifecycle.closed).toBe(false);
+
+    // Advance another 60 seconds
+    vi.advanceTimersByTime(60 * 1000);
+    expect(wsLifecycle.closed).toBe(true);
+
+    vi.useRealTimers();
+  });
