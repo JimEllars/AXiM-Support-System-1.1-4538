@@ -7279,6 +7279,50 @@ function handleChatConnect(request: Request, env: Env): Response {
            } catch (aiErr) {
              console.error("AI text generation error:", aiErr);
            }
+
+           // Asynchronous KB suggestion logic
+           (async () => {
+             try {
+               let embedding = null;
+               try {
+                 const embedRes = await env.AI.run('@cf/baai/bge-small-en-v1.5', { text: data.text });
+                 embedding = (embedRes as any).data[0];
+               } catch (aiErr) {
+                 // Fallback to Core API
+                 const embedRes = await fetch(`${env.CORE_API_URL || "https://api.axim-core.internal"}/functions/v1/generate-embedding`, {
+                   method: 'POST',
+                   headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${env.SUPABASE_SERVICE_ROLE_KEY}` },
+                   body: JSON.stringify({ text: data.text })
+                 });
+                 if (embedRes.ok) {
+                   const embedData = await embedRes.json() as any;
+                   embedding = embedData.embedding;
+                 }
+               }
+
+               if (embedding) {
+                 const supabaseAdmin = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
+                 const { data: matches, error } = await supabaseAdmin.rpc('match_memory_banks', {
+                   query_embedding: embedding,
+                   match_threshold: 0.88,
+                   match_count: 1
+                 });
+
+                 if (!error && matches && matches.length > 0) {
+                   const match = matches[0];
+                   if (!match.is_stale) {
+                     server.send(JSON.stringify({
+                       type: "kb_suggestion",
+                       title: match.metadata?.title || match.category || 'KB Protocol',
+                       memory_id: match.id
+                     }));
+                   }
+                 }
+               }
+             } catch (e) {
+               console.error("KB suggestion error:", e);
+             }
+           })();
          }
       }
     } catch (e) {

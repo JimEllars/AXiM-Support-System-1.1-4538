@@ -19,6 +19,7 @@ export default function LiveChatPanel() {
   const [isPeerTyping, setIsPeerTyping] = useState(false);
   const [readReceipts, setReadReceipts] = useState({});
   const [showOriginal, setShowOriginal] = useState({});
+  const [kbSuggestion, setKbSuggestion] = useState(null);
   const fileInputRef = useRef(null);
 
   const wsRef = useRef(null);
@@ -118,6 +119,9 @@ export default function LiveChatPanel() {
                  style: { background: '#09090b', color: '#60a5fa', border: '1px solid rgba(96,165,250,0.3)' }
                });
              }
+          } else if (data.type === 'kb_suggestion') {
+             setKbSuggestion({ title: data.title, memory_id: data.memory_id });
+             toast('KB Suggestion Available', { icon: '💡', style: { background: '#09090b', color: '#fcd34d', border: '1px solid rgba(252,211,77,0.3)' } });
           } else if (data.type === 'ai_suggestion') {
              setAiSuggestion(data.text);
              toast('AI Suggestion Available', { icon: '🤖', style: { background: '#09090b', color: '#a78bfa', border: '1px solid rgba(167,139,250,0.3)' } });
@@ -534,7 +538,30 @@ export default function LiveChatPanel() {
 
 
       {/* Input Area */}
-      <div className="p-3 bg-zinc-900 border-t border-zinc-800">
+      <div className="p-3 bg-zinc-900 border-t border-zinc-800 relative">
+        {kbSuggestion && (
+          <div className="absolute -top-10 left-3 right-3 flex items-center justify-between px-3 py-1.5 bg-amber-500/20 text-amber-300 border border-amber-500/30 rounded-full text-[10px] font-mono shadow-lg backdrop-blur-sm z-10 animate-in fade-in slide-in-from-bottom-2">
+            <button
+              type="button"
+              className="flex-1 text-left truncate hover:text-amber-200 transition-colors flex items-center gap-2"
+              onClick={() => {
+                setInputValue(prev => prev + (prev && !prev.endsWith(' ') ? ' ' : '') + `[KB: ${kbSuggestion.title}](/kb/${kbSuggestion.memory_id})`);
+                setKbSuggestion(null);
+              }}
+            >
+              <span>💡 Suggested: {kbSuggestion.title}</span>
+              <span className="opacity-50 text-[9px]">Click to insert link</span>
+            </button>
+            <button
+              type="button"
+              className="ml-2 p-1 hover:bg-amber-500/20 rounded-full transition-colors flex-shrink-0"
+              onClick={() => setKbSuggestion(null)}
+              title="Dismiss"
+            >
+              <FiX size={12} />
+            </button>
+          </div>
+        )}
         <form onSubmit={handleSendMessage} className="flex items-end gap-2">
           <input
             type="file"
