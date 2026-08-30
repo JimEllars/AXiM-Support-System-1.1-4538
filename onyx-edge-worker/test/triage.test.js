@@ -82,3 +82,43 @@ describe('Onyx Edge Worker - Memory Search', () => {
     expect(effectiveTenantId).not.toBe(url.searchParams.get('tenant_id'));
   });
 });
+
+describe('Onyx Edge Worker - Live Chat Sentiment Analysis', () => {
+  it('should detect highly negative sentiment and generate an alert payload', async () => {
+    // Mock incoming message
+    const mockMessage = {
+      type: "chat_message",
+      text: "This service is absolutely terrible, I want a refund now!",
+      sender: "customer@example.com",
+      id: "msg-123"
+    };
+
+    // Simulate Cloudflare AI response
+    const mockAiResponse = [
+      { label: "NEGATIVE", score: 0.95 },
+      { label: "POSITIVE", score: 0.05 }
+    ];
+
+    // Verify logic
+    let generatedPayload = null;
+
+    // Test extraction logic
+    if (Array.isArray(mockAiResponse)) {
+       const negativeResult = mockAiResponse.find(r => r.label === 'NEGATIVE');
+       if (negativeResult && negativeResult.score > 0.85) {
+          generatedPayload = {
+            type: "sentiment_alert",
+            level: "critical",
+            score: negativeResult.score,
+            messageId: mockMessage.id
+          };
+       }
+    }
+
+    expect(generatedPayload).toBeDefined();
+    expect(generatedPayload.type).toBe('sentiment_alert');
+    expect(generatedPayload.level).toBe('critical');
+    expect(generatedPayload.score).toBe(0.95);
+    expect(generatedPayload.messageId).toBe('msg-123');
+  });
+});

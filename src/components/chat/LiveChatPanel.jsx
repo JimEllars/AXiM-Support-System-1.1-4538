@@ -11,6 +11,7 @@ export default function LiveChatPanel() {
   const [inputValue, setInputValue] = useState('');
   const [isConnected, setIsConnected] = useState(false);
   const [aiSuggestion, setAiSuggestion] = useState(null);
+  const [sentimentAlert, setSentimentAlert] = useState(null);
 
   const wsRef = useRef(null);
   const messagesEndRef = useRef(null);
@@ -87,6 +88,20 @@ export default function LiveChatPanel() {
           } else if (data.type === 'ai_suggestion') {
              setAiSuggestion(data.text);
              toast('AI Suggestion Available', { icon: '🤖', style: { background: '#09090b', color: '#a78bfa', border: '1px solid rgba(167,139,250,0.3)' } });
+          } else if (data.type === 'sentiment_alert') {
+             setSentimentAlert(data);
+             if (data.messageId) {
+               setMessages(prev => prev.map(m => m.id === data.messageId ? { ...m, isEscalated: true } : m));
+             } else {
+               setMessages(prev => prev.map((m, i) => i === prev.length - 1 ? { ...m, isEscalated: true } : m));
+             }
+             if (!isExpanded) {
+               setIsExpanded(true);
+             }
+             toast.error('High Frustration Detected!', {
+               icon: '⚠️',
+               style: { background: '#09090b', color: '#ef4444', border: '1px solid rgba(239,68,68,0.3)' }
+             });
           } else if (data.type === 'pong') {
              // Keep-alive heartbeat received
           }
@@ -159,6 +174,7 @@ export default function LiveChatPanel() {
       setMessages([]);
       setIsExpanded(false);
       setAiSuggestion(null);
+      setSentimentAlert(null);
     } catch (err) {
       console.error("[LiveChat] Conversion error:", err);
       toast.error(err.message || "Conversion failed.");
@@ -236,6 +252,11 @@ export default function LiveChatPanel() {
           <span className="font-mono font-bold text-xs uppercase text-zinc-200 tracking-wider">
             Live Comms {isConnected ? '' : '(Reconnecting)'}
           </span>
+          {sentimentAlert && (
+             <span className="ml-2 px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-rose-500/20 text-rose-500 border border-rose-500/30 animate-pulse">
+               At-Risk Customer
+             </span>
+          )}
         </div>
         <div className="flex items-center gap-2">
           <button
@@ -275,7 +296,7 @@ export default function LiveChatPanel() {
               ) : (
                 <div className={`max-w-[85%] rounded-2xl p-3 ${
                   msg.isIncoming
-                    ? 'bg-zinc-800 text-zinc-200 rounded-tl-sm'
+                    ? (msg.isEscalated ? 'bg-rose-950/80 text-rose-200 rounded-tl-sm border border-rose-500/50 shadow-[0_0_15px_rgba(225,29,72,0.2)]' : 'bg-zinc-800 text-zinc-200 rounded-tl-sm')
                     : 'bg-indigo-600 text-white rounded-tr-sm'
                 }`}>
                   <div className="text-[10px] font-mono opacity-60 mb-1 flex justify-between">

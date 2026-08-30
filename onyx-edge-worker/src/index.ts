@@ -7098,6 +7098,43 @@ function handleChatConnect(request: Request, env: Env): Response {
          // server.send(JSON.stringify(data));
 
          if (env.AI && data.sender !== 'Operator') {
+           // 1. Text Classification for Sentiment Alert
+           try {
+             const sentimentResponse = await env.AI.run('@cf/huggingface/distilbert-sst-2-int8', {
+               text: data.text
+             });
+
+             // The model typically returns an array of label/score pairs. e.g., [{label: "NEGATIVE", score: 0.98}, {label: "POSITIVE", score: 0.02}]
+             if (Array.isArray(sentimentResponse)) {
+                const negativeResult = sentimentResponse.find(r => r.label === 'NEGATIVE');
+                if (negativeResult && negativeResult.score > 0.85) {
+                   server.send(JSON.stringify({
+                     type: "sentiment_alert",
+                     level: "critical",
+                     score: negativeResult.score,
+                     messageId: data.id
+                   }));
+
+                   try {
+                     const supabaseAdmin = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
+                     await supabaseAdmin.from("events_ax2024").insert({
+                       type: "active_chat_escalated",
+                       payload: {
+                         message_text: data.text,
+                         sentiment_score: negativeResult.score,
+                         timestamp: new Date().toISOString()
+                       }
+                     });
+                   } catch (dbErr) {
+                     console.error("Failed to log sentiment alert:", dbErr);
+                   }
+                }
+             }
+           } catch (sentimentErr) {
+             console.error("AI sentiment analysis error:", sentimentErr);
+           }
+
+           // 2. Suggestion Generation
            const messagesContext = chatHistory.map(msg => `${msg.sender}: ${msg.text}`).join('\n');
            const prompt = `You are a helpful customer support agent. Provide a concise, professional reply suggestion to the customer's last message.\n\nChat history:\n${messagesContext}\n\nReply suggestion:`;
 
@@ -7106,8 +7143,8 @@ function handleChatConnect(request: Request, env: Env): Response {
                prompt
              });
 
-             if (aiResponse && aiResponse.response) {
-                server.send(JSON.stringify({ type: "ai_suggestion", text: aiResponse.response.trim() }));
+             if (aiResponse && (aiResponse as any).response) {
+                server.send(JSON.stringify({ type: "ai_suggestion", text: (aiResponse as any).response.trim() }));
              }
            } catch (aiErr) {
              console.error("AI text generation error:", aiErr);
