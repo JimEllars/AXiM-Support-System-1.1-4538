@@ -7191,6 +7191,13 @@ function handleChatConnect(request: Request, env: Env): Response {
         server.send(JSON.stringify({ type: "pong", timestamp: Date.now() }));
       } else if (data && data.type === "keep_alive") {
         // Just reset activity, already handled above
+      } else if (data && (data.type === "typing_start" || data.type === "typing_stop" || data.type === "read_receipt")) {
+        // Ephemeral bypass: Echo back to connected peers without database I/O
+        try {
+          server.send(JSON.stringify(data));
+        } catch (e) {
+          console.error("Error broadcasting ephemeral state", e);
+        }
       } else if (data && data.type === "chat_message") {
          chatHistory.push(data);
          if (chatHistory.length > 4) chatHistory.shift();
