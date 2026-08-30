@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { FiTerminal, FiCornerDownLeft, FiX } from 'react-icons/fi';
+import { showToast } from '../lib/toast';
 import toast from 'react-hot-toast';
 import { supabase } from '../lib/supabaseClient';
 import { getEdgeWorkerUrl } from '../lib/edgeWorkerUrl';
@@ -25,7 +26,7 @@ export default function OnyxCommandHub({ isOpen, onClose }) {
     if (!rawInput || isExecuting) return;
 
     if (!activeTicket) {
-      toast.error("Select an active ticket before dispatching terminal commands.");
+      showToast.error("Select an active ticket before dispatching terminal commands.");
       return;
     }
 
@@ -34,7 +35,7 @@ export default function OnyxCommandHub({ isOpen, onClose }) {
     const targetValue = parts.slice(1).join(' ') || null;
 
     if (!['/escalate', '/resolve', '/reassign', '/draft', '/brief'].includes(command)) {
-      toast.error("Unsupported command. Use /escalate, /resolve, /reassign [dept], /draft, or /brief");
+      showToast.error("Unsupported command. Use /escalate, /resolve, /reassign [dept], /draft, or /brief");
       return;
     }
 
@@ -88,16 +89,14 @@ export default function OnyxCommandHub({ isOpen, onClose }) {
           style: { background: '#09090b', color: '#10b981', border: '1px solid rgba(16,185,129,0.4)' }
         });
       } else {
-        toast.success(`Command ${command} executed successfully!`, {
-          style: { background: '#09090b', color: '#10b981', border: '1px solid rgba(16,185,129,0.3)' }
-        });
+        showToast.success(`Command ${command} executed successfully!`);
       }
 
       setCommandInput('');
       fetchTickets();
       if (onClose) onClose();
     } catch (err) {
-      toast.error(`Execution Error: ${err.message}`);
+      showToast.error(`Execution Error: ${err.message}`);
     } finally {
       setIsExecuting(false);
     }

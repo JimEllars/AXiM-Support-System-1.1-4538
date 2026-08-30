@@ -62,8 +62,18 @@ export default function Dashboard() {
           {activeTicket ? (
             <TicketDetail ticketId={activeTicket.id}/>
           ) : (
-            <div className="h-full flex items-center justify-center rounded-3xl border border-zinc-800/80 bg-zinc-950/40 p-8 text-center text-zinc-500 font-mono text-xs">
-              Select a ticket from the queue to enter the workstation HUD.
+            <div className="h-full flex flex-col p-6 bg-zinc-950/20 rounded-3xl border border-zinc-800/50 relative overflow-hidden items-center justify-center opacity-50">
+              <div className="absolute inset-0 -translate-x-full animate-[shimmer_2s_infinite] bg-gradient-to-r from-transparent via-white/5 to-transparent z-0"></div>
+              <div className="relative z-10 w-full max-w-md space-y-6 text-center">
+                 <div className="w-16 h-16 rounded-2xl bg-zinc-900 border border-zinc-800 mx-auto flex items-center justify-center animate-pulse"></div>
+                 <div className="space-y-3">
+                    <div className="h-4 w-3/4 bg-zinc-800 rounded-lg mx-auto animate-pulse"></div>
+                    <div className="h-3 w-1/2 bg-zinc-900 rounded mx-auto animate-pulse"></div>
+                 </div>
+                 <div className="pt-8 text-zinc-600 font-mono text-xs uppercase tracking-widest animate-pulse">
+                    Select a ticket from the queue to enter the workstation HUD
+                 </div>
+              </div>
             </div>
           )}
         </div>

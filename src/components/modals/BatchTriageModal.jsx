@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import SafeIcon from '../../common/SafeIcon';
 import * as FiIcons from 'react-icons/fi';
@@ -9,7 +9,17 @@ import toast from 'react-hot-toast';
 
 const { FiCpu, FiX, FiCheck, FiAlertTriangle, FiLoader } = FiIcons;
 
-export default function BatchTriageModal({ isOpen, onClose }) {
+export default function BatchTriageModal({isOpen, onClose }) {
+  useEffect(() => {
+    const handleEsc = (e) => {
+      if (e.key === 'Escape') {
+        onClose(false);
+      }
+    };
+    window.addEventListener('keydown', handleEsc);
+    return () => window.removeEventListener('keydown', handleEsc);
+  }, [onClose]);
+
   const [processing, setProcessing] = useState(false);
   const [completed, setCompleted] = useState(false);
   const { selectedTicketIds, setSelectedTicketIds, fetchTickets } = useTicketStore();

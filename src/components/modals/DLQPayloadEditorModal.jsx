@@ -5,7 +5,17 @@ import { supabase } from '../../lib/supabaseClient';
 import { getEdgeWorkerUrl } from '../../lib/edgeWorkerUrl';
 import { onyxService } from '../../services/onyxService';
 
-export default function DLQPayloadEditorModal({ isOpen, onClose, event, onRefresh }) {
+export default function DLQPayloadEditorModal({isOpen, onClose, event, onRefresh }) {
+  useEffect(() => {
+    const handleEsc = (e) => {
+      if (e.key === 'Escape') {
+        onClose(false);
+      }
+    };
+    window.addEventListener('keydown', handleEsc);
+    return () => window.removeEventListener('keydown', handleEsc);
+  }, [onClose]);
+
   const [payloadText, setPayloadText] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isPurging, setIsPurging] = useState(false);
