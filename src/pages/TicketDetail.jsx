@@ -9,7 +9,7 @@ import KBSidebar from '../components/tickets/KBSidebar';
 import SLABadge from '../components/tickets/SLABadge';
 import AgentPresence from '../components/AgentPresence';
 import { FiSend, FiPaperclip, FiRefreshCw, FiCommand, FiBell, FiMail } from 'react-icons/fi';
-import toast from 'react-hot-toast';
+import { showToast } from '../lib/toast';
 import { supabase } from '../lib/supabaseClient';
 import { getEdgeWorkerUrl } from '../lib/edgeWorkerUrl';
 
@@ -101,11 +101,9 @@ export default function TicketDetail({ ticketId }) {
       const data = await res.json();
       if (!res.ok || !data.success) throw new Error(data.error || 'Failed to export briefing.');
 
-      toast.success("Executive thread briefing emailed to james.ellars@axim.us.com!", {
-        style: { background: '#09090b', color: '#10b981', border: '1px solid rgba(16,185,129,0.3)' }
-      });
+      showToast.success("Executive thread briefing emailed to james.ellars@axim.us.com!");
     } catch (err) {
-      toast.error(`Briefing Export Error: ${err.message}`);
+      showToast.error(`Briefing Export Error: ${err.message}`);
     } finally {
       setIsExporting(false);
     }
@@ -153,11 +151,9 @@ export default function TicketDetail({ ticketId }) {
       if (error) throw error;
 
       setReplyText('');
-      toast.success('Response dispatched successfully!', {
-        style: { background: '#09090b', color: '#10b981', border: '1px solid rgba(16,185,129,0.3)' }
-      });
+      showToast.success('Response dispatched successfully!');
     } catch (err) {
-      toast.error(`Failed to send message: ${err.message}`);
+      showToast.error(`Failed to send message: ${err.message}`);
     } finally {
       setIsSending(false);
     }
@@ -172,8 +168,33 @@ export default function TicketDetail({ ticketId }) {
 
   if (isLoading || !activeTicket) {
     return (
-      <div className="h-full flex items-center justify-center p-8 bg-zinc-950/40 rounded-3xl border border-zinc-800/80">
-        <FiRefreshCw className="animate-spin text-zinc-500 text-xl"/>
+      <div className="h-full flex flex-col p-6 bg-zinc-950/50 rounded-3xl border border-zinc-800/80 relative overflow-hidden">
+        <div className="absolute inset-0 -translate-x-full animate-[shimmer_2s_infinite] bg-gradient-to-r from-transparent via-white/5 to-transparent z-0"></div>
+        <div className="relative z-10 w-full space-y-6">
+          <div className="flex justify-between items-start">
+             <div className="space-y-3 w-1/2">
+                <div className="h-6 w-3/4 bg-zinc-800 rounded-lg animate-pulse"></div>
+                <div className="flex gap-2">
+                   <div className="h-4 w-20 bg-zinc-900 rounded animate-pulse"></div>
+                   <div className="h-4 w-24 bg-zinc-900 rounded animate-pulse"></div>
+                </div>
+             </div>
+             <div className="flex gap-2">
+                <div className="h-8 w-24 bg-zinc-900 rounded-lg animate-pulse"></div>
+                <div className="h-8 w-8 bg-zinc-900 rounded-lg animate-pulse"></div>
+             </div>
+          </div>
+          <div className="grid grid-cols-3 gap-4">
+             <div className="h-24 bg-zinc-900/80 rounded-xl border border-zinc-800 animate-pulse"></div>
+             <div className="h-24 bg-zinc-900/80 rounded-xl border border-zinc-800 animate-pulse"></div>
+             <div className="h-24 bg-zinc-900/80 rounded-xl border border-zinc-800 animate-pulse"></div>
+          </div>
+          <div className="flex-1 space-y-4 mt-8">
+             <div className="h-16 w-full bg-zinc-900/60 rounded-xl animate-pulse"></div>
+             <div className="h-24 w-3/4 bg-zinc-900/60 rounded-xl animate-pulse"></div>
+             <div className="h-20 w-5/6 bg-zinc-900/60 rounded-xl animate-pulse"></div>
+          </div>
+        </div>
       </div>
     );
   }

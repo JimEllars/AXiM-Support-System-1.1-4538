@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { motion } from 'framer-motion';
 import { FiCode, FiExternalLink, FiChevronDown, FiChevronRight, FiGitCommit, FiUser, FiCpu, FiFileText, FiMail, FiCheck, FiEye, FiAlertCircle, FiDatabase } from 'react-icons/fi';
 import { useTicketStore } from '../../store/useTicketStore';
 
-export default function MessageThread({ messages = [], ticketStatus }) {
+export default function MessageThread({ messages = [], ticketStatus, isLoading }) {
   const contributeToOnyxMemory = useTicketStore(state => state.contributeToOnyxMemory);
   const activeTicket = useTicketStore(state => state.activeTicket);
 
@@ -23,7 +24,30 @@ export default function MessageThread({ messages = [], ticketStatus }) {
 
   return (
     <div className="space-y-4 my-4">
-      {messages.map((msg) => {
+      {isLoading && messages.length === 0 ? (
+        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-4">
+          {[1, 2, 3].map((i) => (
+            <div key={i} className="p-4 rounded-2xl border bg-black/40 border-zinc-800/60 relative overflow-hidden">
+              <div className="absolute inset-0 -translate-x-full animate-[shimmer_2s_infinite] bg-gradient-to-r from-transparent via-white/5 to-transparent z-0"></div>
+              <div className="relative z-10 space-y-4 w-full">
+                <div className="flex items-center justify-between">
+                   <div className="flex items-center gap-2">
+                      <div className="w-6 h-6 rounded-lg bg-zinc-900 animate-pulse"></div>
+                      <div className="h-4 w-24 bg-zinc-800 rounded animate-pulse"></div>
+                   </div>
+                   <div className="h-3 w-16 bg-zinc-900 rounded animate-pulse"></div>
+                </div>
+                <div className="space-y-2">
+                  <div className="h-3 bg-zinc-800 rounded w-full animate-pulse"></div>
+                  <div className="h-3 bg-zinc-800 rounded w-5/6 animate-pulse"></div>
+                  <div className="h-3 bg-zinc-800 rounded w-4/6 animate-pulse"></div>
+                </div>
+              </div>
+            </div>
+          ))}
+        </motion.div>
+      ) : (
+        messages.map((msg) => {
         const isGitOpsPatch = msg.metadata?.source_interlock === 'the_coding_lab' || msg.metadata?.patch_delta;
         const isEmailInbound = msg.metadata?.source === 'emailit_inbound_webhook';
         const hasParsedAttachments = msg.metadata?.has_parsed_attachments;
@@ -147,7 +171,7 @@ export default function MessageThread({ messages = [], ticketStatus }) {
             )}
           </div>
         );
-      })}
+      }) )}
 
       <div ref={messagesEndRef} />
     </div>

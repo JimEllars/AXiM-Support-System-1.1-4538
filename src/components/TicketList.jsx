@@ -314,19 +314,31 @@ export default function TicketList({ onSelectTicket, activeQueue, statusFilter =
       <div className="space-y-3 bg-[#09090b]/80 backdrop-blur-md border border-white/10 shadow-2xl rounded-xl p-4">
       <div className={`transition-opacity duration-300 ${isTriaging ? 'opacity-50 pointer-events-none' : 'opacity-100'}`}>
       <AnimatePresence>
-        {isLoading ? (
-  <>
-    {[1, 2, 3, 4, 5].map((i) => (
-      <tr key={i} className="border-b border-zinc-800/50 flex">
-        <td className="px-6 py-4 flex-1"><div className="h-4 bg-zinc-800 rounded animate-pulse w-3/4"></div></td>
-        <td className="px-6 py-4 flex-1"><div className="h-4 bg-zinc-800 rounded animate-pulse w-1/2"></div></td>
-        <td className="px-6 py-4 flex-1"><div className="h-4 bg-zinc-800 rounded animate-pulse w-1/3"></div></td>
-        <td className="px-6 py-4 flex-1"><div className="h-4 bg-zinc-800 rounded animate-pulse w-1/4"></div></td>
-        <td className="px-6 py-4"><div className="h-8 w-8 bg-zinc-800 rounded-lg animate-pulse ml-auto"></div></td>
-      </tr>
-    ))}
-  </>
-) : filteredTickets.length === 0 ? (
+        {isLoading && filteredTickets.length === 0 ? (
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="space-y-3">
+            {[1, 2, 3, 4, 5].map((i) => (
+              <div key={i} className="flex items-center justify-between p-5 border rounded-2xl bg-zinc-950/50 border-zinc-800/80 relative overflow-hidden">
+                <div className="absolute inset-0 -translate-x-full animate-[shimmer_2s_infinite] bg-gradient-to-r from-transparent via-white/5 to-transparent z-0"></div>
+                <div className="flex items-center gap-5 relative z-10 w-full">
+                  <div className="w-8 h-8 rounded-lg bg-zinc-900 shrink-0 animate-pulse"></div>
+                  <div className="w-12 h-12 rounded-xl bg-zinc-900 border-2 border-zinc-800 shrink-0 animate-pulse"></div>
+                  <div className="flex-1 space-y-3 py-1">
+                    <div className="h-4 bg-zinc-800 rounded w-1/3 animate-pulse"></div>
+                    <div className="flex items-center gap-2">
+                      <div className="h-3 bg-zinc-900 rounded w-24 animate-pulse"></div>
+                      <div className="w-1 h-1 rounded-full bg-zinc-800"></div>
+                      <div className="h-3 bg-zinc-900 rounded w-32 animate-pulse"></div>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-6 opacity-60">
+                    <div className="w-24 h-6 bg-zinc-900 rounded-lg animate-pulse"></div>
+                    <div className="w-20 h-6 bg-zinc-800 rounded-lg animate-pulse"></div>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </motion.div>
+        ) : filteredTickets.length === 0 ? (
           <div className="py-24 text-center">
             <div className="flex flex-col items-center justify-center space-y-4 animate-in fade-in zoom-in duration-500">
               <div className="w-16 h-16 rounded-full bg-zinc-900/50 border border-zinc-800 flex items-center justify-center text-zinc-600 shadow-inner">

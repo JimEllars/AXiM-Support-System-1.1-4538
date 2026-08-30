@@ -2,7 +2,17 @@ import React, { useState, useEffect } from 'react';
 import { FiUserCheck, FiX, FiCheckCircle, FiXCircle, FiRefreshCw } from 'react-icons/fi';
 import { supabase } from '../../lib/supabaseClient';
 
-export default function ExecutiveDirectiveHistoryModal({ isOpen, onClose }) {
+export default function ExecutiveDirectiveHistoryModal({isOpen, onClose }) {
+  useEffect(() => {
+    const handleEsc = (e) => {
+      if (e.key === 'Escape') {
+        onClose(false);
+      }
+    };
+    window.addEventListener('keydown', handleEsc);
+    return () => window.removeEventListener('keydown', handleEsc);
+  }, [onClose]);
+
   const [directives, setDirectives] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
   const [filter, setFilter] = useState('all'); // 'all' | 'approved' | 'rejected'

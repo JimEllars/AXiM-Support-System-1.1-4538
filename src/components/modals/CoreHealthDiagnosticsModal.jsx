@@ -4,7 +4,17 @@ import toast from 'react-hot-toast';
 import { supabase } from '../../lib/supabaseClient';
 import { getEdgeWorkerUrl } from '../../lib/edgeWorkerUrl';
 
-export default function CoreHealthDiagnosticsModal({ isOpen, onClose }) {
+export default function CoreHealthDiagnosticsModal({isOpen, onClose }) {
+  useEffect(() => {
+    const handleEsc = (e) => {
+      if (e.key === 'Escape') {
+        onClose(false);
+      }
+    };
+    window.addEventListener('keydown', handleEsc);
+    return () => window.removeEventListener('keydown', handleEsc);
+  }, [onClose]);
+
   const [edgeHealth, setEdgeHealth] = useState(null);
   const [cronHealth, setCronHealth] = useState(null);
   const [secHealth, setSecHealth] = useState(null);
