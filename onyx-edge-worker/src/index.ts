@@ -7204,6 +7204,34 @@ function handleChatConnect(request: Request, env: Env): Response {
 
          if (env.AI && data.sender !== 'Operator') {
            try {
+             const translationPrompt = `Analyze the following text. If it is NOT in English, detect the language and translate it to English. If it is already in English, return exactly "IS_ENGLISH". Otherwise, return a JSON object strictly in this format: {"translated_text": "...", "original_language": "..."}. Text: "${data.text}"`;
+             const translationResponse = await env.AI.run('@cf/meta/llama-3-8b-instruct', {
+               prompt: translationPrompt
+             });
+
+             const responseText = (translationResponse as any).response?.trim() || "";
+             if (responseText !== "IS_ENGLISH" && responseText.includes("{") && responseText.includes("}")) {
+               try {
+                 const jsonMatch = responseText.substring(responseText.indexOf("{"), responseText.lastIndexOf("}") + 1);
+                 const parsedTranslation = JSON.parse(jsonMatch);
+                 if (parsedTranslation.translated_text && parsedTranslation.original_language) {
+                   data.translated_text = parsedTranslation.translated_text;
+                   data.original_language = parsedTranslation.original_language;
+                 }
+               } catch (e) {
+                 console.error("Failed to parse translation JSON", e);
+               }
+             }
+           } catch (e) {
+             console.error("AI translation error:", e);
+           }
+
+           try {
+             server.send(JSON.stringify(data));
+           } catch (e) {
+             console.error("Error broadcasting chat_message", e);
+           }
+           try {
              const sentimentResponse = await env.AI.run('@cf/huggingface/distilbert-sst-2-int8', {
                text: data.text
              });

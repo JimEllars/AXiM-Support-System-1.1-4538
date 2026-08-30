@@ -18,6 +18,7 @@ export default function LiveChatPanel() {
   const [isUploading, setIsUploading] = useState(false);
   const [isPeerTyping, setIsPeerTyping] = useState(false);
   const [readReceipts, setReadReceipts] = useState({});
+  const [showOriginal, setShowOriginal] = useState({});
   const fileInputRef = useRef(null);
 
   const wsRef = useRef(null);
@@ -440,7 +441,17 @@ export default function LiveChatPanel() {
                     <span>{new Date(msg.timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})} {readReceipts[msg.id] && !msg.isIncoming && <span className="ml-1 text-emerald-400 font-bold" title="Seen">✓</span>}</span>
                   </div>
                                     <div className="text-sm font-sans whitespace-pre-wrap break-words leading-snug">
-                    {msg.text}
+                    {msg.translated_text && !showOriginal[msg.id || i] ? msg.translated_text : msg.text}
+                    {msg.translated_text && (
+                      <div className="mt-1">
+                        <button
+                          onClick={() => setShowOriginal(prev => ({...prev, [msg.id || i]: !prev[msg.id || i]}))}
+                          className="inline-flex items-center gap-1 text-[9px] font-bold font-mono uppercase px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-400 border border-amber-500/40 hover:bg-amber-500/30 transition-colors shadow-sm"
+                        >
+                          {showOriginal[msg.id || i] ? "Show Translation" : "Show Original"}
+                        </button>
+                      </div>
+                    )}
                     {msg.attachment_url && (
                       <div className="mt-2">
                         {msg.attachment_url.toLowerCase().endsWith('.pdf') ? (
