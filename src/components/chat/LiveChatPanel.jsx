@@ -12,6 +12,9 @@ export default function LiveChatPanel() {
   const [isConnected, setIsConnected] = useState(false);
   const [aiSuggestion, setAiSuggestion] = useState(null);
   const [sentimentAlert, setSentimentAlert] = useState(null);
+  const [timeoutWarning, setTimeoutWarning] = useState(false);
+  const [timeoutSeconds, setTimeoutSeconds] = useState(0);
+  const [isReadOnly, setIsReadOnly] = useState(false);
 
   const wsRef = useRef(null);
   const messagesEndRef = useRef(null);
@@ -19,6 +22,18 @@ export default function LiveChatPanel() {
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   };
+
+  useEffect(() => {
+    let timer = null;
+    if (timeoutWarning && timeoutSeconds > 0) {
+      timer = setInterval(() => {
+        setTimeoutSeconds(prev => prev - 1);
+      }, 1000);
+    } else if (timeoutSeconds === 0 && timeoutWarning) {
+      setTimeoutWarning(false);
+    }
+    return () => clearInterval(timer);
+  }, [timeoutWarning, timeoutSeconds]);
 
   useEffect(() => {
     if (isChatOnline) {
@@ -69,7 +84,11 @@ export default function LiveChatPanel() {
                 timestamp: new Date().toISOString(),
                 isSystem: true
              }]);
+          } else if (data.type === 'timeout_warning') {
+             setTimeoutWarning(true);
+             setTimeoutSeconds(data.expiresIn || 60);
           } else if (data.type === 'chat_message') {
+             setTimeoutWarning(false);
              setMessages(prev => [...prev, {
                 id: data.id || 'msg-' + Date.now(),
                 sender: data.sender || 'Customer',
@@ -112,6 +131,15 @@ export default function LiveChatPanel() {
 
       ws.onclose = () => {
         setIsConnected(false);
+        setIsReadOnly(true);
+        setTimeoutWarning(false);
+        setMessages(prev => [...prev, {
+          id: 'system-' + Date.now(),
+          sender: 'System',
+          text: 'Session Closed due to Inactivity',
+          timestamp: new Date().toISOString(),
+          isSystem: true
+        }]);
         wsRef.current = null;
         console.log('[LiveChat] WebSocket disconnected');
 
@@ -192,7 +220,8 @@ export default function LiveChatPanel() {
 
   const handleSendMessage = (e) => {
     e.preventDefault();
-    if (!inputValue.trim() || !isConnected) return;
+    if (!inputValue.trim() || !isConnected || isReadOnly) return;
+    setTimeoutWarning(false);
 
     const newMessage = {
       type: 'chat_message',
@@ -338,6 +367,28 @@ export default function LiveChatPanel() {
         </div>
       )}
 
+
+      {/* Timeout Warning Area */}
+      {timeoutWarning && (
+        <div className="px-3 py-2 bg-rose-950 border-t border-rose-800 animate-in fade-in slide-in-from-bottom-2 flex items-center justify-between">
+           <div className="text-[10px] font-mono text-rose-400 flex items-center gap-1">
+             <span className="w-1.5 h-1.5 rounded-full bg-rose-400 animate-pulse"></span>
+             Session idle. Closing in {timeoutSeconds}s
+           </div>
+           <button
+             onClick={() => {
+               if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+                 wsRef.current.send(JSON.stringify({ type: 'keep_alive' }));
+                 setTimeoutWarning(false);
+               }
+             }}
+             className="text-[10px] font-mono bg-rose-600/20 text-rose-300 hover:bg-rose-600 hover:text-white px-2 py-1 rounded transition-colors"
+           >
+             KEEP ALIVE
+           </button>
+        </div>
+      )}
+
       {/* Input Area */}
       <div className="p-3 bg-zinc-900 border-t border-zinc-800">
         <form onSubmit={handleSendMessage} className="flex items-end gap-2">
@@ -350,8 +401,8 @@ export default function LiveChatPanel() {
                 handleSendMessage(e);
               }
             }}
-            placeholder={isConnected ? "Type a message..." : "Reconnecting..."}
-            disabled={!isConnected}
+            placeholder={isReadOnly ? "Session Closed due to Inactivity" : isConnected ? "Type a message..." : "Reconnecting..."}
+            disabled={!isConnected || isReadOnly}
             className="flex-1 max-h-32 min-h-[40px] bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-sm text-zinc-200 placeholder-zinc-500 focus:outline-none focus:border-indigo-500 transition-colors resize-none font-sans disabled:opacity-50"
             rows={1}
           />
