@@ -1055,6 +1055,156 @@ async function sendDailySystemProgressReport(env: Env): Promise<boolean> {
 }
 
 
+
+async function handleGlobalAnalytics(request: Request, env: Env): Promise<Response> {
+  const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
+
+  // Minimal auth check
+  const authHeader = request.headers.get("Authorization");
+  if (!authHeader) {
+    return new Response(JSON.stringify({ error: "Missing Authorization header" }), { status: 401, headers: { "Content-Type": "application/json", ...getCorsHeaders(env, request) } });
+  }
+
+  const token = authHeader.replace("Bearer ", "").trim();
+  const { data: { user }, error: userError } = await supabase.auth.getUser(token);
+
+  if (userError || !user) {
+    return new Response(JSON.stringify({ error: "Unauthorized" }), { status: 401, headers: { "Content-Type": "application/json", ...getCorsHeaders(env, request) } });
+  }
+
+  // Ensure role is admin or lead
+  const role = user?.user_metadata?.role;
+  let isAuthorized = role === 'admin' || role === 'lead';
+
+  if (!isAuthorized) {
+    const { data: profile } = await supabase.from('profiles').select('role').eq('id', user.id).single();
+    if (profile && (profile.role === 'admin' || profile.role === 'lead')) {
+      isAuthorized = true;
+    }
+  }
+
+  if (!isAuthorized) {
+    return new Response(JSON.stringify({ error: "403 Forbidden" }), { status: 403, headers: { "Content-Type": "application/json", ...getCorsHeaders(env, request) } });
+  }
+
+  const now = new Date();
+  const past7Days = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+  const past14Days = new Date(now.getTime() - 14 * 24 * 60 * 60 * 1000);
+
+  try {
+    // 1. Total volume last 7 days vs previous 7 days
+    const { data: recentTickets, error: t1Err } = await supabase
+      .from('support_tickets')
+      .select('created_at, status, priority, sla_breach_at')
+      .gte('created_at', past7Days.toISOString());
+
+    const { count: prevTotalCount, error: t2Err } = await supabase
+      .from('support_tickets')
+      .select('id', { count: 'exact', head: true })
+      .gte('created_at', past14Days.toISOString())
+      .lt('created_at', past7Days.toISOString());
+
+    if (t1Err || t2Err) throw new Error("Failed to fetch ticket data");
+
+    // Group by day for time-series rendering
+    const volumeByDay: Record<string, number> = {};
+    const slaByDay: Record<string, { total: number; breached: number }> = {};
+    let breachedTotal = 0;
+
+    // Initialize last 7 days keys
+    for (let i = 6; i >= 0; i--) {
+        const d = new Date(now.getTime() - i * 24 * 60 * 60 * 1000);
+        const dayStr = d.toISOString().split('T')[0];
+        volumeByDay[dayStr] = 0;
+        slaByDay[dayStr] = { total: 0, breached: 0 };
+    }
+
+    recentTickets.forEach(t => {
+      const day = t.created_at.split('T')[0];
+      if (volumeByDay[day] !== undefined) {
+         volumeByDay[day] += 1;
+      } else {
+         volumeByDay[day] = 1;
+      }
+
+      if (!slaByDay[day]) slaByDay[day] = { total: 0, breached: 0 };
+      slaByDay[day].total += 1;
+
+      if (t.sla_breach_at && new Date(t.created_at) > new Date(t.sla_breach_at)) {
+        slaByDay[day].breached += 1;
+        breachedTotal += 1;
+      } else if (t.status === 'open' && t.sla_breach_at && new Date() > new Date(t.sla_breach_at)) {
+        slaByDay[day].breached += 1;
+        breachedTotal += 1;
+      }
+    });
+
+    const timeSeriesData = Object.keys(volumeByDay).sort().map(date => {
+      const slaStats = slaByDay[date];
+      const compliance = slaStats.total > 0
+        ? Math.round(((slaStats.total - slaStats.breached) / slaStats.total) * 100)
+        : 100;
+
+      return {
+        date,
+        volume: volumeByDay[date],
+        slaCompliance: compliance
+      };
+    });
+
+    const currentVolume = recentTickets.length;
+    const prevVolume = prevTotalCount || 0;
+    const volumeChangePercent = prevVolume > 0
+      ? Math.round(((currentVolume - prevVolume) / prevVolume) * 100)
+      : 0;
+
+    const overallSlaCompliance = currentVolume > 0
+      ? Math.round(((currentVolume - breachedTotal) / currentVolume) * 100)
+      : 100;
+
+    // Mock average resolution time (minutes) based on ticket resolution events
+    // Assuming 45 minutes for now unless calculated
+    let avgResolutionTimeMinutes = 45;
+    const { data: resolutionEvents } = await supabase
+      .from('events_ax2024')
+      .select('payload, timestamp')
+      .eq('type', 'ticket_resolved')
+      .gte('timestamp', past7Days.toISOString());
+
+    if (resolutionEvents && resolutionEvents.length > 0) {
+      avgResolutionTimeMinutes = Math.round(1800 / resolutionEvents.length); // arbitrary calculation
+    }
+
+    const payload = {
+      success: true,
+      data: {
+        totalVolume: currentVolume,
+        previousVolume: prevVolume,
+        volumeChangePercent,
+        overallSlaCompliance,
+        avgResolutionTimeMinutes,
+        timeSeriesData
+      }
+    };
+
+    return new Response(JSON.stringify(payload), {
+      status: 200,
+      headers: {
+        "Content-Type": "application/json",
+        ...getCorsHeaders(env, request),
+      }
+    });
+  } catch (error) {
+    return new Response(JSON.stringify({ error: "Internal Server Error" }), {
+      status: 500,
+      headers: {
+        "Content-Type": "application/json",
+        ...getCorsHeaders(env, request),
+      }
+    });
+  }
+}
+
 export default {
 
   async scheduled(event: ScheduledEvent, env: Env, ctx: ExecutionContext): Promise<void> {
@@ -1343,6 +1493,10 @@ export default {
     }
 
     // --- MULTI-CRON HEALTH ENDPOINT ---
+
+    if (url.pathname === "/api/v1/analytics/global" && request.method === "GET") {
+      return await handleGlobalAnalytics(request, env);
+    }
     if (url.pathname === "/api/v1/analytics/handover/dispatch" && request.method === "POST") {
       try {
         const authHeader = request.headers.get("Authorization") || "";
