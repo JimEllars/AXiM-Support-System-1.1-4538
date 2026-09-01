@@ -15,6 +15,9 @@ import { getEdgeWorkerUrl } from '../lib/edgeWorkerUrl';
 
 export default function TicketDetail({ ticketId }) {
   const { activeTicket, activeThreadMessages, selectTicket, isLoading, trackPresence, untrackPresence, updateTypingStatus, activeAgents } = useTicketStore();
+
+
+
   const [replyText, setReplyText] = useState('');
   const [isSending, setIsSending] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
@@ -199,7 +202,9 @@ export default function TicketDetail({ ticketId }) {
     );
   }
 
-  const sampleDraft = activeTicket.metadata?.auto_response_draft || null;
+  // Let React render conditionally if llmDraftText is defined below.
+let llmDraftText = '';
+const sampleDraft = llmDraftText || activeTicket.metadata?.auto_response_draft || null;
 
   return (
     <div className="flex flex-col h-full space-y-6 overflow-y-auto pr-2">
