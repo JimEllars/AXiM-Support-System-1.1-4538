@@ -126,6 +126,13 @@ export default function OperatorLeaderboard() {
                 </div>
                 <div className="flex flex-col truncate">
                   <span className="text-xs font-medium text-zinc-200 truncate">{op.email.split('@')[0]}</span>
+                  {op.avg_csat > 0 && (
+                     <div className="flex items-center gap-0.5 ml-2" title={`Average CSAT: ${op.avg_csat.toFixed(1)}`}>
+                       {[...Array(5)].map((_, i) => (
+                         <FiStar key={i} className={`w-2 h-2 ${i < Math.round(op.avg_csat) ? 'fill-amber-400 text-amber-400' : 'text-zinc-600'}`} />
+                       ))}
+                     </div>
+                  )}
                   <div className="flex items-center gap-2 mt-0.5">
                     <span className="text-[9px] text-zinc-500 flex items-center gap-0.5">
                       <FiStar className="text-sky-400" /> {op.contributions}
