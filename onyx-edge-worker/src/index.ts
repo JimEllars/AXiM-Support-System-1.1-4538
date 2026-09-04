@@ -3035,6 +3035,11 @@ if (url.pathname === "/webhooks/intake") {
     // --- EDGE COMMAND EXECUTION ROUTE ---
 
     // --- ON-DEMAND EXECUTIVE DIGEST DISPATCH ROUTE ---
+
+    if (url.pathname.match(/^\/api\/v1\/tickets\/([^\/]+)\/csat$/) && request.method === "POST") {
+      return handleCSATFeedback(request, env, ctx);
+    }
+
     if (url.pathname === "/api/v1/email/digest" && request.method === "POST") {
       const authHeader = request.headers.get("Authorization") || "";
       const token = authHeader.replace("Bearer ", "").trim();
@@ -5658,6 +5663,72 @@ async function handleTicketResolved(request: Request, env: Env, ctx: any): Promi
     };
     ctx.waitUntil(dispatchWebhook());
 
+    const dispatchCsatEmail = async () => {
+      try {
+        if (!record.customer_email && !record.customer_id) return;
+
+        let customerEmail = record.customer_email;
+        if (!customerEmail && record.customer_id) {
+           const { data: contact } = await supabase.from('contacts_ax2024').select('email').eq('id', record.customer_id).single();
+           if (contact) customerEmail = contact.email;
+        }
+
+        if (!customerEmail) return;
+
+        const emailPayload = {
+          from: "AXiM Support <support@axim.us.com>",
+          to: customerEmail,
+          subject: `How did we do? Rate your support experience (Ticket #${record.id.slice(0, 8)})`,
+          html: `
+            <h2>Ticket Resolved</h2>
+            <p>Your support ticket (${record.subject}) has been resolved.</p>
+            <p>Please take a moment to rate your experience:</p>
+            <div>
+              <a href="https://axim.us.com/support/csat/${record.id}?rating=1" style="padding: 10px; background: #eee; text-decoration: none; margin: 2px;">⭐ 1</a>
+              <a href="https://axim.us.com/support/csat/${record.id}?rating=2" style="padding: 10px; background: #eee; text-decoration: none; margin: 2px;">⭐ 2</a>
+              <a href="https://axim.us.com/support/csat/${record.id}?rating=3" style="padding: 10px; background: #eee; text-decoration: none; margin: 2px;">⭐ 3</a>
+              <a href="https://axim.us.com/support/csat/${record.id}?rating=4" style="padding: 10px; background: #eee; text-decoration: none; margin: 2px;">⭐ 4</a>
+              <a href="https://axim.us.com/support/csat/${record.id}?rating=5" style="padding: 10px; background: #eee; text-decoration: none; margin: 2px;">⭐ 5</a>
+            </div>
+          `,
+          text: `Your ticket ${record.subject} has been resolved. Please rate us 1-5.`
+        };
+
+        const emailitRes = await fetch("https://api.emailit.com/v2/emails", {
+          method: "POST",
+          headers: {
+             "Authorization": `Bearer ${env.EMAILIT_API_KEY}`,
+             "Content-Type": "application/json"
+          },
+          body: JSON.stringify(emailPayload)
+        });
+
+        if (!emailitRes.ok) {
+           const fallbackRes = await fetch("https://api.resend.com/emails", {
+              method: "POST",
+              headers: {
+                 "Authorization": `Bearer ${env.RESEND_API_KEY}`,
+                 "Content-Type": "application/json"
+              },
+              body: JSON.stringify({
+                  from: emailPayload.from,
+                  to: [emailPayload.to],
+                  subject: emailPayload.subject,
+                  html: emailPayload.html,
+                  text: emailPayload.text
+              })
+           });
+           if (!fallbackRes.ok) {
+               console.error("Both EmailIt and Resend failed to send CSAT email");
+           }
+        }
+      } catch (e) {
+         console.error("CSAT dispatch error:", e);
+      }
+    };
+    ctx.waitUntil(dispatchCsatEmail());
+
+
     if (record.priority === "urgent" && !record.rca_generated) {
       const processRCA = async () => {
         try {
@@ -6664,107 +6735,74 @@ async function handleOnyxMemoryContribute(request: Request, env: Env, ctx: any):
 }
 
 
+
 async function handleLeaderboardAnalytics(request: Request, env: Env, ctx: any): Promise<Response> {
   const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
-  const logCtx = createLogContext(request);
 
-  const authHeader = request.headers.get("Authorization") || "";
-  const token = authHeader.replace("Bearer ", "").trim();
-  if (!token) {
-    return new Response(JSON.stringify({ error: "UNAUTHORIZED_ANALYTICS" }), {
-      status: 401, headers: getCorsHeaders(env, request)
-    });
+  const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+
+  // 1. Fetch active operators
+  const { data: operators, error: opsError } = await supabase
+      .from("team_profiles")
+      .select("id, email")
+      .in("role", ["operator", "lead"]);
+
+  if (opsError || !operators) {
+      return new Response(JSON.stringify({ error: "Failed to fetch operators" }), {
+          status: 500, headers: { "Content-Type": "application/json", ...getCorsHeaders(env, request) }
+      });
   }
 
-  const supabaseAuth = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY, {
-    global: { headers: { Authorization: `Bearer ${token}` } }
+  // 2. Fetch memory contributions (Score weight: 10)
+  const { data: contributions } = await supabase
+      .from("memory_banks")
+      .select("author_id, created_at")
+      .gte("created_at", thirtyDaysAgo);
+
+  // 3. Fetch manual renewals (Score weight: 5)
+  const { data: renewals } = await supabase
+      .from("events_ax2024")
+      .select("payload")
+      .eq("type", "memory_manual_renewed")
+      .gte("timestamp", thirtyDaysAgo);
+
+  // 4. Fetch CSAT scores
+  const { data: feedbacks } = await supabase
+      .from("ticket_feedback")
+      .select("operator_id, rating")
+      .gte("created_at", thirtyDaysAgo);
+
+  const opStats = operators.map(op => {
+      const opContributes = (contributions || []).filter(c => c.author_id === op.id).length;
+      const opRenewals = (renewals || []).filter(r => r.payload?.operator_id === op.id).length;
+
+      const opFeedbacks = (feedbacks || []).filter(f => f.operator_id === op.id);
+      let avg_csat = 0;
+      if (opFeedbacks.length > 0) {
+          avg_csat = opFeedbacks.reduce((sum, f) => sum + f.rating, 0) / opFeedbacks.length;
+      }
+
+      // Bonus points for good CSAT
+      const csatBonus = avg_csat >= 4.5 ? 20 : (avg_csat >= 4.0 ? 10 : 0);
+
+      const score = (opContributes * 10) + (opRenewals * 5) + csatBonus;
+
+      return {
+          id: op.id,
+          email: op.email,
+          contributions: opContributes,
+          renewals: opRenewals,
+          score: score,
+          avg_csat: avg_csat
+      };
   });
 
-  const { data: { user }, error: authError } = await supabaseAuth.auth.getUser();
-  if (authError || !user) {
-    return new Response(JSON.stringify({ error: "INVALID_SESSION" }), {
-      status: 403, headers: getCorsHeaders(env, request)
-    });
-  }
+  const sortedLeaderboard = opStats.sort((a, b) => b.score - a.score);
 
-  try {
-    const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
-
-    // Fetch contribution and renewal events
-    const { data: events, error: fetchError } = await supabase
-      .from('events_ax2024')
-      .select('type, payload')
-      .in('type', ['onyx_memory_bank_contributed', 'onyx_memory_renewed'])
-      .gte('timestamp', thirtyDaysAgo);
-
-    if (fetchError) throw fetchError;
-
-    // Aggregate stats by author_id / operator_id
-    const leaderboardMap = new Map<string, { id: string, email: string, score: number, contributions: number, renewals: number }>();
-
-    if (events) {
-      for (const ev of events) {
-        const payload = ev.payload as any;
-        const operatorId = payload?.author_id || payload?.operator_id;
-
-        if (!operatorId) continue;
-
-        if (!leaderboardMap.has(operatorId)) {
-          leaderboardMap.set(operatorId, {
-            id: operatorId,
-            email: "Operator_" + operatorId.slice(0, 4), // Fallback if no email
-            score: 0,
-            contributions: 0,
-            renewals: 0
-          });
-        }
-
-        const stats = leaderboardMap.get(operatorId)!;
-
-        if (ev.type === 'onyx_memory_bank_contributed') {
-          stats.contributions += 1;
-          stats.score += 5;
-        } else if (ev.type === 'onyx_memory_renewed') {
-          stats.renewals += 1;
-          stats.score += 2;
-        }
-      }
-    }
-
-    // Attempt to enrich with actual emails if possible, but keep it within the 95/5 rule.
-    // For a drop-in that avoids complex joins, we can query auth.users if admin role is allowed.
-    // Alternatively, just query contacts_ax2024 or ticket table to guess emails.
-    // Let's query auth users to fetch emails if possible.
-    try {
-      const { data: usersData } = await supabaseAuth.auth.admin.listUsers();
-      if (usersData && usersData.users) {
-        for (const u of usersData.users) {
-          if (leaderboardMap.has(u.id)) {
-            leaderboardMap.get(u.id)!.email = u.email || u.id;
-          }
-        }
-      }
-    } catch (adminErr) {
-      console.warn("Could not fetch user emails from admin API", adminErr);
-    }
-
-    const sortedLeaderboard = Array.from(leaderboardMap.values())
-      .sort((a, b) => b.score - a.score)
-      .slice(0, 10);
-
-    return new Response(JSON.stringify({ success: true, leaderboard: sortedLeaderboard }), {
-      status: 200,
-      headers: { "Content-Type": "application/json", ...getCorsHeaders(env, request) }
-    });
-
-  } catch (err: any) {
-    logErr(supabase, logCtx, err, ctx);
-    return new Response(JSON.stringify({ error: err.message }), {
-      status: 500, headers: getCorsHeaders(env, request)
-    });
-  }
+  return new Response(JSON.stringify({ leaderboard: sortedLeaderboard }), {
+      status: 200, headers: { "Content-Type": "application/json", ...getCorsHeaders(env, request) }
+  });
 }
-
 
 async function handleManualLeaderboardDispatch(request: Request, env: Env, ctx: any): Promise<Response> {
   const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
@@ -7544,4 +7582,50 @@ function handleChatConnect(request: Request, env: Env): Response {
     status: 101,
     webSocket: client
   });
+}
+
+
+async function handleCSATFeedback(request: Request, env: Env, ctx: any): Promise<Response> {
+  const url = new URL(request.url);
+  const match = url.pathname.match(/^\/api\/v1\/tickets\/([^\/]+)\/csat$/);
+  const ticketId = match ? match[1] : null;
+
+  if (!ticketId) {
+    return new Response(JSON.stringify({ error: "MISSING_TICKET_ID" }), { status: 400, headers: { 'Content-Type': 'application/json', ...getCorsHeaders(env, request) } });
+  }
+
+  try {
+    const payload: any = await request.json();
+    const rating = payload.rating;
+    const feedback_text = payload.feedback_text || "";
+
+    if (!rating || rating < 1 || rating > 5) {
+      return new Response(JSON.stringify({ error: "INVALID_RATING" }), { status: 400, headers: { 'Content-Type': 'application/json', ...getCorsHeaders(env, request) } });
+    }
+
+    const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
+
+    // Check if ticket exists
+    const { data: ticket, error: ticketError } = await supabase.from('support_tickets').select('id, assigned_to').eq('id', ticketId).single();
+    if (ticketError || !ticket) {
+        return new Response(JSON.stringify({ error: "TICKET_NOT_FOUND" }), { status: 404, headers: { 'Content-Type': 'application/json', ...getCorsHeaders(env, request) } });
+    }
+
+    const { error } = await supabase.from('ticket_feedback').insert({
+      ticket_id: ticketId,
+      rating: rating,
+      feedback_text: feedback_text,
+      operator_id: ticket.assigned_to
+    });
+
+    if (error) {
+      console.error("Error inserting CSAT feedback", error);
+      return new Response(JSON.stringify({ error: "DATABASE_ERROR" }), { status: 500, headers: { 'Content-Type': 'application/json', ...getCorsHeaders(env, request) } });
+    }
+
+    return new Response(JSON.stringify({ success: true }), { status: 200, headers: { 'Content-Type': 'application/json', ...getCorsHeaders(env, request) } });
+  } catch (error: any) {
+    console.error("CSAT Handler Error", error);
+    return new Response(JSON.stringify({ error: "INTERNAL_ERROR" }), { status: 500, headers: { 'Content-Type': 'application/json', ...getCorsHeaders(env, request) } });
+  }
 }

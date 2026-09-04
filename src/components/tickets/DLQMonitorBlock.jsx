@@ -99,6 +99,38 @@ export default function DLQMonitorBlock() {
     }
   };
 
+
+  const handleEchoReplay = async (itemId, jobId) => {
+    setRetryingId(itemId);
+    try {
+      const echoUrl = import.meta.env.VITE_ECHO_RECOVERY_URL || 'http://localhost:54321/functions/v1/echo-recovery';
+      const internalKey = import.meta.env.VITE_AXIM_INTERNAL_KEY || 'axim_internal_dev_key';
+
+      const res = await fetch(`${echoUrl}/api/v1/recovery/replay-single`, {
+         method: 'POST',
+         headers: {
+            'Content-Type': 'application/json',
+            'X-Axim-Signature': internalKey
+         },
+         body: JSON.stringify({ job_id: jobId })
+      });
+
+      if (!res.ok) {
+         const errData = await res.json().catch(() => ({}));
+         throw new Error(errData.error || 'Echo recovery replay failed');
+      }
+
+      toast.success("Payload successfully replayed via Echo Recovery!", {
+        style: { background: '#09090b', color: '#10b981', border: '1px solid rgba(16,185,129,0.3)' }
+      });
+      fetchDLQData();
+    } catch (err) {
+      toast.error(`Replay Failed: ${err.message}`);
+    } finally {
+      setRetryingId(null);
+    }
+  };
+
   const handleRetryPayload = async (itemId, payload) => {
     setRetryingId(itemId);
     try {
@@ -185,6 +217,18 @@ export default function DLQMonitorBlock() {
                 <div className="text-[10px] text-zinc-500 font-sans truncate">{item.payload?.error_reason || 'Transient ingestion fault'}</div>
               </div>
 
+
+              <div className="flex items-center gap-2 flex-shrink-0">
+              {(item.payload?.job_id || item.payload?.metadata?.job_id) && (
+                <button
+                  onClick={() => handleEchoReplay(item.id, item.payload?.job_id || item.payload?.metadata?.job_id)}
+                  disabled={retryingId === item.id}
+                  className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-zinc-900 hover:bg-zinc-800 text-[10px] text-emerald-400 border border-emerald-900/50 transition-all flex-shrink-0 disabled:opacity-50"
+                >
+                  <FiRefreshCw className={retryingId === item.id ? 'animate-spin' : ''} />
+                  <span>{retryingId === item.id ? 'Replaying...' : 'Replay via Echo'}</span>
+                </button>
+              )}
               <button
                 onClick={() => {
                   setSelectedEvent(item);
@@ -195,6 +239,8 @@ export default function DLQMonitorBlock() {
                 <FiSearch />
                 <span>Inspect Payload</span>
               </button>
+              </div>
+
             </div>
           ))
         ) : (
