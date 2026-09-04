@@ -1,2 +1,4 @@
 In SPRINT 6.3 / PHASE 147, we added CRON health pulse indicators and executive receipt email confirmations.
 When dealing with user-provided JSX snippets that have syntax errors (like mangled template literals or incorrect react-icons imports, e.g. FiCheckCircle2 instead of FiCheckCircle), it's important to correct them to ensure the build passes.
+In SPRINT 14.2 / PHASE 187, we implemented automated CSAT Survey Dispatch and Ingestion.
+This involved adding a secure HMAC SHA-256 signature generator (`generateCSATSignature`), modifying `handleTicketResolved` to dispatch CSAT survey emails using EmailIt when tickets are resolved, and creating a new `handleCSATSubmit` endpoint to securely ingest feedback into the `product_feedback` table (with fallback logic).
