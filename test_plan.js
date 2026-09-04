@@ -1,1 +1,0 @@
-console.log("I need to implement a cosine similarity function in typescript, then query recent tickets (e.g., from the last 48 hours) for the same organization_id, generate an embedding for the new ticket, and then for each recent ticket, check if it's a duplicate.")

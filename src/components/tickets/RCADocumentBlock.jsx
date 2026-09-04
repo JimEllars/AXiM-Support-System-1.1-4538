@@ -7,11 +7,42 @@ const getEdgeWorkerUrl = () => {
     return import.meta.env.VITE_EDGE_WORKER_URL || "http://127.0.0.1:54321/functions/v1/onyx-edge-worker";
 };
 
-export default function RCADocumentBlock({ rcaRecord, onFinalized }) {
-  const [notes, setNotes] = useState(rcaRecord?.payload?.notes || '');
+export default function RCADocumentBlock({ rcaRecord, onFinalized, ticketId, severity }) {
+  const [notes, setNotes] = useState(rcaRecord?.content || rcaRecord?.payload?.notes || '');
   const [isFinalizing, setIsFinalizing] = useState(false);
+  const [isGenerating, setIsGenerating] = useState(false);
 
-  const isDraft = rcaRecord.status === 'draft';
+  const isDraft = rcaRecord?.status?.toLowerCase() === 'draft';
+  const hasRecord = !!rcaRecord;
+
+  const handleGenerateRCA = async () => {
+    setIsGenerating(true);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const token = session?.access_token;
+      if (!token) throw new Error("Active session token required.");
+
+      const workerUrl = getEdgeWorkerUrl();
+      const res = await fetch(`${workerUrl}/api/v1/tickets/${ticketId}/generate-rca`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        }
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) throw new Error(data.error || 'Failed to generate RCA.');
+
+      toast.success("RCA Post-Mortem generated successfully.", {
+        style: { background: '#09090b', color: '#10b981', border: '1px solid rgba(16,185,129,0.3)' }
+      });
+      if (onFinalized) onFinalized();
+    } catch (err) {
+      toast.error(`RCA Generation Error: ${err.message}`);
+    } finally {
+      setIsGenerating(false);
+    }
+  };
 
   const handleFinalize = async () => {
     if (!notes.trim()) {
@@ -27,14 +58,23 @@ export default function RCADocumentBlock({ rcaRecord, onFinalized }) {
       if (!token) throw new Error("Active session token required.");
 
       const workerUrl = getEdgeWorkerUrl();
-      const res = await fetch(`${workerUrl}/api/v1/actions/rca/finalize`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
-        },
-        body: JSON.stringify({ rcaLogId: rcaRecord.id, notes })
-      });
+      // Use existing endpoint for finalizing RCA
+      let res;
+      if (rcaRecord.payload) {
+          res = await fetch(`${workerUrl}/api/v1/actions/rca/finalize`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${token}`
+            },
+            body: JSON.stringify({ rcaLogId: rcaRecord.id, notes })
+          });
+      } else {
+         // Direct update if using the new table
+         const { error } = await supabase.from('rca_documents').update({ status: 'FINALIZED', content: notes }).eq('id', rcaRecord.id);
+         if (error) throw error;
+         res = { ok: true, json: async () => ({ success: true }) };
+      }
 
       const data = await res.json();
       if (!res.ok || !data.success) throw new Error(data.error || 'Failed to finalize RCA.');
@@ -50,6 +90,27 @@ export default function RCADocumentBlock({ rcaRecord, onFinalized }) {
       setIsFinalizing(false);
     }
   };
+
+  if (!hasRecord) {
+    if (severity === 'urgent' || severity === 'high' || severity === 'CRITICAL' || severity === 'HIGH') {
+        return (
+          <div className="p-4 rounded-2xl bg-indigo-950/20 border border-indigo-500/30 space-y-4 shadow-lg shadow-indigo-900/10 flex flex-col items-start">
+             <div className="flex items-center gap-2 text-indigo-400 mb-2">
+                <FiFileText className="text-lg" />
+                <h3 className="text-xs font-mono font-bold uppercase tracking-widest">Post-Mortem Required</h3>
+              </div>
+             <button
+                onClick={handleGenerateRCA}
+                disabled={isGenerating}
+                className="flex items-center gap-2 px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-mono font-bold uppercase transition-all disabled:opacity-50 disabled:hover:bg-indigo-600 shadow-md shadow-indigo-900/50"
+              >
+                {isGenerating ? 'Generating...' : <><FiFileText /> Generate RCA Post-Mortem with Onyx</>}
+              </button>
+          </div>
+        );
+    }
+    return null;
+  }
 
   return (
     <div className="p-4 rounded-2xl bg-indigo-950/20 border border-indigo-500/30 space-y-4 shadow-lg shadow-indigo-900/10">
@@ -73,7 +134,7 @@ export default function RCADocumentBlock({ rcaRecord, onFinalized }) {
 
       <div className="space-y-2">
          <div className="text-[11px] font-mono text-zinc-400 uppercase tracking-widest">Breach Type</div>
-         <div className="text-sm font-semibold text-zinc-200">{rcaRecord.payload?.breach_type || 'Unknown'}</div>
+         <div className="text-sm font-semibold text-zinc-200">{rcaRecord.payload?.breach_type || 'System Incident'}</div>
       </div>
 
       <div className="space-y-2 pt-2 border-t border-indigo-500/20">
@@ -86,11 +147,11 @@ export default function RCADocumentBlock({ rcaRecord, onFinalized }) {
             onChange={(e) => setNotes(e.target.value)}
             disabled={isFinalizing}
             placeholder="Document your findings, root cause verification, and long-term resolution here..."
-            className="w-full p-3 rounded-xl bg-black/50 border border-indigo-500/30 text-xs text-zinc-200 placeholder-indigo-500/40 focus:outline-none focus:border-indigo-400/60 transition-all resize-none font-sans min-h-[100px]"
+            className="w-full p-3 rounded-xl bg-black/50 border border-indigo-500/30 text-xs text-zinc-200 placeholder-indigo-500/40 focus:outline-none focus:border-indigo-400/60 transition-all resize-none font-sans min-h-[250px]"
           />
         ) : (
           <div className="w-full p-3 rounded-xl bg-black/30 border border-indigo-500/20 text-xs text-zinc-300 font-sans min-h-[80px] whitespace-pre-wrap">
-            {rcaRecord.payload?.notes || 'No notes provided.'}
+            {notes || 'No notes provided.'}
           </div>
         )}
       </div>
@@ -102,7 +163,7 @@ export default function RCADocumentBlock({ rcaRecord, onFinalized }) {
             disabled={isFinalizing || !notes.trim()}
             className="flex items-center gap-2 px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-mono font-bold uppercase transition-all disabled:opacity-50 disabled:hover:bg-indigo-600 shadow-md shadow-indigo-900/50"
           >
-            {isFinalizing ? 'Locking...' : <><FiCheck /> Finalize RCA</>}
+            {isFinalizing ? 'Locking...' : <><FiCheck /> Save & Notify Leadership</>}
           </button>
         </div>
       )}
