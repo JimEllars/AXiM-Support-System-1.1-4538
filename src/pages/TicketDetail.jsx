@@ -32,12 +32,26 @@ export default function TicketDetail({ ticketId }) {
     if (!ticketId) return;
     try {
       const { data, error } = await supabase
-        .from('hitl_audit_logs')
+        .from('rca_documents')
         .select('*')
-        .eq('support_ticket_id', ticketId)
-        .eq('tool_type', 'rca_report')
-        .order('created_at', { ascending: false })
+        .eq('ticket_id', ticketId)
+        .order('generated_at', { ascending: false })
         .limit(1);
+
+      if (!data || data.length === 0) {
+        // Fallback to hitl logs
+        const { data: hitlData } = await supabase
+          .from('hitl_audit_logs')
+          .select('*')
+          .eq('support_ticket_id', ticketId)
+          .eq('tool_type', 'rca_report')
+          .order('created_at', { ascending: false })
+          .limit(1);
+        if (hitlData && hitlData.length > 0) {
+          setRcaRecord(hitlData[0]);
+          return;
+        }
+      }
 
       if (!error && data && data.length > 0) {
         setRcaRecord(data[0]);
@@ -239,15 +253,15 @@ const sampleDraft = llmDraftText || activeTicket.metadata?.auto_response_draft |
       {/* Main Workstation Grid */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
         <div className="lg:col-span-8 space-y-6">
-          {rcaRecord && (
-            <RCADocumentBlock
+          <RCADocumentBlock
               rcaRecord={rcaRecord}
+              ticketId={activeTicket.id}
+              severity={activeTicket.priority}
               onFinalized={() => {
                 fetchRcaRecord();
                 selectTicket(activeTicket.id);
               }}
             />
-          )}
           <OnyxInvestigationPanel ticketId={activeTicket.id} />
 
           {sampleDraft && (

@@ -3,6 +3,14 @@ import { FiUser, FiBriefcase, FiDollarSign, FiAlertCircle, FiStar, FiShield } fr
 import { supabase } from '../../lib/supabaseClient';
 import { useNavigate } from 'react-router-dom';
 
+import { FiPhoneCall } from 'react-icons/fi';
+import toast from 'react-hot-toast';
+
+const getEdgeWorkerUrl = () => {
+    return import.meta.env.VITE_EDGE_WORKER_URL || "http://127.0.0.1:54321/functions/v1/onyx-edge-worker";
+};
+
+
 export default function Customer360({ ticketId }) {
   const [profile, setProfile] = useState(null);
   const [ticketMeta, setTicketMeta] = useState(null);
@@ -10,6 +18,48 @@ export default function Customer360({ ticketId }) {
   const [isLoading, setIsLoading] = useState(true);
   const [customerId, setCustomerId] = useState(null);
   const navigate = useNavigate();
+
+
+  const [isScheduling, setIsScheduling] = useState(false);
+  const [showScheduleForm, setShowScheduleForm] = useState(false);
+  const [scheduleDate, setScheduleDate] = useState('');
+
+  const handleScheduleCallback = async () => {
+    if (!scheduleDate) {
+        toast.error('Please select a date and time.');
+        return;
+    }
+
+    setIsScheduling(true);
+    try {
+        const { data: { session } } = await supabase.auth.getSession();
+        const token = session?.access_token;
+        if (!token) throw new Error("Active session token required.");
+
+        const workerUrl = getEdgeWorkerUrl();
+        const res = await fetch(`${workerUrl}/api/v1/tickets/${ticketId}/schedule-callback`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`
+          },
+          body: JSON.stringify({ scheduled_at: new Date(scheduleDate).toISOString() })
+        });
+
+        const data = await res.json();
+        if (!res.ok || !data.success) throw new Error(data.error || 'Failed to schedule callback.');
+
+        toast.success("Voice callback scheduled successfully.", {
+          style: { background: '#09090b', color: '#10b981', border: '1px solid rgba(16,185,129,0.3)' }
+        });
+        setShowScheduleForm(false);
+        setScheduleDate('');
+    } catch (err) {
+        toast.error(`Schedule Error: ${err.message}`);
+    } finally {
+        setIsScheduling(false);
+    }
+  };
 
   useEffect(() => {
     const fetchContext = async () => {
@@ -98,6 +148,46 @@ export default function Customer360({ ticketId }) {
           )}
         </div>
       )}
+
+
+      {/* Schedule Callback Action */}
+      <div className="mb-6">
+         {!showScheduleForm ? (
+            <button
+                onClick={() => setShowScheduleForm(true)}
+                className="w-full py-2 bg-emerald-600/20 hover:bg-emerald-600/40 text-emerald-400 border border-emerald-500/30 rounded-xl text-xs font-mono font-bold uppercase tracking-wider flex items-center justify-center gap-2 transition-all"
+            >
+                <FiPhoneCall /> Schedule Phone Callback
+            </button>
+         ) : (
+            <div className="p-3 bg-emerald-950/20 border border-emerald-500/30 rounded-xl space-y-3">
+                <div className="text-xs font-mono text-emerald-400 font-bold uppercase tracking-widest flex items-center gap-2">
+                   <FiPhoneCall /> Book Outbound Call
+                </div>
+                <input
+                    type="datetime-local"
+                    value={scheduleDate}
+                    onChange={(e) => setScheduleDate(e.target.value)}
+                    className="w-full bg-black/40 border border-emerald-500/30 rounded px-2 py-1 text-xs text-zinc-200"
+                />
+                <div className="flex gap-2">
+                    <button
+                        disabled={isScheduling}
+                        onClick={handleScheduleCallback}
+                        className="flex-1 py-1.5 bg-emerald-600 hover:bg-emerald-500 rounded text-xs font-mono font-bold uppercase text-black transition-all disabled:opacity-50"
+                    >
+                        {isScheduling ? 'Booking...' : 'Confirm'}
+                    </button>
+                    <button
+                        onClick={() => setShowScheduleForm(false)}
+                        className="flex-1 py-1.5 bg-zinc-800 hover:bg-zinc-700 rounded text-xs font-mono font-bold uppercase text-zinc-300 transition-all"
+                    >
+                        Cancel
+                    </button>
+                </div>
+            </div>
+         )}
+      </div>
 
       {profile ? (
         <div className="space-y-3 mb-6">
