@@ -1,1 +1,0 @@
-echo 'export AI_BINDING_AVAILABLE="YES"'

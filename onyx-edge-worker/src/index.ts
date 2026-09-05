@@ -2210,129 +2210,90 @@ export default {
 
     // --- SECURE EMAIL DISPATCH ROUTE ---
     // --- INBOUND EMAIL WEBHOOK INGESTION ROUTE ---
+
     if (url.pathname === "/api/v1/email/inbound" && request.method === "POST") {
       try {
-        const rawBody = await request.text();
-        const signature = request.headers.get("X-EmailIt-Signature") || "";
+        const rawBody = await request.clone().text();
+        const signature = request.headers.get("X-Emailit-Signature") || request.headers.get("X-EmailIt-Signature");
 
-        // 1. Webhook Signature Verification (If secret configured)
-        if (env.EMAILIT_WEBHOOK_SECRET) {
-          const isValid = await verifyEmailItWebhookSignature(rawBody, signature, env.EMAILIT_WEBHOOK_SECRET);
+        if (signature && env.EMAILIT_WEBHOOK_SECRET) {
+          // The signature format is expected to be `t=${timestamp},v1=${hash}`
+          let isValid = false;
+          const [tPart, v1Part] = signature.split(",");
+          const timestamp = tPart?.split("=")[1];
+          const hash = v1Part?.split("=")[1];
+
+          if (timestamp && hash) {
+            const encoder = new TextEncoder();
+            const cryptoKey = await crypto.subtle.importKey(
+              "raw",
+              encoder.encode(env.EMAILIT_WEBHOOK_SECRET),
+              { name: "HMAC", hash: "SHA-256" },
+              false,
+              ["sign"]
+            );
+            const sigBuffer = await crypto.subtle.sign("HMAC", cryptoKey, encoder.encode(timestamp + "." + rawBody));
+            const expectedSig = Array.from(new Uint8Array(sigBuffer)).map(b => b.toString(16).padStart(2, "0")).join("");
+            if (hash === expectedSig) {
+                isValid = true;
+            }
+          }
           if (!isValid) {
-            return new Response(JSON.stringify({ error: "INVALID_WEBHOOK_SIGNATURE" }), {
-              status: 401, headers: getCorsHeaders(env, request)
-            });
+            const fallbackValid = await verifyEmailItWebhookSignature(rawBody, signature, env.EMAILIT_WEBHOOK_SECRET);
+            if (!fallbackValid) {
+               return new Response(JSON.stringify({ error: "Invalid webhook signature" }), {
+                 status: 401, headers: getCorsHeaders(env, request)
+               });
+            }
           }
         }
 
-        const payload: any = JSON.parse(rawBody || "{}");
-        const sender = payload.from || payload.sender || "unknown@external.com";
+        const payload = JSON.parse(rawBody || "{}");
+
+        // Extract ticket ID from subject: [Ticket #<id>]
         const subject = payload.subject || "";
+        const ticketMatch = subject.match(/\[Ticket #([a-zA-Z0-9-]+)\]/i) || subject.match(/Ticket #([a-zA-Z0-9-]+)/i);
 
-        // 2. Cloudflare KV Rate-Limiting (30 requests / minute)
-        if (env.STATUS_KV) {
-          const clientIp = request.headers.get("CF-Connecting-IP") || sender;
-          const rateKey = `rate_inbound_${clientIp}`;
-          const currentCount = parseInt((await env.STATUS_KV.get(rateKey)) || "0", 10);
-
-          if (currentCount >= 30) {
-            return new Response(JSON.stringify({ error: "RATE_LIMIT_EXCEEDED" }), {
-              status: 429, headers: getCorsHeaders(env, request)
-            });
-          }
-
-          await env.STATUS_KV.put(rateKey, (currentCount + 1).toString(), { expirationTtl: 60 });
+        if (!ticketMatch) {
+          return new Response("No ticket ID found in subject", { status: 200 }); // Return 200 to acknowledge webhook
         }
 
-        let bodyText = payload.text || payload.plain_body || payload.html || "Empty email body.";
+        const ticketId = ticketMatch[1];
+        const supabaseAdmin = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
 
-        // Pre-process attachments via Workers AI toMarkdown
-        if (env.AI && payload.attachments && Array.isArray(payload.attachments)) {
-          for (const att of payload.attachments) {
-            if (att.content_base64 && att.name) {
-              try {
-                const fileBuffer = Uint8Array.from(atob(att.content_base64), c => c.charCodeAt(0));
-                const markdownResult = await env.AI.toMarkdown({
-                  name: att.name,
-                  blob: new Blob([fileBuffer], { type: att.content_type || 'application/octet-stream' })
-                });
+        const { data: ticket, error: ticketError } = await supabaseAdmin
+          .from("support_tickets")
+          .select("id")
+          .ilike("id", `${ticketId}%`)
+          .limit(1)
+          .single();
 
-                if (markdownResult?.data) {
-                  bodyText += `\n\n--- Attached Document Markdown (${att.name}) ---\n${markdownResult.data}`;
-                }
-              } catch (attErr) {
-                console.warn(`[ATTACHMENT MARKDOWN FAULT] Failed to parse ${att.name}:`, attErr);
-              }
-            }
-          }
+        if (ticketError || !ticket) {
+          return new Response("Ticket not found", { status: 200 }); // Return 200 to acknowledge webhook
         }
 
-        const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
+        const fromEmail = payload.from?.address || payload.from || "unknown@external.com";
+        const bodyText = payload.text || payload.plain_body || payload.html || "Empty message body";
 
-        // Smart Executive Directive Parser
-        const isExecutive = sender.toLowerCase().includes("james.ellars@axim.us.com");
-        const hitlMatch = bodyText.match(/\[HITL #([a-f0-9-]+)\]/i) || payload.subject?.match(/\[HITL #([a-f0-9-]+)\]/i);
-        const hitlId = hitlMatch ? hitlMatch[1] : null;
-
-        if (isExecutive && hitlId) {
-          const isApprove = /\[APPROVE\]/i.test(bodyText) || /approve/i.test(bodyText);
-          const isReject = /\[REJECT\]/i.test(bodyText) || /reject/i.test(bodyText);
-
-          if (isApprove || isReject) {
-            const newStatus = isApprove ? "approved" : "rejected";
-            await supabase.from("hitl_audit_logs").update({
-              status: newStatus,
-              updated_at: new Date().toISOString(),
-              metadata: { executive_responder: sender, method: "email_text_reply" }
-            }).eq("id", hitlId);
-
-            if (env.STATUS_KV) {
-              ctx.waitUntil(env.STATUS_KV.delete("exec_policy_summary_v1"));
-            }
-
-            ctx.waitUntil(sendEmailItNotification(
-              "james.ellars@axim.us.com",
-              `✅ [DIRECTIVE CONFIRMED] Inbound Text Directive Processed`,
-              `<div style="font-family: monospace; background: #09090b; color: #f4f4f5; padding: 20px; border-radius: 12px; border: 1px solid #27272a;">
-                <h2 style="color: #10b981; margin-top: 0;">TEXT DIRECTIVE INGESTED</h2>
-                <p>Decision <strong>${newStatus.toUpperCase()}</strong> recorded for HITL #${hitlId.slice(0, 8)}.</p>
-              </div>`,
-              env
-            ));
-          }
-        }
-
-        // Match Ticket UUID
-        const ticketMatch = payload.subject?.match(/\[Ticket #([a-f0-9-]+)\]/i);
-        const ticketId = ticketMatch ? ticketMatch[1] : null;
-
-        if (ticketId) {
-          const { data: ticket } = await supabase.from("support_tickets").select("id").eq("id", ticketId).single();
-          if (ticket) {
-            await supabase.from("ticket_messages").insert({
-              ticket_id: ticket.id,
-              sender_id: sender,
-              message_body: `**[📧 INBOUND EMAIL RECEIVED]**\n\n${bodyText.trim()}`,
-              is_internal_note: false,
-              metadata: { source: "emailit_inbound_webhook", original_subject: payload.subject, has_parsed_attachments: !!payload.attachments?.length }
-            });
-          }
-        }
-
-        return new Response(JSON.stringify({
-          success: true,
-          matched_ticket_id: ticketId,
-          executive_directive_parsed: isExecutive && !!hitlId
-        }), {
-          status: 200, headers: { "Content-Type": "application/json", ...getCorsHeaders(env, request) }
+        await supabaseAdmin.from("ticket_messages").insert({
+          ticket_id: ticket.id,
+          sender_id: "email_inbound",
+          message_body: bodyText,
+          metadata: { inbound_email: fromEmail, source: "emailit_inbound_webhook", original_subject: payload.subject }
         });
-      } catch (err: any) {
-        return new Response(JSON.stringify({ error: err.message }), {
-          status: 500, headers: getCorsHeaders(env, request)
-        });
+
+        // Update ticket status
+        await supabaseAdmin.from("support_tickets").update({
+          status: "open",
+          updated_at: new Date().toISOString()
+        }).eq("id", ticket.id);
+
+        return new Response(JSON.stringify({ success: true, matched_ticket_id: ticket.id }), { status: 200, headers: { "Content-Type": "application/json", ...getCorsHeaders(env, request) } });
+      } catch (err) {
+        console.error("Error processing inbound email webhook:", err);
+        return new Response("Internal Server Error", { status: 500, headers: getCorsHeaders(env, request) });
       }
     }
-
 
     if (url.pathname === "/api/v1/email/webhook" && request.method === "POST") {
       try {
@@ -3561,6 +3522,97 @@ ${notes}`,
       }
     }
 
+    if (url.pathname === "/api/v1/hitl/action" && request.method === "GET") {
+      const token = url.searchParams.get("token");
+      const decision = url.searchParams.get("decision");
+
+      if (!token || !decision) {
+        return new Response("Missing token or decision", { status: 400 });
+      }
+
+      try {
+        const supabaseAdmin = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
+
+        const tokenParts = token.split(":");
+        if (tokenParts.length !== 4) {
+          return new Response("Invalid token structure", { status: 400 });
+        }
+
+        const [hitlId, uuid, timestamp, sig] = tokenParts;
+        const encoder = new TextEncoder();
+        const cryptoKey = await crypto.subtle.importKey(
+          "raw",
+          encoder.encode(env.AXIM_ONYX_SECRET),
+          { name: "HMAC", hash: "SHA-256" },
+          false,
+          ["sign"]
+        );
+
+        const sigBuffer = await crypto.subtle.sign("HMAC", cryptoKey, encoder.encode(`${hitlId}:${uuid}:${timestamp}`));
+        const expectedSig = Array.from(new Uint8Array(sigBuffer)).map(b => b.toString(16).padStart(2, "0")).join("");
+
+        if (sig !== expectedSig) {
+          return new Response("Invalid token signature", { status: 403 });
+        }
+
+        if (env.HITL_KV) {
+          const kvData = await env.HITL_KV.get(`hitl_token:${token}`);
+          if (kvData) {
+            const meta = JSON.parse(kvData);
+            if (meta.status !== "pending") {
+              return new Response(`<html><body style="background:#09090b;color:#f4f4f5;font-family:sans-serif;text-align:center;padding:50px;">
+                <h2 style="color:#fbbf24;">Action Already Processed</h2>
+                <p>This action has already been marked as ${meta.status}.</p>
+              </body></html>`, { status: 400, headers: { "Content-Type": "text/html" }});
+            }
+            meta.status = decision;
+            await env.HITL_KV.put(`hitl_token:${token}`, JSON.stringify(meta), { expirationTtl: 86400 });
+          }
+        }
+
+        const { data: hitlLog, error: logError } = await supabaseAdmin
+          .from("hitl_audit_logs")
+          .select("*")
+          .eq("id", hitlId)
+          .single();
+
+        if (logError || !hitlLog) {
+          return new Response("Action log not found", { status: 404 });
+        }
+
+        if (hitlLog.status !== "pending") {
+           return new Response(`<html><body style="background:#09090b;color:#f4f4f5;font-family:sans-serif;text-align:center;padding:50px;">
+                <h2 style="color:#fbbf24;">Action Already Processed</h2>
+                <p>This action has already been marked as ${hitlLog.status}.</p>
+              </body></html>`, { status: 400, headers: { "Content-Type": "text/html" }});
+        }
+
+        const newStatus = decision === "approve" ? "approved" : "rejected";
+        await supabaseAdmin
+          .from("hitl_audit_logs")
+          .update({ status: newStatus, metadata: { ...hitlLog.metadata, executed_via: "email_action" } })
+          .eq("id", hitlId);
+
+        await supabaseAdmin.from("events_ax2024").insert({
+            type: "hitl_action_processed",
+            payload: { hitl_id: hitlId, status: newStatus, method: "email" }
+        });
+
+        const color = newStatus === "approved" ? "#10b981" : "#f43f5e";
+        const displayStatus = newStatus === "approved" ? "Approved" : "Rejected";
+
+        return new Response(`<html><body style="background:#09090b;color:#f4f4f5;font-family:sans-serif;text-align:center;padding:50px;">
+            <h2 style="color:${color};">Action Successfully ${displayStatus}</h2>
+            <p style="color:#a1a1aa;">The workflow for Ticket #${hitlLog.support_ticket_id?.slice(0, 8)} has been updated.</p>
+            <a href="${env.ALLOWED_ORIGINS?.split(",")[0] || 'https://support.axim.us.com'}/ticket/${hitlLog.support_ticket_id}" style="color:#6366f1;text-decoration:none;display:inline-block;margin-top:20px;">Return to Cockpit</a>
+          </body></html>`, { status: 200, headers: { "Content-Type": "text/html" }});
+      } catch (error: any) {
+        console.error("Error processing HITL email action:", error);
+        return new Response("Internal Server Error", { status: 500 });
+      }
+    }
+
+
     if (url.pathname === "/api/v1/actions/resolve" && request.method === "POST") {
       const authHeader = request.headers.get("Authorization") || "";
       const token = authHeader.replace("Bearer ", "").trim();
@@ -4219,8 +4271,9 @@ async function sendIngestionExecutiveNotification(ticket: any, triageResult: any
         <p><strong>AI Triage Classification:</strong> ${triageResult.category}</p>
         <p><strong>Proposed Action:</strong> Sandbox Escalation</p>
         <div style="margin-top: 15px;">
-          <a href="${workerUrl}/api/v1/actions/resolve?token=${tokenApprove}&action=approve" style="background: #10b981; color: white; padding: 8px 16px; text-decoration: none; border-radius: 4px; font-weight: bold; margin-right: 10px;">Approve & Execute</a>
-          <a href="${workerUrl}/api/v1/actions/resolve?token=${tokenReject}&action=reject" style="background: #ef4444; color: white; padding: 8px 16px; text-decoration: none; border-radius: 4px; font-weight: bold;">Reject</a>
+          <a href="${workerUrl}/api/v1/hitl/action?token=${tokenApprove}&decision=approve" style="background: #10b981; color: white; padding: 8px 16px; text-decoration: none; border-radius: 4px; font-weight: bold; margin-right: 10px;">Approve & Execute</a>
+          <a href="${workerUrl}/api/v1/hitl/action?token=${tokenReject}&decision=reject" style="background: #ef4444; color: white; padding: 8px 16px; text-decoration: none; border-radius: 4px; font-weight: bold;">Reject</a>
+          <a href="https://support.axim.us.com/tickets/${ticket.id}" style="background: #4f46e5; color: white; padding: 8px 16px; text-decoration: none; border-radius: 4px; font-weight: bold; margin-left: 10px;">View in Cockpit</a>
         </div>
       </div>
     `;
