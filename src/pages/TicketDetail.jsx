@@ -18,7 +18,14 @@ export default function TicketDetail({ ticketId }) {
 
 
 
-  const [replyText, setReplyText] = useState('');
+  const [replyText, setReplyText] = useState(() => {
+    const saved = localStorage.getItem(`composer_${ticketId}`);
+    return saved !== null ? saved : '';
+  });
+
+  useEffect(() => {
+    localStorage.setItem(`composer_${ticketId}`, replyText);
+  }, [replyText, ticketId]);
   const [isSending, setIsSending] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
   const [isTyping, setIsTyping] = useState(false);
@@ -168,6 +175,7 @@ export default function TicketDetail({ ticketId }) {
       if (error) throw error;
 
       setReplyText('');
+      localStorage.removeItem(`composer_${ticketId}`);
       showToast.success('Response dispatched successfully!');
     } catch (err) {
       showToast.error(`Failed to send message: ${err.message}`);
@@ -260,6 +268,9 @@ const sampleDraft = llmDraftText || activeTicket.metadata?.auto_response_draft |
               onFinalized={() => {
                 fetchRcaRecord();
                 selectTicket(activeTicket.id);
+                // Also optionally refresh the ticket list so dashboard stays in sync
+                const { fetchTickets } = useTicketStore.getState();
+                if (fetchTickets) fetchTickets();
               }}
             />
           <OnyxInvestigationPanel ticketId={activeTicket.id} />

@@ -81,8 +81,13 @@ export default function CoreHealthIndicator() {
     let timeoutId;
 
     const scheduleNext = () => {
+       if (document.hidden) {
+           // Wait and try again if tab is backgrounded
+           timeoutId = setTimeout(scheduleNext, 5000);
+           return;
+       }
        // Exponential backoff logic
-       const baseInterval = 30000;
+       const baseInterval = 45000;
        const maxInterval = 300000; // 5 mins
        // if failures > 0, we do baseInterval * (2 ^ (failures - 1))
        const currentFailures = failures;
