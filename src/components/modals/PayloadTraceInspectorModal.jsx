@@ -1,3 +1,4 @@
+import toast from 'react-hot-toast';
 import React, { useEffect, useState } from 'react';
 import { useTicketStore } from '../../store/useTicketStore';
 import { supabase } from '../../lib/supabaseClient';
@@ -96,8 +97,22 @@ export default function PayloadTraceInspectorModal() {
             </div>
           </div>
 
-          <div className="bg-black/50 p-4 rounded-xl border border-zinc-800/50">
-            <span className="text-zinc-600 font-bold uppercase tracking-widest text-[10px] block mb-3">Exception Metadata Stream</span>
+          <div className="bg-black/50 p-4 rounded-xl border border-zinc-800/50 relative">
+            <div className="flex items-center justify-between mb-3">
+              <span className="text-zinc-600 font-bold uppercase tracking-widest text-[10px] block">Exception Metadata Stream</span>
+              <button
+                onClick={() => {
+                  navigator.clipboard.writeText(renderPayload());
+                  toast.success("Payload copied to clipboard", {
+                    style: { background: '#09090b', color: '#22d3ee', border: '1px solid rgba(34,211,238,0.3)' }
+                  });
+                }}
+                className="text-cyan-400 hover:text-cyan-300 transition-colors flex items-center gap-1 text-[10px]"
+                title="Copy Payload"
+              >
+                <FiCopy /> Copy
+              </button>
+            </div>
             <pre className="text-[11px] text-zinc-300 overflow-x-auto p-4 bg-[#09090b] rounded-lg border border-zinc-900 shadow-inner max-h-[400px] whitespace-pre-wrap break-words">
               {renderPayload()}
             </pre>

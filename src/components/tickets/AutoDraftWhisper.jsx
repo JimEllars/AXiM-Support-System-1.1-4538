@@ -7,7 +7,17 @@ import { getEdgeWorkerUrl } from '../../lib/edgeWorkerUrl';
 export default function AutoDraftWhisper({ draftText, onApplyDraft, ticketId }) {
   const [isDismissed, setIsDismissed] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
-  const [editedText, setEditedText] = useState(draftText);
+
+  // Use localStorage or persist the state safely so re-renders don't blast the edit
+  const [editedText, setEditedText] = useState(() => {
+    const saved = localStorage.getItem(`draft_${ticketId}`);
+    return saved !== null ? saved : draftText;
+  });
+
+  React.useEffect(() => {
+    localStorage.setItem(`draft_${ticketId}`, editedText);
+  }, [editedText, ticketId]);
+
   const [isSending, setIsSending] = useState(false);
 
   if (!draftText || isDismissed) return null;
@@ -42,10 +52,12 @@ export default function AutoDraftWhisper({ draftText, onApplyDraft, ticketId }) 
     toast.success("AI draft whisper applied to composer!", {
       style: { background: '#09090b', color: '#10b981', border: '1px solid rgba(16,185,129,0.3)' }
     });
+    localStorage.removeItem(`draft_${ticketId}`);
   };
 
   const handleDismiss = () => {
     sendFeedbackTelemetry('dismissed');
+    localStorage.removeItem(`draft_${ticketId}`);
     setIsDismissed(true);
   };
 
@@ -84,7 +96,7 @@ export default function AutoDraftWhisper({ draftText, onApplyDraft, ticketId }) 
       toast.success("Response dispatched via EmailIt successfully!", {
         style: { background: '#09090b', color: '#10b981', border: '1px solid rgba(16,185,129,0.3)' }
       });
-
+      localStorage.removeItem(`draft_${ticketId}`);
       setIsDismissed(true);
     } catch (error) {
       toast.error(error.message || "Failed to dispatch. Please try again.");

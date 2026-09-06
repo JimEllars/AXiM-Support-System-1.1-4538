@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
-import { FiFileText, FiLock, FiCheck } from 'react-icons/fi';
+import { FiFileText, FiLock, FiCheck, FiRefreshCw } from 'react-icons/fi';
 import toast from 'react-hot-toast';
+import { sanitizePayload } from "../../lib/sanitize";
 import { supabase } from '../../lib/supabaseClient';
 
 const getEdgeWorkerUrl = () => {
@@ -129,6 +130,15 @@ export default function RCADocumentBlock({ rcaRecord, onFinalized, ticketId, sev
               <FiLock className="text-[10px]" /> Finalized
             </span>
           )}
+
+          <button
+            onClick={handleGenerateRCA}
+            disabled={isGenerating}
+            className="ml-2 inline-flex items-center gap-1 px-2 py-1 rounded bg-indigo-500/10 text-indigo-400 text-[10px] font-bold uppercase tracking-wider border border-indigo-500/20 hover:bg-indigo-500/20 transition-colors disabled:opacity-50"
+            title="Regenerate RCA"
+          >
+            <FiRefreshCw className={isGenerating ? "animate-spin" : ""} /> {isGenerating ? "Regenerating" : "Regenerate"}
+          </button>
         </div>
       </div>
 
@@ -151,7 +161,7 @@ export default function RCADocumentBlock({ rcaRecord, onFinalized, ticketId, sev
           />
         ) : (
           <div className="w-full p-3 rounded-xl bg-black/30 border border-indigo-500/20 text-xs text-zinc-300 font-sans min-h-[80px] whitespace-pre-wrap">
-            {notes || 'No notes provided.'}
+            <div dangerouslySetInnerHTML={{ __html: sanitizePayload({ html: notes || 'No notes provided.' }).html }} />
           </div>
         )}
       </div>
