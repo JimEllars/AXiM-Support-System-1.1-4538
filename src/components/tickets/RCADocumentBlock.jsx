@@ -18,6 +18,7 @@ export default function RCADocumentBlock({ rcaRecord, onFinalized, ticketId, sev
 
   const handleGenerateRCA = async () => {
     setIsGenerating(true);
+    const toastId = toast.loading("Generating RCA...");
     try {
       const { data: { session } } = await supabase.auth.getSession();
       const token = session?.access_token;
@@ -35,11 +36,12 @@ export default function RCADocumentBlock({ rcaRecord, onFinalized, ticketId, sev
       if (!res.ok || !data.success) throw new Error(data.error || 'Failed to generate RCA.');
 
       toast.success("RCA Post-Mortem generated successfully.", {
+        id: toastId,
         style: { background: '#09090b', color: '#10b981', border: '1px solid rgba(16,185,129,0.3)' }
       });
       if (onFinalized) onFinalized();
     } catch (err) {
-      toast.error(`RCA Generation Error: ${err.message}`);
+      toast.error(`RCA Generation Error: ${err.message}`, { id: toastId });
     } finally {
       setIsGenerating(false);
     }

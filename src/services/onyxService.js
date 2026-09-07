@@ -11,7 +11,7 @@ const ONYX_SECRET = import.meta.env.VITE_ONYX_SECURE_KEY;
 
 // Safe fetch wrapper with 3000ms timeout and standardized error handling
 async function fetchWithTimeout(url, options = {}) {
-  const timeoutMs = options.timeout || 3000;
+  const timeoutMs = options.timeout || 4000;
   const controller = new AbortController();
   const id = setTimeout(() => controller.abort(), timeoutMs);
 

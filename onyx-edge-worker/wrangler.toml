@@ -46,3 +46,7 @@ bucket_name = "axim-telemetry-archive"
 # R2 Lifecycle Retention Policy
 # Retain backup objects for 365 days
 lifecycle_retention_days = 365
+
+[[kv_namespaces]]
+binding = "HITL_KV"
+id = "fake-hitl-kv-id-for-now"
