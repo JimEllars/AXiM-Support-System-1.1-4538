@@ -198,6 +198,7 @@ export interface Env {
   CORE_API_URL: string;
   IDEMPOTENCY_KV: KVNamespace;
   KB_CACHE: KVNamespace;
+  HITL_KV: KVNamespace;
   EMAILIT_API_KEY?: string;
   STATUS_KV: KVNamespace;
   RESEND_API_KEY?: string;
