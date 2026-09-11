@@ -37,3 +37,21 @@ Once secrets are bound, you can review the currently configured bindings without
 ```bash
 npx wrangler secret list
 ```
+
+5. **Bind the EmailIt API Key:**
+   ```bash
+   npx wrangler secret put EMAILIT_API_KEY
+   ```
+   *(Paste the key when prompted)*
+
+6. **Bind the Resend API Key:**
+   ```bash
+   npx wrangler secret put RESEND_API_KEY
+   ```
+   *(Paste the key when prompted)*
+
+7. **Bind the EmailIt Webhook Secret:**
+   ```bash
+   npx wrangler secret put EMAILIT_WEBHOOK_SECRET
+   ```
+   *(Paste the key when prompted)*

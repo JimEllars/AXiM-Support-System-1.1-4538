@@ -4,6 +4,7 @@ compatibility_date = "2024-03-20"
 compatibility_flags = ["nodejs_compat"]
 
 [vars]
+DEFAULT_FROM_EMAIL = "AXiM Support <support@updates.axim.io>"
 ALLOWED_ORIGINS = "http://localhost:5173,https://axim.us.com"
 CORE_API_URL = "https://api.axim-core.internal"
 SUPABASE_URL = "https://your-supabase-project.supabase.co"

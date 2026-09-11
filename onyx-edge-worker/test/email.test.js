@@ -1,124 +1,154 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { EmailDispatchManager } from '../src/email/dispatch';
 
-global.fetch = vi.fn();
+describe('EmailDispatchManager', () => {
+  let dispatchManager;
+  const mockEmailitKey = 'test_emailit_key';
+  const mockResendKey = 'test_resend_key';
+  const defaultFrom = 'AXiM Support <support@updates.axim.io>';
 
-describe('EmailIt Edge Webhook Security & Rate-Limiting Suite', () => {
-  it('should return 429 Too Many Requests when inbound webhook rate limit is exceeded', async () => {
-    vi.mocked(fetch).mockResolvedValueOnce({
-      status: 429,
-      json: async () => ({ error: "RATE_LIMIT_EXCEEDED" })
-    });
-
-    const res = await fetch('http://localhost:8787/api/v1/email/inbound', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ sender: 'spammer@test.com', subject: 'Test' })
-    });
-
-    expect(res.status).toBe(429);
-    const data = await res.json();
-    expect(data.error).toBe("RATE_LIMIT_EXCEEDED");
+  beforeEach(() => {
+    dispatchManager = new EmailDispatchManager(mockEmailitKey, mockResendKey, defaultFrom);
+    global.fetch = vi.fn();
   });
 
-  it('should return 401 Unauthorized for invalid HMAC webhook signatures', async () => {
-    vi.mocked(fetch).mockResolvedValueOnce({
-      status: 401,
-      json: async () => ({ error: "INVALID_WEBHOOK_SIGNATURE" })
-    });
-
-    const res = await fetch('http://localhost:8787/api/v1/email/inbound', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-EmailIt-Signature': 'invalid_signature_hash'
-      },
-      body: JSON.stringify({ sender: 'test@axim.us.com', subject: 'Test' })
-    });
-
-    expect(res.status).toBe(401);
-  });
-
-  it('should include proactive SLA warning metrics in the HTML payload dispatched to james.ellars@axim.us.com', async () => {
-    vi.mocked(fetch).mockImplementation(async (url, options) => {
-      if (url === 'https://api.emailit.com/v1/emails' || url === 'https://api.resend.com/emails') {
-        const body = JSON.parse(options.body);
-        expect(body.to).toContain('james.ellars@axim.us.com');
-        expect(body.html).toContain('PROACTIVE SLA RISK HORIZON');
-        return { ok: true, status: 200, json: async () => ({ success: true }) };
-      }
-      return { ok: true, status: 200, json: async () => ({}) };
-    });
-
-    // Mock an endpoint call that triggers the executive digest
-    const res = await fetch('http://localhost:8787/api/v1/cron/digest', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' }
-    });
-
-    expect(fetch).toHaveBeenCalled();
-  });
-
-  it('should embed dynamic HITL Action Approval links in email when requires_hitl is true', async () => {
-    vi.mocked(fetch).mockImplementation(async (url, options) => {
-      if (url === 'https://api.emailit.com/v1/emails' || url === 'https://api.resend.com/emails') {
-        const body = JSON.parse(options.body);
-        expect(body.html).toContain('HITL ACTION REQUIRED');
-        expect(body.html).toContain('token=');
-        expect(body.html).toContain('action=approve');
-        return { ok: true, status: 200, json: async () => ({ success: true }) };
-      }
-      return { ok: true, status: 200, json: async () => ({}) };
-    });
-
-    const res = await fetch('http://localhost:8787/api/v1/webhooks/public-intake', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ encrypted_payload: 'test', iv: 'test', cf_turnstile_response: 'valid-token' })
-    });
-    expect(res.status).toBe(200);
-  });
-
-  it('should process email delivery lifecycle webhook updates', async () => {
-    vi.mocked(fetch).mockResolvedValueOnce({
+  it('Primary Path: Successful send via EmailIt API v2 with mocked HTTP 200 and telemetry header extraction', async () => {
+    global.fetch.mockResolvedValueOnce({
+      ok: true,
       status: 200,
-      json: async () => ({ success: true })
-    });
-    const res = await fetch('http://localhost:8787/api/v1/email/webhook', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        message_id: 'test_msg_123',
-        event: 'delivered'
-      })
+      headers: new Headers({
+        'ratelimit-remaining': '9',
+        'ratelimit-daily-remaining': '4999',
+        'ratelimit-daily-reset': '3600'
+      }),
+      json: async () => ({ id: 'emailit_msg_1' })
     });
 
-    expect(res.status).toBe(200);
-    const data = await res.json();
-    expect(data.success).toBe(true);
+    const result = await dispatchManager.send({ to: 'test@example.com', subject: 'Test' });
+
+    expect(result.success).toBe(true);
+    expect(result.provider).toBe('emailit');
+    expect(result.messageId).toBe('emailit_msg_1');
+    expect(dispatchManager.getTelemetry()).toEqual({
+      rateLimitRemaining: 9,
+      dailyRemaining: 4999,
+      dailyResetSeconds: 3600
+    });
+  });
+
+  it('Failover Path (Timeout or 500): Trigger fallback to Resend', async () => {
+    // Mock EmailIt to fail
+    global.fetch.mockResolvedValueOnce({
+      ok: false,
+      status: 500,
+      headers: new Headers(),
+      json: async () => ({ error: 'Internal Server Error' })
     });
 
-  it('should process weekly leaderboard digest dispatch and log telemetry', async () => {
-    vi.mocked(fetch).mockImplementation(async (url, options) => {
-      if (url === 'https://api.emailit.com/v1/emails' || url === 'https://api.resend.com/emails') {
-        const body = JSON.parse(options.body);
-        expect(body.to).toContain('james.ellars@axim.us.com');
-        expect(body.subject).toContain('Weekly Leaderboard Digest');
-        expect(body.html).toContain('Weekly Operator Leaderboard Digest');
-        return { ok: true, status: 200, json: async () => ({ success: true }) };
-      }
-      return { ok: true, status: 200, json: async () => ({}) };
+    // Mock Resend to succeed
+    global.fetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      headers: new Headers(),
+      json: async () => ({ id: 'resend_msg_1' })
     });
 
-    const res = await fetch('http://localhost:8787/api/v1/analytics/leaderboard/dispatch', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': 'Bearer test_token'
-      }
+    const result = await dispatchManager.send({ to: 'test@example.com', subject: 'Failover Test', meta: { key: 'val' } });
+
+    expect(result.success).toBe(true);
+    expect(result.provider).toBe('resend');
+    expect(result.messageId).toBe('resend_msg_1');
+
+    // Check if fetch was called with Resend endpoint on second try
+    expect(global.fetch).toHaveBeenCalledTimes(2);
+    expect(global.fetch.mock.calls[1][0]).toContain('resend.com');
+  });
+
+  it('Failover Path (Quota Exhaustion): Route to Resend directly when daily quota is 0', async () => {
+    // Setup state where daily remaining is 0
+    global.fetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      headers: new Headers({
+        'ratelimit-remaining': '9',
+        'ratelimit-daily-remaining': '0',
+        'ratelimit-daily-reset': '3600'
+      }),
+      json: async () => ({ id: 'emailit_msg_1' })
     });
 
-    expect(fetch).toHaveBeenCalled();
+    await dispatchManager.send({ to: 'test1@example.com', subject: 'Exhaust Quota' });
+
+    // Next call should go straight to Resend
+    global.fetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      headers: new Headers(),
+      json: async () => ({ id: 'resend_msg_2' })
+    });
+
+    const result2 = await dispatchManager.send({ to: 'test2@example.com', subject: 'Direct Resend' });
+    expect(result2.provider).toBe('resend');
+
+    // 1 call to EmailIt (first time), 1 call to Resend (second time)
+    expect(global.fetch).toHaveBeenCalledTimes(2);
+    expect(global.fetch.mock.calls[1][0]).toContain('resend.com');
+  });
+
+  it('Circuit Breaker: Should trip open on error and route to Resend for 5 minutes', async () => {
+    // First call fails
+    global.fetch.mockResolvedValueOnce({
+      ok: false,
+      status: 500,
+      headers: new Headers(),
+      json: async () => ({ error: 'Error' })
+    });
+    global.fetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      headers: new Headers(),
+      json: async () => ({ id: 'resend_msg_1' })
+    });
+
+    await dispatchManager.send({ to: 'test1@example.com', subject: 'Error Trigger' });
+
+    // Second call should go straight to Resend
+    global.fetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      headers: new Headers(),
+      json: async () => ({ id: 'resend_msg_2' })
+    });
+    const result2 = await dispatchManager.send({ to: 'test2@example.com', subject: 'Circuit Open Test' });
+
+    expect(result2.provider).toBe('resend');
+    expect(global.fetch).toHaveBeenCalledTimes(3);
+    expect(global.fetch.mock.calls[2][0]).toContain('resend.com');
+  });
+
+  it('Webhook Verification: Verify X-Emailit-Signature', async () => {
+    const rawBody = JSON.stringify({ message: 'test' });
+    const secret = 'supersecret';
+
+    const encoder = new TextEncoder();
+    const cryptoKey = await crypto.subtle.importKey(
+      "raw",
+      encoder.encode(secret),
+      { name: "HMAC", hash: "SHA-256" },
+      false,
+      ["sign"]
+    );
+    const t = Math.floor(Date.now() / 1000).toString();
+    const dataToSign = encoder.encode(t + '.' + rawBody);
+    const signatureBuffer = await crypto.subtle.sign("HMAC", cryptoKey, dataToSign);
+    const signatureHex = Array.from(new Uint8Array(signatureBuffer)).map(b => b.toString(16).padStart(2, '0')).join('');
+
+    const signatureHeader = `t=${t},v1=${signatureHex}`;
+
+    const isValid = await EmailDispatchManager.verifyEmailItSignature(rawBody, signatureHeader, secret);
+    expect(isValid).toBe(true);
+
+    const isInvalid = await EmailDispatchManager.verifyEmailItSignature(rawBody, 't=123,v1=badhex', secret);
+    expect(isInvalid).toBe(false);
   });
 });
