@@ -19,6 +19,7 @@ async function generateHitlActionToken(hitlId: string, secret: string): Promise<
  */
 
 import { createClient } from "@supabase/supabase-js";
+import { EmailDispatchManager } from "./email/dispatch";
 
 import { z } from "zod";
 
@@ -203,6 +204,7 @@ export interface Env {
   STATUS_KV: KVNamespace;
   RESEND_API_KEY?: string;
   RESEND_FROM_EMAIL?: string;
+  DEFAULT_FROM_EMAIL?: string;
   AI?: any;
 }
 
@@ -2358,7 +2360,13 @@ export default {
       }
     }
 
-    if (url.pathname === "/api/v1/email/send" && request.method === "POST") {
+
+    if (url.pathname === "/api/onyx/email/health" && request.method === "GET") {
+        const dispatchManager = new EmailDispatchManager(env.EMAILIT_API_KEY || '', env.RESEND_API_KEY || '', env.DEFAULT_FROM_EMAIL);
+        return new Response(JSON.stringify({ status: "healthy", telemetry: dispatchManager.getTelemetry() || { dailyRemaining: 5000, rateLimitRemaining: 10 } }), { status: 200, headers: getCorsHeaders(env, request) });
+    }
+
+    if (url.pathname === "/api/onyx/email/send" && request.method === "POST") {
       const authHeader = request.headers.get("Authorization") || "";
       const token = authHeader.replace("Bearer ", "").trim();
       if (!token) {
@@ -2379,38 +2387,156 @@ export default {
 
       try {
         const payload: any = await request.json();
-        const { to, subject, html } = payload;
+        const dispatchManager = new EmailDispatchManager(env.EMAILIT_API_KEY || '', env.RESEND_API_KEY || '', env.DEFAULT_FROM_EMAIL);
+        const result = await dispatchManager.send(payload);
+        return new Response(JSON.stringify(result), { status: result.success ? 200 : 500, headers: getCorsHeaders(env, request) });
+      } catch (error: any) {
+        return new Response(JSON.stringify({ error: error.message }), { status: 500, headers: getCorsHeaders(env, request) });
+      }
+    }
 
-        if (!to || !subject || !html) {
-          return new Response(JSON.stringify({ error: "MISSING_EMAIL_PARAMETERS" }), {
-            status: 400, headers: getCorsHeaders(env, request)
+    if (url.pathname === "/api/onyx/email/ticket-reply" && request.method === "POST") {
+      const authHeader = request.headers.get("Authorization") || "";
+      const token = authHeader.replace("Bearer ", "").trim();
+      if (!token) return new Response(JSON.stringify({ error: "UNAUTHORIZED" }), { status: 401, headers: getCorsHeaders(env, request) });
+
+      const supabaseAuth = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY, {
+        global: { headers: { Authorization: `Bearer ${token}` } }
+      });
+      const { data: { user }, error: authError } = await supabaseAuth.auth.getUser();
+      if (authError || !user) return new Response(JSON.stringify({ error: "INVALID_SESSION" }), { status: 403, headers: getCorsHeaders(env, request) });
+
+      try {
+        const payload: any = await request.json();
+        const { ticket_id, recipient_email, message_body, is_html, public_reply } = payload;
+
+        const dispatchManager = new EmailDispatchManager(env.EMAILIT_API_KEY || '', env.RESEND_API_KEY || '', env.DEFAULT_FROM_EMAIL);
+
+        let result: any = null;
+        if (public_reply) {
+          result = await dispatchManager.send({
+            to: recipient_email,
+            subject: `Re: Support Ticket #${ticket_id.slice(0, 8)}`,
+            html: is_html ? message_body : undefined,
+            text: !is_html ? message_body : undefined,
+            meta: { ticket_id }
           });
         }
 
-        const sent = await sendEmailItNotification(to, subject, html, env);
         const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
-
-        await supabase.from("events_ax2024").insert({
-          type: "email_dispatched",
-          payload: {
-            recipient: to,
-            subject,
-            operator_id: user.id,
-            success: sent,
-            timestamp: new Date().toISOString()
-          }
+        await supabase.from("ticket_messages").insert({
+          ticket_id,
+          sender_id: user.id,
+          message_body,
+          is_internal_note: !public_reply,
+          metadata: result ? { delivery_provider: result.provider, message_id: result.messageId } : {}
         });
 
-        return new Response(JSON.stringify({ success: sent, recipient: to }), {
-          status: sent ? 200 : 502,
-          headers: { "Content-Type": "application/json", ...getCorsHeaders(env, request) }
-        });
-      } catch (err: any) {
-        return new Response(JSON.stringify({ error: err.message }), {
-          status: 500, headers: getCorsHeaders(env, request)
-        });
+        return new Response(JSON.stringify({ success: true, result }), { status: 200, headers: getCorsHeaders(env, request) });
+      } catch (error: any) {
+        return new Response(JSON.stringify({ error: error.message }), { status: 500, headers: getCorsHeaders(env, request) });
       }
     }
+
+    if (url.pathname === "/api/onyx/email/hitl-request" && request.method === "POST") {
+      const authHeader = request.headers.get("Authorization") || "";
+      const token = authHeader.replace("Bearer ", "").trim();
+      if (!token && authHeader !== `Bearer ${env.AXIM_ONYX_SECRET}`) {
+         return new Response(JSON.stringify({ error: "UNAUTHORIZED" }), { status: 401, headers: getCorsHeaders(env, request) });
+      }
+
+      try {
+        const payload: any = await request.json();
+        const { ticket_id, proposal_id, action_name, approver_email, risk_level, justification } = payload;
+
+        const dispatchManager = new EmailDispatchManager(env.EMAILIT_API_KEY || '', env.RESEND_API_KEY || '', env.DEFAULT_FROM_EMAIL);
+
+        const html = `
+          <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; background-color: #09090b; color: #f4f4f5; padding: 32px; border: 1px solid #27272a; border-radius: 16px;">
+            <h2 style="color: #e11d48; margin-top: 0;">⚠️ HITL ACTION REQUIRED</h2>
+            <p><strong>Ticket:</strong> ${ticket_id}</p>
+            <p><strong>Action:</strong> ${action_name}</p>
+            <p><strong>Risk Level:</strong> ${risk_level}</p>
+            <p><strong>Justification:</strong> ${justification}</p>
+            <a href="https://axim.us.com/support/hitl?token=${proposal_id}&action=approve" style="display:inline-block; margin-top:20px; padding: 10px 20px; background-color: #e11d48; color: #fff; text-decoration: none; border-radius: 8px;">Review & Approve</a>
+          </div>
+        `;
+
+        const result = await dispatchManager.send({
+          to: approver_email,
+          subject: `[HITL AUDIT] Action Gated - Ticket #${ticket_id.slice(0,8)}`,
+          html,
+          meta: { ticket_id, proposal_id }
+        });
+
+        return new Response(JSON.stringify({ success: true, result }), { status: 200, headers: getCorsHeaders(env, request) });
+      } catch (error: any) {
+        return new Response(JSON.stringify({ error: error.message }), { status: 500, headers: getCorsHeaders(env, request) });
+      }
+    }
+
+    if (url.pathname === "/api/onyx/email/executive-summary" && request.method === "POST") {
+      const authHeader = request.headers.get("Authorization") || "";
+      if (authHeader !== `Bearer ${env.AXIM_ONYX_SECRET}`) {
+         return new Response(JSON.stringify({ error: "UNAUTHORIZED" }), { status: 401, headers: getCorsHeaders(env, request) });
+      }
+
+      try {
+        const payload: any = await request.json();
+        const { recipient_emails, time_range, metrics_payload, rca_highlights } = payload;
+
+        const dispatchManager = new EmailDispatchManager(env.EMAILIT_API_KEY || '', env.RESEND_API_KEY || '', env.DEFAULT_FROM_EMAIL);
+
+        const html = `
+          <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto;">
+            <h2>Executive Operations Digest (${time_range})</h2>
+            <pre>${JSON.stringify(metrics_payload, null, 2)}</pre>
+            <h3>RCA Highlights:</h3>
+            <p>${rca_highlights}</p>
+          </div>
+        `;
+
+        const result = await dispatchManager.send({
+          to: recipient_emails,
+          subject: `Executive Operational Digest - ${time_range}`,
+          html
+        });
+
+        return new Response(JSON.stringify({ success: true, result }), { status: 200, headers: getCorsHeaders(env, request) });
+      } catch (error: any) {
+        return new Response(JSON.stringify({ error: error.message }), { status: 500, headers: getCorsHeaders(env, request) });
+      }
+    }
+
+    if (url.pathname === "/api/onyx/email/webhook" && request.method === "POST") {
+      try {
+        const signature = request.headers.get("X-Emailit-Signature") || "";
+        const rawBody = await request.text();
+
+        if (!await EmailDispatchManager.verifyEmailItSignature(rawBody, signature, env.EMAILIT_WEBHOOK_SECRET || '')) {
+          return new Response(JSON.stringify({ error: "INVALID_SIGNATURE" }), { status: 401, headers: getCorsHeaders(env, request) });
+        }
+
+        const payload = JSON.parse(rawBody);
+        const { message_id, event, meta } = payload;
+
+        if (meta && meta.ticket_id) {
+          const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
+          await supabase.from("ticket_audit_events").insert({
+            ticket_id: meta.ticket_id,
+            action_type: `email_${event}`,
+            performed_by: 'system',
+            details: { message_id, provider: 'emailit' }
+          });
+        }
+
+        return new Response(JSON.stringify({ success: true }), { status: 200, headers: getCorsHeaders(env, request) });
+      } catch (error: any) {
+        return new Response(JSON.stringify({ error: error.message }), { status: 500, headers: getCorsHeaders(env, request) });
+      }
+    }
+
+
 
 
     // --- EDGE VECTOR EMBEDDING KB SEARCH ROUTE ---

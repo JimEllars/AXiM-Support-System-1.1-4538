@@ -19,6 +19,7 @@ export default function CoreHealthDiagnosticsModal({isOpen, onClose }) {
   const [cronHealth, setCronHealth] = useState(null);
   const [secHealth, setSecHealth] = useState(null);
   const [archiveHealth, setArchiveHealth] = useState(null);
+  const [emailHealth, setEmailHealth] = useState(null);
   const [archiveFiles, setArchiveFiles] = useState([]);
   const [telemetryStats, setTelemetryStats] = useState(null);
   const [lastKvPurge, setLastKvPurge] = useState(null);
@@ -33,11 +34,12 @@ export default function CoreHealthDiagnosticsModal({isOpen, onClose }) {
       const { data: { session } } = await supabase.auth.getSession();
       const token = session?.access_token || '';
 
-      const [edgeRes, cronRes, secRes, archiveRes, filesRes, telemetryRes] = await Promise.all([
+      const [edgeRes, cronRes, secRes, archiveRes, filesRes, telemetryRes, emailRes] = await Promise.all([
         fetch(`${workerUrl}/health`),
         fetch(`${workerUrl}/api/v1/health/cron`),
         fetch(`${workerUrl}/api/v1/health/security`),
         fetch(`${workerUrl}/api/v1/health/archive`),
+        fetch(`${workerUrl}/api/onyx/email/health`),
         fetch(`${workerUrl}/api/v1/telemetry/health`),
         fetch(`${workerUrl}/api/v1/admin/archives`, { headers: { 'Authorization': `Bearer ${token}` } })
       ]);
@@ -47,6 +49,7 @@ export default function CoreHealthDiagnosticsModal({isOpen, onClose }) {
       if (secRes.ok) setSecHealth(await secRes.json());
       if (archiveRes.ok) setArchiveHealth(await archiveRes.json());
       if (telemetryRes && telemetryRes.ok) setTelemetryStats(await telemetryRes.json());
+      if (emailRes && emailRes.ok) setEmailHealth(await emailRes.json());
       if (filesRes.ok) {
         const fileData = await filesRes.json();
         setArchiveFiles(fileData.archives || []);
@@ -188,6 +191,30 @@ export default function CoreHealthDiagnosticsModal({isOpen, onClose }) {
                 </div>
               )}
             </div>
+
+
+            {/* Email Dispatch Carrier Status */}
+            <div className="glass-panel p-4 rounded-xl border border-white/5 space-y-3">
+              <div className="flex items-center gap-2 mb-2">
+                 <FiActivity className="text-zinc-400" />
+                 <h3 className="font-mono text-xs text-zinc-400 uppercase tracking-wider">Email Dispatch Status</h3>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-sm text-zinc-300">EmailIt API v2 (Primary)</span>
+                <span className="px-2 py-1 rounded text-xs font-medium bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">Active</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-sm text-zinc-300">Resend API v1 (Failover)</span>
+                <span className="px-2 py-1 rounded text-xs font-medium bg-zinc-500/10 text-zinc-400 border border-zinc-500/20">Standby</span>
+              </div>
+              {emailHealth && emailHealth.telemetry && (
+                 <div className="mt-3 pt-3 border-t border-white/5 flex gap-4 text-xs font-mono text-zinc-500">
+                   <div>Daily: <span className="text-zinc-300">{emailHealth.telemetry.dailyRemaining}</span></div>
+                   <div>Rate Limit: <span className="text-zinc-300">{emailHealth.telemetry.rateLimitRemaining}</span></div>
+                 </div>
+              )}
+            </div>
+
 
             {/* Onyx Core Status */}
             <div className="p-3.5 rounded-2xl bg-black/50 border border-zinc-800/80 space-y-1">

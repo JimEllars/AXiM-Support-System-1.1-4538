@@ -230,4 +230,28 @@ export const onyxService = {
         }, 300);
     });
   }
+,
+  async sendTicketEmailReply(ticketId, payload) {
+    const result = await fetchWithTimeout(`${ONYX_WORKER_URL}/api/onyx/email/ticket-reply`, {
+      method: 'POST',
+      body: JSON.stringify({ ticket_id: ticketId, ...payload })
+    });
+    return result;
+  },
+
+  async triggerHITLNotification(ticketId, proposalId, details) {
+    const result = await fetchWithTimeout(`${ONYX_WORKER_URL}/api/onyx/email/hitl-request`, {
+      method: 'POST',
+      body: JSON.stringify({ ticket_id: ticketId, proposal_id: proposalId, ...details })
+    });
+    return result;
+  },
+
+  async dispatchExecutiveSummary(recipients, metrics) {
+    const result = await fetchWithTimeout(`${ONYX_WORKER_URL}/api/onyx/email/executive-summary`, {
+      method: 'POST',
+      body: JSON.stringify({ recipient_emails: recipients, ...metrics })
+    });
+    return result;
+  }
 };
