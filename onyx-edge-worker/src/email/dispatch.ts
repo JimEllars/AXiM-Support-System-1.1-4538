@@ -124,7 +124,16 @@ export class EmailDispatchManager {
 
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
-        throw new Error(`EmailIt API Error [HTTP ${response.status}]: ${JSON.stringify(errorData)}`);
+
+        if (response.status >= 500 || response.status === 403 || response.status === 429) {
+          throw new Error(`EmailIt API Error [HTTP ${response.status}]: ${JSON.stringify(errorData)}`);
+        }
+
+        return {
+          success: false,
+          provider: 'emailit',
+          error: `EmailIt API Error [HTTP ${response.status}]: ${JSON.stringify(errorData)}`
+        };
       }
 
       const data: any = await response.json();

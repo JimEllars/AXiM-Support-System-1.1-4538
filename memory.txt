@@ -13,3 +13,5 @@ Successfully completed system hardening iteration (v1.2).
 - Avoided broken token and bracket mismatches by precisely migrating `new Response()` statements without disrupting route closure signatures.
 - Upgraded `RCADocumentBlock` and `TicketDetail` to handle realtime RCA changes via Supabase postgres_changes channels instead of manual refetches.
 - Restructured `DLQMonitorBlock` optimistic state clears.
+- EmailIt v2 deployment added with automated failover state machine mapped to Resend.
+- Configured Cloudflare cron triggers for executive summaries at 0 7 * * * (7:00 AM UTC).
