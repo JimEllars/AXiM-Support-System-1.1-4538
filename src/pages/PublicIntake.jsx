@@ -95,7 +95,7 @@ export default function PublicIntake() {
       // We will send the sanitized payload to edge worker. If encryption is required, we use Web Crypto API.
 
       const encoder = new TextEncoder();
-      const secret = import.meta.env.VITE_AXIM_ONYX_SECRET || 'fallback_secret_do_not_use_in_prod';
+      const secret = import.meta.env.VITE_AXIM_ONYX_SECRET || import.meta.env.VITE_TURNSTILE_SITE_KEY || 'fallback_secret_do_not_use_in_prod';
       const hashBuffer = await crypto.subtle.digest("SHA-256", encoder.encode(secret));
       const key = await crypto.subtle.importKey("raw", hashBuffer, { name: "AES-GCM" }, false, ["encrypt"]);
 
@@ -134,7 +134,7 @@ export default function PublicIntake() {
       }
 
 
-      const response = await fetch(`${workerUrl}/api/v1/webhooks/public-intake`, fetchOptions);
+      const response = await fetch(`${workerUrl}/api/v1/webhooks/public-ingress`, fetchOptions);
 
       trackEvent('public_support_form_submitted', { category: formData.workflow_category, has_attachment: !!file });
 

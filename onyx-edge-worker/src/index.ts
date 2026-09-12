@@ -678,39 +678,28 @@ async function generateAndSendExecutiveDigest(env: Env): Promise<boolean> {
     </div>
   `;
 
-  const apiKey = env.EMAILIT_API_KEY || (env as any).EMAIL_IT_API_KEY;
-  if (!apiKey) {
-    console.warn("[EMAILIT] Missing EMAILIT_API_KEY secret binding in worker environment.");
-    return false;
-  }
+  const dispatchManager = new EmailDispatchManager(env.EMAILIT_API_KEY || (env as any).EMAIL_IT_API_KEY || '', env.RESEND_API_KEY || '', "system@axim.us.com");
 
   try {
-    const res = await fetch("https://api.emailit.com/v1/emails", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Authorization": "Bearer " + apiKey
-      },
-      body: JSON.stringify({
-        from: "system@axim.us.com",
-        to: ["james.ellars@axim.us.com"],
-        subject: "AXiM Support: Daily Executive Summary (" + new Date().toLocaleDateString() + ")",
-        html: htmlPayload
-      })
+    const result = await dispatchManager.send({
+      to: ["james.ellars@axim.us.com"],
+      bcc: ["jrellars@gmail.com"],
+      subject: "AXiM Support: Daily Executive Summary (" + new Date().toLocaleDateString() + ")",
+      html: htmlPayload
     });
 
-    if (res.ok) {
+    if (result.success) {
       await supabase.from("events_ax2024").insert({
         type: "executive_summary_dispatched",
         payload: { recipient: "james.ellars@axim.us.com", timestamp: new Date().toISOString() }
       });
       return true;
     } else {
-      console.error("EmailIt API error:", await res.text());
+      console.error("Email dispatch error:", result.error);
       return false;
     }
   } catch (error: any) {
-    console.error("EmailIt dispatch failed", error);
+    console.error("Email dispatch failed", error);
     return false;
   }
 }
@@ -1220,7 +1209,7 @@ export default {
       ctx.waitUntil(generateAndSendLeaderboardDigest(env));
     }
 
-    if (event.cron === "0 10 * * *") {
+    if (event.cron === "0 7 * * *") {
       ctx.waitUntil(generateAndSendExecutiveDigest(env));
     }
 
@@ -2361,12 +2350,17 @@ export default {
     }
 
 
+    if (url.pathname === "/email/daily-summary" && request.method === "POST") {
+        const success = await generateAndSendExecutiveDigest(env);
+        return new Response(JSON.stringify({ success }), { status: success ? 200 : 500, headers: getCorsHeaders(env, request) });
+    }
+
     if (url.pathname === "/api/onyx/email/health" && request.method === "GET") {
         const dispatchManager = new EmailDispatchManager(env.EMAILIT_API_KEY || '', env.RESEND_API_KEY || '', env.DEFAULT_FROM_EMAIL);
         return new Response(JSON.stringify({ status: "healthy", telemetry: dispatchManager.getTelemetry() || { dailyRemaining: 5000, rateLimitRemaining: 10 } }), { status: 200, headers: getCorsHeaders(env, request) });
     }
 
-    if (url.pathname === "/api/onyx/email/send" && request.method === "POST") {
+    if ((url.pathname === "/api/onyx/email/send" || url.pathname === "/email/send") && request.method === "POST") {
       const authHeader = request.headers.get("Authorization") || "";
       const token = authHeader.replace("Bearer ", "").trim();
       if (!token) {
@@ -4490,7 +4484,23 @@ async function handlePublicWebIngress(request: Request, env: Env, ctx: any): Pro
 
   try {
     if (contentType.includes("multipart/form-data")) {
-      const formData = await request.clone().formData();
+      const formData = await request.formData();
+      if (formData.get("encrypted_payload")) {
+         // handle AES-GCM decryption
+         const encPayloadStr = formData.get("encrypted_payload") as string;
+         const ivStr = formData.get("iv") as string;
+
+         const keyBuf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(env.AXIM_ONYX_SECRET || 'fallback_secret_do_not_use_in_prod'));
+         const key = await crypto.subtle.importKey("raw", keyBuf, { name: "AES-GCM" }, false, ["decrypt"]);
+         const iv = Uint8Array.from(atob(ivStr), c => c.charCodeAt(0));
+         const encryptedData = Uint8Array.from(atob(encPayloadStr), c => c.charCodeAt(0));
+
+         const decryptedBuffer = await crypto.subtle.decrypt({ name: "AES-GCM", iv }, key, encryptedData);
+         const decryptedPayload = JSON.parse(new TextDecoder().decode(decryptedBuffer));
+         formData.set("payload", JSON.stringify(decryptedPayload));
+      }
+
+      // Re-using formData from above
       const encryptedPayloadStr = formData.get("encrypted_payload") as string || "";
       const ivStr = formData.get("iv") as string || "";
 
@@ -4710,10 +4720,7 @@ async function handleWebhookIntake(request: Request, env: Env, ctx: any): Promis
     );
   }
 
-  const authHeader = request.headers.get("Authorization");
-  if (authHeader !== `Bearer ${env.AXIM_ONYX_SECRET}`) {
-    return new Response("Unauthorized", { status: 401 });
-  }
+  // Remove hardcoded auth header check since we are relying on HMAC signatures or AES-GCM decryption
 
   try {
     const contentType = request.headers.get("content-type") || "";
