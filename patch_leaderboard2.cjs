@@ -1,4 +1,8 @@
-import React, { useState, useEffect } from 'react';
+const fs = require('fs');
+const file = './src/components/analytics/OperatorLeaderboard.jsx';
+let data = fs.readFileSync(file, 'utf8');
+
+const newLeaderboard = `import React, { useState, useEffect } from 'react';
 import { FiAward, FiStar, FiRefreshCw, FiMail } from 'react-icons/fi';
 import { supabase } from '../../lib/supabaseClient';
 import { useAuthStore } from '../../store/useAuthStore';
@@ -31,10 +35,10 @@ export default function OperatorLeaderboard() {
       if (!token) return;
 
       const apiUrl = import.meta.env.VITE_ONYX_WORKER_URL || 'http://localhost:54321/functions/v1/onyx-bridge';
-      const res = await fetch(`${apiUrl}/api/v1/analytics/leaderboard/dispatch`, {
+      const res = await fetch(\`\${apiUrl}/api/v1/analytics/leaderboard/dispatch\`, {
         method: 'POST',
         headers: {
-          'Authorization': `Bearer ${token}`,
+          'Authorization': \`Bearer \${token}\`,
           'Content-Type': 'application/json'
         }
       });
@@ -114,15 +118,15 @@ export default function OperatorLeaderboard() {
           leaderboard.map((op, idx) => (
             <div key={op.id} className="flex items-center justify-between p-2 rounded-xl hover:bg-zinc-800/40 transition-colors border border-transparent hover:border-zinc-800/50">
               <div className="flex items-center gap-3 overflow-hidden">
-                <div className={`w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold ${idx === 0 ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30' : idx === 1 ? 'bg-zinc-300/20 text-zinc-300 border border-zinc-400/30' : idx === 2 ? 'bg-orange-700/20 text-orange-400 border border-orange-700/30' : 'bg-zinc-800 text-zinc-500'}`}>
+                <div className={\`w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold \${idx === 0 ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30' : idx === 1 ? 'bg-zinc-300/20 text-zinc-300 border border-zinc-400/30' : idx === 2 ? 'bg-orange-700/20 text-orange-400 border border-orange-700/30' : 'bg-zinc-800 text-zinc-500'}\`}>
                   {idx + 1}
                 </div>
                 <div className="flex flex-col truncate">
                   <span className="text-xs font-medium text-zinc-200 truncate">{op.email.split('@')[0]}</span>
                   {op.avg_csat > 0 && (
-                     <div className="flex items-center gap-0.5 ml-2" title={`Average CSAT: ${op.avg_csat.toFixed(1)}`}>
+                     <div className="flex items-center gap-0.5 ml-2" title={\`Average CSAT: \${op.avg_csat.toFixed(1)}\`}>
                        {[...Array(5)].map((_, i) => (
-                         <FiStar key={i} className={`w-2 h-2 ${i < Math.round(op.avg_csat) ? 'fill-amber-400 text-amber-400' : 'text-zinc-600'}`} />
+                         <FiStar key={i} className={\`w-2 h-2 \${i < Math.round(op.avg_csat) ? 'fill-amber-400 text-amber-400' : 'text-zinc-600'}\`} />
                        ))}
                      </div>
                   )}
@@ -145,4 +149,6 @@ export default function OperatorLeaderboard() {
       </div>
     </div>
   );
-}
+}`;
+
+fs.writeFileSync(file, newLeaderboard, 'utf8');
