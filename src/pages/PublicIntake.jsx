@@ -57,8 +57,15 @@ export default function PublicIntake() {
   const handleFileChange = (e) => {
     const selectedFile = e.target.files[0];
     if (selectedFile) {
-      if (selectedFile.size > 5 * 1024 * 1024) {
-        setFileError('File size exceeds the 5MB limit.');
+      const allowedExtensions = ['.pdf', '.png', '.jpg', '.jpeg', '.txt', '.log'];
+      const extension = '.' + selectedFile.name.split('.').pop().toLowerCase();
+      if (!allowedExtensions.includes(extension)) {
+        setFileError('Invalid file type. Allowed: .pdf, .png, .jpg, .txt, .log');
+        setFile(null);
+        return;
+      }
+      if (selectedFile.size > 10 * 1024 * 1024) {
+        setFileError('File size exceeds the 10MB limit.');
         setFile(null);
       } else {
         setFileError('');
@@ -79,8 +86,12 @@ export default function PublicIntake() {
 
     try {
       // 1. Client-Side Sanitization
-      const rawPayload = {
-        ...formData,
+            const rawPayload = {
+        subject: formData.subject,
+        description: formData.description,
+        customer_name: formData.customer_name,
+        customer_email: formData.customer_email,
+        workflow_category: formData.workflow_category,
         customer_id: formData.customer_email, // Map email to ID for simplicity
         source: 'website_support_form',
         urgency_flag: 'standard',
@@ -317,7 +328,7 @@ export default function PublicIntake() {
                     </div>
 
                     <div>
-                        <label className="block text-xs font-semibold text-zinc-400 uppercase tracking-widest mb-2 ml-1">Attachment (Optional, Max 5MB)</label>
+                        <label className="block text-xs font-semibold text-zinc-400 uppercase tracking-widest mb-2 ml-1">Attachment (Optional, Max 10MB)</label>
                         <div className="relative">
                             <input
                                 type="file"

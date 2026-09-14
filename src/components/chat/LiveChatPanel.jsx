@@ -8,7 +8,13 @@ export default function LiveChatPanel() {
   const { isChatOnline, user } = useAuthStore();
   const [isExpanded, setIsExpanded] = useState(false);
   const [messages, setMessages] = useState([]);
-  const [inputValue, setInputValue] = useState('');
+    const [inputValue, setInputValue] = useState(() => {
+    return localStorage.getItem('chat_draft_' + ticketId) || '';
+  });
+
+  useEffect(() => {
+    localStorage.setItem('chat_draft_' + ticketId, inputValue);
+  }, [inputValue, ticketId]);
   const [isInternalNote, setIsInternalNote] = useState(false);
   const [isConnected, setIsConnected] = useState(false);
   const [aiSuggestion, setAiSuggestion] = useState(null);
@@ -356,7 +362,8 @@ export default function LiveChatPanel() {
           isIncoming: false
        }]);
 
-       setInputValue('');
+           setInputValue('');
+    localStorage.removeItem('chat_draft_' + ticketId);
     } else {
        toast.error("Not connected to chat server.");
     }

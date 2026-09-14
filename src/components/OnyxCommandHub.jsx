@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { FiTerminal, FiCornerDownLeft, FiX } from 'react-icons/fi';
+import SafeIcon from '../common/SafeIcon';
 import { showToast } from '../lib/toast';
 import toast from 'react-hot-toast';
 import { supabase } from '../lib/supabaseClient';
@@ -107,7 +107,7 @@ export default function OnyxCommandHub({ isOpen, onClose }) {
       <div className="w-full max-w-xl rounded-3xl bg-zinc-950 border border-zinc-800 shadow-2xl p-6 space-y-4 font-mono">
         <div className="flex items-center justify-between border-b border-zinc-900 pb-3">
           <div className="flex items-center gap-2 text-xs font-bold text-indigo-400">
-            <FiTerminal className="text-sm"/>
+            <SafeIcon icon={null} name="Terminal" className="text-sm"/>
             <span className="uppercase tracking-wider">Onyx Command Terminal</span>
           </div>
           <button
@@ -134,7 +134,7 @@ export default function OnyxCommandHub({ isOpen, onClose }) {
               disabled={!commandInput.trim() || isExecuting}
               className="absolute right-2 p-2 rounded-xl bg-indigo-500 hover:bg-indigo-400 text-white transition-all disabled:opacity-40"
             >
-              <FiCornerDownLeft className="text-xs"/>
+              <SafeIcon icon={null} name="CornerDownLeft" className="text-xs"/>
             </button>
           </div>
         </form>

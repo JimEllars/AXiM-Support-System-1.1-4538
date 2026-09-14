@@ -144,9 +144,19 @@ export default function RCADocumentBlock({ rcaRecord, onFinalized, ticketId, sev
         </div>
       </div>
 
-      <div className="space-y-2">
+            <div className="space-y-2">
          <div className="text-[11px] font-mono text-zinc-400 uppercase tracking-widest">Breach Type</div>
-         <div className="text-sm font-semibold text-zinc-200">{rcaRecord.payload?.breach_type || 'System Incident'}</div>
+         <div className="text-sm font-semibold text-zinc-200">{rcaRecord?.payload?.breach_type ?? 'System Incident'}</div>
+      </div>
+
+      <div className="space-y-2 pt-2 border-t border-indigo-500/20">
+         <div className="text-[11px] font-mono text-zinc-400 uppercase tracking-widest">Corrective Actions</div>
+         <div className="text-sm font-semibold text-zinc-200 whitespace-pre-wrap">{rcaRecord?.payload?.corrective_actions ?? 'None specified.'}</div>
+      </div>
+
+      <div className="space-y-2 pt-2 border-t border-indigo-500/20">
+         <div className="text-[11px] font-mono text-zinc-400 uppercase tracking-widest">Incident Timeline</div>
+         <div className="text-sm font-semibold text-zinc-200 whitespace-pre-wrap">{rcaRecord?.payload?.incident_timeline ?? 'No timeline available.'}</div>
       </div>
 
       <div className="space-y-2 pt-2 border-t border-indigo-500/20">

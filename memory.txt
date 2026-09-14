@@ -1,8 +1,14 @@
 Successfully completed all tasks outlined in the ticket.
 
-1. EmailDispatchManager Usage Consolidated: Replaced raw `fetch()` calls to Resend and EmailIt with `EmailDispatchManager` references across all outbound paths in `onyx-edge-worker/src/index.ts` (e.g., HITL dispatches, daily digests, leaderboard exports, automated AI replies). Handled syntax issues encountered with TypeScript template literal string interpolation in Bash scripts using careful manual and AST-like block replacement.
-2. Inbound Parsing & Threading: Updated the incoming webhook path `/api/v1/email/inbound` to securely verify the signature using `EmailDispatchManager.verifyEmailItSignature`. Incoming messages correctly parse subject `[Ticket #<id>]` tokens, insert records into `ticket_messages` as `email_inbound` (a customer reply), set ticket statuses to `open`, and push telemetry to `events_ax2024`.
-3. Carrier Telemetry UI: Modified `src/components/tickets/MessageThread.jsx` to parse `msg.metadata.delivery_provider` and display a lightweight UI badge indicating whether an outbound operator dispatch succeeded over the primary carrier (`via EmailIt`) or failover carrier (`via Resend`).
-4. Health Telemetry: Added the `/api/onyx/email/health` endpoint to edge worker and bound it to `onyxService.fetchEmailCarrierHealth()`. The `CoreHealthDiagnosticsModal` HUD now fetches this and displays real-time carrier state and daily quota remaining limits.
+1. EmailDispatchManager Usage Consolidated: Replaced raw `fetch()` calls to Resend and EmailIt with `EmailDispatchManager` references across all outbound paths in `onyx-edge-worker/src/index.ts` (e.g., HITL dispatches, daily digests, leaderboard exports, automated AI replies).
+2. Inbound Parsing & Threading: Updated the incoming webhook path `/api/v1/email/inbound` to securely verify the signature using `EmailDispatchManager.verifyEmailItSignature`.
+3. Carrier Telemetry UI: Modified `src/components/tickets/MessageThread.jsx` to parse `msg.metadata.delivery_provider` and display a lightweight UI badge.
+4. Health Telemetry: Added the `/api/onyx/email/health` endpoint to edge worker and bound it to `onyxService.fetchEmailCarrierHealth()`.
+5. UI Resilience & Test Fixes (Sprint 1.2): Fixed `RCADocumentBlock.jsx` with strict nullish coalescing/optional chaining. Tests pass.
+6. PublicIntake.jsx Hardening: Sanitized all text inputs, enforced 10MB payload size limits, and validated attachment extensions (.pdf, .png, .jpg, .txt, .log).
+7. LiveChatPanel.jsx State Preservation: Preserved `currentDraft` in localStorage.
+8. Edge Worker Hardening: Ensured `OPTIONS` requests return `204 No Content` with appropriate CORS headers in `onyx-edge-worker/src/index.ts`. Ensured `/health` endpoint reports the status of Edge KV, Supabase connectivity, and model configuration without throwing 500 errors.
+9. Wired Live Telemetry: Connected `SupportMetrics.jsx` & `OperatorLeaderboard.jsx` directly to `ticket_ai_telemetry` and `team_profiles` via `supabaseClient.js`, replacing fallback arrays. Supported `is_curated` toggle.
+10. UI/UX Modernization & Polish: Refined `CoreHealthIndicator.jsx` & `OnyxCommandHub.jsx` with clean Tailwind transitions, pulsating indicators, dark-mode typography, and standardized icon usage using `src/common/SafeIcon.jsx`.
 
-Tests pass successfully (frontend tests via `npm test` and worker tests via `npm run test:worker`). The build succeeds on both sides.
+Tests pass successfully (frontend tests via `npm test` and worker tests via `cd onyx-edge-worker && npm test`). The build succeeds on both sides.

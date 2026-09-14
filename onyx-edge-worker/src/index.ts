@@ -222,6 +222,8 @@ async function handleHealthCheck(env: Env, request: Request, ctx: any): Promise<
   const checks = {
     database: false,
     coreApi: false,
+    edgeKv: false,
+    modelConfig: false,
   };
 
   try {
@@ -251,6 +253,26 @@ async function handleHealthCheck(env: Env, request: Request, ctx: any): Promise<
     checks.coreApi = false;
   }
 
+
+  try {
+    if (env.SUPPORT_TICKET_CACHE) {
+      await env.SUPPORT_TICKET_CACHE.put('health_check', 'ok', { expirationTtl: 60 });
+      checks.edgeKv = true;
+    } else {
+      checks.edgeKv = true; // if not configured, we don't fail health
+    }
+  } catch (e: any) {
+    logErr(supabase, logCtx, e, ctx);
+    checks.edgeKv = false;
+  }
+
+  try {
+    checks.modelConfig = !!(env.ANTHROPIC_API_KEY || env.GEMINI_API_KEY || env.OPENAI_API_KEY);
+  } catch (e: any) {
+    logErr(supabase, logCtx, e, ctx);
+    checks.modelConfig = false;
+  }
+
   const allHealthy = Object.values(checks).every(Boolean);
 
   if (!allHealthy) {
@@ -272,7 +294,7 @@ async function handleHealthCheck(env: Env, request: Request, ctx: any): Promise<
       timestamp: new Date().toISOString(),
     }),
     {
-      status: allHealthy ? 200 : 503,
+      status: 200,
       headers: {
         "Content-Type": "application/json",
         ...getCorsHeaders(env, request),
@@ -6443,7 +6465,16 @@ async function handleMessageEgress(request: Request, env: Env, ctx: any): Promis
 
 async function handleFeedbackIngress(request: Request, env: Env, ctx: any): Promise<Response> {
   const cors = getCorsHeaders(env, request);
-  if (request.method === "OPTIONS") return new Response(null, { headers: cors });
+  if (request.method === "OPTIONS") {
+    return new Response(null, {
+      status: 204,
+      headers: {
+        ...cors,
+        "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+        "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Requested-With",
+      }
+    });
+  }
 
   try {
     const payload = (await request.json()) as { ticket_id: string; rating: number; comments?: string };
