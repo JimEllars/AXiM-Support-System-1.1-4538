@@ -167,6 +167,11 @@ export default function MessageThread({ messages = [], ticketStatus, isLoading }
                     </button>
                   )
                 )}
+                {msg.metadata?.delivery_provider && (
+                  <span className={`px-1.5 py-0.5 rounded text-[9px] font-mono border ${msg.metadata.delivery_provider === 'emailit' ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' : 'bg-zinc-500/10 text-zinc-400 border-zinc-500/20'}`}>
+                    via {msg.metadata.delivery_provider === 'emailit' ? 'EmailIt' : 'Resend'}
+                  </span>
+                )}
                 {msg.metadata?.delivery_status === 'delivered' && (
                   <div className="flex -space-x-1 text-emerald-400" title="Delivered">
                     <FiCheck /><FiCheck />
