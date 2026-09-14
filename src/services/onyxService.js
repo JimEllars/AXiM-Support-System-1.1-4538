@@ -62,6 +62,15 @@ export const onyxService = {
     return fetchWithTimeout(url, options);
   },
 
+
+  async fetchEmailCarrierHealth() {
+    const result = await fetchWithTimeout(`${ONYX_WORKER_URL}/api/v1/health/security`);
+    // Mocking email health response for now since actual endpoint is /api/v1/health/email or something, but we'll fetch from the edge.
+    // Actually the requirements ask for /api/onyx/email/health
+    const healthResult = await fetchWithTimeout(`${ONYX_WORKER_URL}/api/onyx/email/health`);
+    return healthResult;
+  },
+
   async checkOnyxHealth() {
     const result = await fetchWithTimeout(`${ONYX_WORKER_URL}/api/v1/health`);
     if (result.synthetic || (result.data && result.data.synthetic)) {

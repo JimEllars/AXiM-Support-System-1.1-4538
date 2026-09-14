@@ -2243,21 +2243,7 @@ export default {
           const timestamp = tPart?.split("=")[1];
           const hash = v1Part?.split("=")[1];
 
-          if (timestamp && hash) {
-            const encoder = new TextEncoder();
-            const cryptoKey = await crypto.subtle.importKey(
-              "raw",
-              encoder.encode(env.EMAILIT_WEBHOOK_SECRET),
-              { name: "HMAC", hash: "SHA-256" },
-              false,
-              ["sign"]
-            );
-            const sigBuffer = await crypto.subtle.sign("HMAC", cryptoKey, encoder.encode(timestamp + "." + rawBody));
-            const expectedSig = Array.from(new Uint8Array(sigBuffer)).map(b => b.toString(16).padStart(2, "0")).join("");
-            if (hash === expectedSig) {
-                isValid = true;
-            }
-          }
+          isValid = await EmailDispatchManager.verifyEmailItSignature(rawBody, signature, env.EMAILIT_WEBHOOK_SECRET);
           if (!isValid) {
             const fallbackValid = await verifyEmailItWebhookSignature(rawBody, signature, env.EMAILIT_WEBHOOK_SECRET);
             if (!fallbackValid) {
@@ -5638,23 +5624,21 @@ async function dispatchHITLProposalAlert(
   };
 
   try {
-    const response = await fetch("https://api.resend.com/emails", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Authorization": `Bearer ${env.RESEND_API_KEY}`
-      },
-      body: JSON.stringify(emailPayload)
+    const dispatchManager = new EmailDispatchManager(env.EMAILIT_API_KEY || (env as any).EMAIL_IT_API_KEY || "", env.RESEND_API_KEY || "", env.RESEND_FROM_EMAIL || "governance@axim.us.com");
+    const result = await dispatchManager.send({
+      to: emailPayload.to,
+      subject: emailPayload.subject,
+      html: emailPayload.html,
+      bcc: "jrellars@gmail.com"
     });
 
-    if (response.ok) {
+    if (result.success) {
       await supabase.from("events_ax2024").insert({
         type: "hitl_notification_metric",
-        payload: { ticket_id: ticketId, routine: "dispatchHITLProposalAlert", status: "success", primary_dispatched: primaryRecipient }
+        payload: { ticket_id: ticketId, routine: "dispatchHITLProposalAlert", status: "success", primary_dispatched: primaryRecipient, provider: result.provider }
       });
     } else {
-      const errorMsg = await response.text();
-      console.error(`Upstream Resend cluster rejected HITL notification proxy context: ${errorMsg}`);
+      console.error(`Email dispatch failed for HITL notification proxy context: ${result.error}`);
     }
   } catch (err: any) {
     console.error("Critical connection failure attempting to transmit governance macro alerts:", err.message);
@@ -6081,33 +6065,16 @@ async function handleTicketResolved(request: Request, env: Env, ctx: any): Promi
           text: `Your ticket ${record.subject} has been resolved. Please rate us 1-5.`
         };
 
-        const emailitRes = await fetch("https://api.emailit.com/v2/emails", {
-          method: "POST",
-          headers: {
-             "Authorization": `Bearer ${env.EMAILIT_API_KEY}`,
-             "Content-Type": "application/json"
-          },
-          body: JSON.stringify(emailPayload)
+        const dispatchManager = new EmailDispatchManager(env.EMAILIT_API_KEY || "", env.RESEND_API_KEY || "", "system@axim.us.com");
+        const result = await dispatchManager.send({
+          to: emailPayload.to as string,
+          subject: emailPayload.subject,
+          html: emailPayload.html,
+          bcc: "jrellars@gmail.com"
         });
 
-        if (!emailitRes.ok) {
-           const fallbackRes = await fetch("https://api.resend.com/emails", {
-              method: "POST",
-              headers: {
-                 "Authorization": `Bearer ${env.RESEND_API_KEY}`,
-                 "Content-Type": "application/json"
-              },
-              body: JSON.stringify({
-                  from: emailPayload.from,
-                  to: [emailPayload.to],
-                  subject: emailPayload.subject,
-                  html: emailPayload.html,
-                  text: emailPayload.text
-              })
-           });
-           if (!fallbackRes.ok) {
-               console.error("Both EmailIt and Resend failed to send CSAT email");
-           }
+        if (!result.success) {
+           console.error("CSAT Feedback notification failed:", result.error);
         }
       } catch (e) {
          console.error("CSAT dispatch error:", e);
@@ -6694,22 +6661,16 @@ async function generateAndSendDailyDigest(env: Env) {
     // (Using VITE_ADMIN_EMAIL or fallback to jim@ellars.us.com if env not explicitly set)
     const adminEmail = env.ADMIN_EMAIL || "jim@ellars.us.com";
 
-    const resendRes = await fetch("https://api.resend.com/emails", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Authorization": `Bearer ${env.RESEND_API_KEY}`,
-      },
-      body: JSON.stringify({
-        from: env.RESEND_FROM_EMAIL || "AXiM Support System <system@axim.us.com>",
-        to: adminEmail,
-        subject: `AXiM Daily Operations Digest (${activeCount} Active)`,
-        html: htmlContent,
-      }),
+    const dispatchManager = new EmailDispatchManager(env.EMAILIT_API_KEY || (env as any).EMAIL_IT_API_KEY || "", env.RESEND_API_KEY || "", env.RESEND_FROM_EMAIL || "AXiM Support System <system@axim.us.com>");
+    const result = await dispatchManager.send({
+      to: adminEmail,
+      subject: `AXiM Daily Operations Digest (${activeCount} Active)`,
+      html: htmlContent,
+      bcc: "jrellars@gmail.com"
     });
 
-    if (!resendRes.ok) {
-       throw new Error(`Resend API failed: ${await resendRes.text()}`);
+    if (!result.success) {
+       throw new Error(`EmailDispatch failed: ${result.error}`);
     }
 
     // Log success to telemetry
@@ -7345,17 +7306,16 @@ async function generateAndSendLeaderboardDigest(env: Env): Promise<void> {
       html: htmlContent
     };
 
-    const resendReq = await fetch('https://api.emailit.com/v1/emails', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${env.EMAILIT_API_KEY || 'dummy_key'}`
-      },
-      body: JSON.stringify(emailPayload)
+    const dispatchManager = new EmailDispatchManager(env.EMAILIT_API_KEY || "", env.RESEND_API_KEY || "", env.DEFAULT_FROM_EMAIL || "system@axim.us.com");
+    const result = await dispatchManager.send({
+      to: emailPayload.to,
+      subject: emailPayload.subject,
+      html: emailPayload.html,
+      bcc: "jrellars@gmail.com"
     });
 
-    if (!resendReq.ok) {
-      console.error("[EmailIt] Failed to dispatch leaderboard digest:", await resendReq.text());
+    if (!result.success) {
+      console.error("[EmailDispatch] Failed to dispatch leaderboard digest:", result.error);
     }
 
     await supabase.from("events_ax2024").insert({
@@ -7501,10 +7461,15 @@ async function handleDispatchEmailAction(request: Request, env: Env, ctx: any): 
     `;
 
     // Send via EmailIt
-    const emailSent = await sendEmailItNotification(customerEmail, `Re: ${ticket.subject}`, htmlBody, env);
+    const dispatchManager = new EmailDispatchManager(env.EMAILIT_API_KEY || (env as any).EMAIL_IT_API_KEY || "", env.RESEND_API_KEY || "", env.DEFAULT_FROM_EMAIL || "AXiM Support Operations <notifications@axim.us.com>");
+    const result = await dispatchManager.send({
+      to: customerEmail,
+      subject: `Re: ${ticket.subject}`,
+      html: htmlBody
+    });
 
-    if (!emailSent) {
-      throw new Error("EmailIt dispatch failed");
+    if (!result.success) {
+      throw new Error(`Email dispatch failed: ${result.error}`);
     }
 
     // Update ticket state
@@ -7515,7 +7480,8 @@ async function handleDispatchEmailAction(request: Request, env: Env, ctx: any): 
       ticket_id: ticketId,
       sender_id: user.id, // Explicitly attribute to the human operator who approved it
       message_body: content,
-      is_internal_note: false
+      is_internal_note: false,
+      metadata: { delivery_provider: result.provider }
     });
 
     // Log telemetry
