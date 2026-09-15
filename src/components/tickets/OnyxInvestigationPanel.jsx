@@ -1,3 +1,4 @@
+import { sanitizePayload } from '../../lib/sanitize';
 import React, { useState, useEffect } from 'react';
 import { FiCpu, FiClock, FiCheckCircle, FiMail, FiAlertTriangle } from 'react-icons/fi';
 import { supabase } from '../../lib/supabaseClient';
@@ -128,7 +129,7 @@ export default function OnyxInvestigationPanel({ ticketId }) {
 
         <div className="p-3 rounded-xl bg-black/40 border border-zinc-900">
           <span className="text-[10px] text-zinc-500 uppercase font-bold block mb-0.5">Category</span>
-          <span className="text-zinc-200 font-bold uppercase">{telemetry?.category || 'General'}</span>
+          <span className="text-zinc-200 font-bold uppercase">{telemetry?.category ? sanitizePayload({ text: telemetry.category }).text : 'General'}</span>
         </div>
 
         <div className="p-3 rounded-xl bg-black/40 border border-zinc-900">

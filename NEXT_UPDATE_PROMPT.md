@@ -11,3 +11,13 @@ Progress made in this session:
 Next possible increments:
 - Continue increasing e2e coverage with playwright tests if necessary.
 - Add advanced rate limiting to Edge Worker.
+
+# Increment Completed: Production Hardening & Telemetry Activation
+*Date: 2026-09-15T18:23:25.533Z*
+
+- **Milestone 1**: Telemetry pipeline activated. Wired src/lib/telemetry.js to the edge worker using `onyxService.recordTelemetry`. The edge worker is updated to support UI events and inserts to `ticket_ai_telemetry`.
+- **Milestone 2**: HITL feedback loops wired. `ActionProposalBlock.jsx` and `AutoDraftWhisper.jsx` execute background fetch calls to `autodraft-feedback`, persisting to `memory_banks` and `product_feedback`.
+- **Milestone 3**: DLQ hardening & Headers. Wrapped `handleBatchTriage`, `handleAutoDraft`, and `handleExecuteAction` in try/catch to buffer to `DLQ_BUCKET` if a timeout/key error occurs, returning `{ status: 'degraded', queued_to_dlq: true }`. Included security headers (`X-Onyx-Edge-Region`, `X-Onyx-Execution-Time-MS`). Added comprehensive `handleHealthCheck`.
+- **Milestone 4**: UI/UX. `MessageThread.jsx`, `AutoDraftWhisper.jsx`, and `OnyxInvestigationPanel.jsx` import and apply `sanitizePayload`. `CoreHealthIndicator.jsx` throttled to 30s.
+
+All tests (`npm test`) pass across root and `onyx-edge-worker`. Build executes successfully.
