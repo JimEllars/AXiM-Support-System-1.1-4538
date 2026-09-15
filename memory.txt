@@ -12,3 +12,11 @@ Successfully completed all tasks outlined in the ticket.
 10. UI/UX Modernization & Polish: Refined `CoreHealthIndicator.jsx` & `OnyxCommandHub.jsx` with clean Tailwind transitions, pulsating indicators, dark-mode typography, and standardized icon usage using `src/common/SafeIcon.jsx`.
 
 Tests pass successfully (frontend tests via `npm test` and worker tests via `cd onyx-edge-worker && npm test`). The build succeeds on both sides.
+
+[Session Log]
+- Fixed RCADocumentBlock UI rendering with missing/partial data and improved markdown styling.
+- Telemetry hardened: Swapped raw fetch blocking for `requestIdleCallback` dispatch batching.
+- Worker CORS patched to explicitly handle all REST methods.
+- UI Pill counters added to TicketList queue.
+- Cleaned root repo architecture, moving utility scripts into `scripts/maintenance/`.
+- Completed sprint 12 production hardening. All client and worker tests pass. Root `.cjs` maintenance scripts migrated to `scripts/maintenance/`.

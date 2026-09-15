@@ -87,6 +87,7 @@ async function checkRateLimit(
   return true;
 }
 
+
 // Allowed Origins helper
 function getCorsHeaders(env: Env, request: Request) {
   const origin = request.headers.get("Origin");
@@ -99,251 +100,12 @@ function getCorsHeaders(env: Env, request: Request) {
 
   return {
     "Access-Control-Allow-Origin": allowOrigin,
-    "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type, Authorization",
+    "Access-Control-Allow-Methods": "GET, POST, OPTIONS, PUT, DELETE, PATCH",
+    "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Axim-Signature, Idempotency-Key",
     "Access-Control-Max-Age": "86400",
   };
 }
 
-const ALLOWED_MIME_TYPES = [
-  "image/png",
-  "image/jpeg",
-  "image/gif",
-  "application/pdf",
-  "text/plain",
-];
-const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
-
-function validateAttachment(file: {
-  name: string;
-  type: string;
-  size: number;
-}): { valid: boolean; error?: string } {
-  if (!ALLOWED_MIME_TYPES.includes(file.type)) {
-    return { valid: false, error: `File type ${file.type} not allowed` };
-  }
-  if (file.size > MAX_FILE_SIZE) {
-    return {
-      valid: false,
-      error: `File size exceeds ${MAX_FILE_SIZE / 1024 / 1024}MB limit`,
-    };
-  }
-  return { valid: true };
-}
-
-function createLogContext(request: Request): {
-  id: string;
-  method: string;
-  url: string;
-  ua: string;
-  edge_colo: string; // CRITICAL FIX: Extract Cloudflare point-of-presence datacenter traces
-} {
-  const url = new URL(request.url);
-  // Unpack Cloudflare metadata parameters securely from incoming Request objects
-  const cfMetadata = (request as any).cf;
-  const targetColoLocation = cfMetadata?.colo || "UNKNOWN_NODE";
-
-  return {
-    id: crypto.randomUUID(),
-    method: request.method,
-    url: url.pathname,
-    ua: request.headers.get("user-agent") || "unknown",
-    edge_colo: targetColoLocation
-  };
-}
-
-function logEnd(supabase: any, logCtx: any, startTime: number, ctx: any) {
-  const duration = Date.now() - startTime;
-  ctx.waitUntil(logToEvents(supabase, logCtx, "performance_metric", "Request end", {
-    execution_time_ms: duration,
-  }).catch(() => {}));
-}
-
-function logErr(supabase: any, logCtx: any, err: any, ctx: any) {
-  ctx?.waitUntil(logToEvents(supabase, logCtx, "error", "Request error", {
-    error: err instanceof Error ? err.message : String(err),
-    stack: err instanceof Error ? err.stack : "",
-  }).catch(() => {}));
-}
-
-async function logToEvents(
-  supabase: any,
-  context: any,
-  type: string,
-  message: string,
-  metadata?: any,
-) {
-  await supabase.from("events_ax2024").insert({
-    type: type,
-    payload: {
-      ...context,
-      message,
-      metadata,
-    },
-  });
-}
-
-export interface Env {
-  TELEMETRY_ARCHIVE?: R2Bucket;
-  EMAILIT_WEBHOOK_SECRET?: string;
-  AXIM_TELEMETRY_SECRET: string;
-  TURNSTILE_SECRET_KEY: string;
-  ADMIN_EMAIL?: string;
-  ALLOWED_ORIGINS?: string;
-  SUPABASE_URL: string;
-  SUPABASE_SERVICE_ROLE_KEY: string;
-  AXIM_ONYX_SECRET: string;
-  ANTHROPIC_API_KEY: string;
-  DEEPSEEK_API_KEY?: string;
-  AXIM_SERVICE_KEY: string;
-  CORE_API_URL: string;
-  IDEMPOTENCY_KV: KVNamespace;
-  KB_CACHE: KVNamespace;
-  HITL_KV: KVNamespace;
-  EMAILIT_API_KEY?: string;
-  STATUS_KV: KVNamespace;
-  RESEND_API_KEY?: string;
-  RESEND_FROM_EMAIL?: string;
-  DEFAULT_FROM_EMAIL?: string;
-  AI?: any;
-}
-
-async function handleHealthCheck(env: Env, request: Request, ctx: any): Promise<Response> {
-  const supabase = createClient(
-    env.SUPABASE_URL,
-    env.SUPABASE_SERVICE_ROLE_KEY,
-  );
-  const logCtx = createLogContext(request);
-  ctx.waitUntil(logToEvents(supabase, logCtx, "performance_metric", "Request start", {
-    headers: request.headers,
-  }).catch(() => {}));
-  const startTime = Date.now();
-
-  const checks = {
-    database: false,
-    coreApi: false,
-    edgeKv: false,
-    modelConfig: false,
-  };
-
-  try {
-    const { error } = await supabase
-      .from("support_tickets")
-      .select("id")
-      .limit(1);
-    checks.database = !error;
-  } catch (e: any) {
-    logErr(supabase, logCtx, e, ctx);
-
-    checks.database = false;
-  }
-
-  try {
-    const coreRes = await fetch(
-      `${env.CORE_API_URL || "https://api.axim-core.internal"}/functions/v1/gateway-heartbeat`,
-      {
-        method: "GET",
-        signal: AbortSignal.timeout(3000),
-      },
-    );
-    checks.coreApi = coreRes.ok;
-  } catch (e: any) {
-    logErr(supabase, logCtx, e, ctx);
-
-    checks.coreApi = false;
-  }
-
-
-  try {
-    if (env.SUPPORT_TICKET_CACHE) {
-      await env.SUPPORT_TICKET_CACHE.put('health_check', 'ok', { expirationTtl: 60 });
-      checks.edgeKv = true;
-    } else {
-      checks.edgeKv = true; // if not configured, we don't fail health
-    }
-  } catch (e: any) {
-    logErr(supabase, logCtx, e, ctx);
-    checks.edgeKv = false;
-  }
-
-  try {
-    checks.modelConfig = !!(env.ANTHROPIC_API_KEY || env.GEMINI_API_KEY || env.OPENAI_API_KEY);
-  } catch (e: any) {
-    logErr(supabase, logCtx, e, ctx);
-    checks.modelConfig = false;
-  }
-
-  const allHealthy = Object.values(checks).every(Boolean);
-
-  if (!allHealthy) {
-     const metricPayload = {
-        endpoint: "/health",
-        intercept_counter: checks.coreApi ? 0 : 1,
-        d1_timeout_count: checks.database ? 0 : 1,
-        timestamp: new Date().toISOString()
-     };
-     ctx.waitUntil(logToEvents(supabase, logCtx, "onyx_core_degraded_intercept", "Health degraded", metricPayload).catch(() => {}));
-  }
-
-  logEnd(supabase, logCtx, startTime, ctx);
-  return new Response(
-    JSON.stringify({
-      status: allHealthy ? "healthy" : "degraded",
-      synthetic: !allHealthy,
-      checks,
-      timestamp: new Date().toISOString(),
-    }),
-    {
-      status: 200,
-      headers: {
-        "Content-Type": "application/json",
-        ...getCorsHeaders(env, request),
-      },
-    },
-  );
-}
-
-
-async function handleStaleTicketSweep(env: Env) {
-  try {
-    const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
-    const fortyEightHoursAgo = new Date();
-    fortyEightHoursAgo.setHours(fortyEightHoursAgo.getHours() - 48);
-
-    // Find tickets that have been pending for > 48 hours
-    const { data: staleTickets, error } = await supabase
-      .from('support_tickets')
-      .select('id')
-      .eq('status', 'pending')
-      .lt('updated_at', fortyEightHoursAgo.toISOString());
-
-    if (error || !staleTickets || staleTickets.length === 0) return;
-
-    for (const ticket of staleTickets) {
-      await supabase.from('support_tickets').update({ status: 'closed', metadata: { closure_reason: 'Auto-closed due to 48h inactivity' } }).eq('id', ticket.id);
-      await supabase.from('ticket_messages').insert({
-        ticket_id: ticket.id,
-        sender_id: 'system',
-        message_body: 'This ticket has been automatically closed due to 48 hours of inactivity. Please open a new request if the issue persists.',
-        is_internal_note: false
-      });
-    }
-
-    // Inside handleStaleTicketSweep, right before console.log at the bottom of the loop:
-    const { error: cronStaleTelemetryErr } = await supabase.from("events_ax2024").insert({
-      type: "chrono_automation_metric",
-      payload: {
-        routine: "handleStaleTicketSweep",
-        processed_records_count: staleTickets.length,
-        timestamp: new Date().toISOString()
-      }
-    });
-    if (cronStaleTelemetryErr) console.error("Chrono telemetry frame desynchronized:", cronStaleTelemetryErr.message);
-    console.log(`[STALE SWEEP] Successfully closed ${staleTickets.length} abandoned tickets.`);
-  } catch (err) {
-    console.error('[STALE SWEEP] Error:', err);
-  }
-}
 
 async function handleSLASweep(env: Env, ctx?: any) {
   try {
@@ -1364,8 +1126,8 @@ export default {
       return new Response(null, {
         headers: {
           ...getCorsHeaders(env, request),
-          "Access-Control-Allow-Methods": "POST, GET, OPTIONS",
-          "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Idempotency-Key, X-Axim-Network-Key, cf-turnstile-response",
+          "Access-Control-Allow-Methods": "GET, POST, OPTIONS, PUT, DELETE, PATCH",
+          "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Idempotency-Key, X-Axim-Network-Key, cf-turnstile-response, X-Axim-Signature, Idempotency-Key",
           "Access-Control-Max-Age": "86400"
         },
       });
@@ -2319,7 +2081,7 @@ export default {
         return new Response(JSON.stringify({ success: true, matched_ticket_id: ticket.id }), { status: 200, headers: { "Content-Type": "application/json", ...getCorsHeaders(env, request) } });
       } catch (err) {
         console.error("Error processing inbound email webhook:", err);
-        return new Response("Internal Server Error", { status: 500, headers: getCorsHeaders(env, request) });
+        return new Response(JSON.stringify({ error: "AI_SERVICE_UNAVAILABLE", fallback: true }), { status: 500, headers: { "Content-Type": "application/json", ...getCorsHeaders(env, request) } });
       }
     }
 
@@ -3765,7 +3527,7 @@ ${notes}`,
           </body></html>`, { status: 200, headers: { "Content-Type": "text/html" }});
       } catch (error: any) {
         console.error("Error processing HITL email action:", error);
-        return new Response("Internal Server Error", { status: 500 });
+        return new Response(JSON.stringify({ error: "AI_SERVICE_UNAVAILABLE", fallback: true }), { status: 500, headers: { "Content-Type": "application/json", ...getCorsHeaders(env, request) } });
       }
     }
 

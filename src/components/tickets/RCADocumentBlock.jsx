@@ -13,8 +13,8 @@ export default function RCADocumentBlock({ rcaRecord, onFinalized, ticketId, sev
   const [isFinalizing, setIsFinalizing] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
 
-  const isDraft = rcaRecord?.status?.toLowerCase() === 'draft';
-  const hasRecord = !!rcaRecord;
+  const isDraft = rcaRecord?.status?.toLowerCase() !== 'finalized' && rcaRecord?.status?.toLowerCase() !== 'locked';
+  const hasRecord = !!rcaRecord && Object.keys(rcaRecord).length > 0;
 
   const handleGenerateRCA = async () => {
     setIsGenerating(true);
@@ -172,7 +172,7 @@ export default function RCADocumentBlock({ rcaRecord, onFinalized, ticketId, sev
             className="w-full p-3 rounded-xl bg-black/50 border border-indigo-500/30 text-xs text-zinc-200 placeholder-indigo-500/40 focus:outline-none focus:border-indigo-400/60 transition-all resize-none font-sans min-h-[250px]"
           />
         ) : (
-          <div className="w-full p-3 rounded-xl bg-black/30 border border-indigo-500/20 text-xs text-zinc-300 font-sans min-h-[80px] whitespace-pre-wrap">
+          <div className="w-full p-4 rounded-xl bg-black/30 border border-indigo-500/20 text-xs text-zinc-300 font-sans min-h-[80px] prose prose-sm prose-invert prose-indigo max-w-none prose-p:leading-relaxed prose-pre:bg-black/50 prose-pre:border prose-pre:border-indigo-500/30">
             <div dangerouslySetInnerHTML={{ __html: sanitizePayload({ html: notes || 'No notes provided.' }).html }} />
           </div>
         )}

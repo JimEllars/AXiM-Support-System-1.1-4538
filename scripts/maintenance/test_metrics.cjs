@@ -1,3 +1,4 @@
+/* global console */
 const fs = require('fs');
 const metricsFile = './src/components/analytics/SupportMetrics.jsx';
 let data = fs.readFileSync(metricsFile, 'utf8');

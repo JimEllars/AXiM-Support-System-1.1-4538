@@ -1,3 +1,4 @@
+/* global console */
 const fs = require('fs');
 const file = './onyx-edge-worker/src/index.ts';
 let data = fs.readFileSync(file, 'utf8');

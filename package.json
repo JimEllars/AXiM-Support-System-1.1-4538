@@ -12,9 +12,11 @@
     "preview": "vite preview",
     "dev:worker": "npm --prefix onyx-edge-worker run dev",
     "build:worker": "npm --prefix onyx-edge-worker run build",
-    "test:worker": "npm --prefix onyx-edge-worker run test -- --run",
+    "test:worker": "npm run test --prefix onyx-edge-worker",
     "deploy:worker": "npm --prefix onyx-edge-worker run deploy",
-    "test": "vitest run"
+    "test": "vitest run",
+    "test:client": "vitest run",
+    "health:check": "node scripts/maintenance/get_health_check.cjs"
   },
   "dependencies": {
     "@marsidev/react-turnstile": "^1.5.3",

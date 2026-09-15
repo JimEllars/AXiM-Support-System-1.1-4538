@@ -4,7 +4,7 @@ import { useAuthStore } from '../../store/useAuthStore';
 import { getEdgeWorkerUrl } from '../../lib/edgeWorkerUrl';
 import toast from 'react-hot-toast';
 
-export default function LiveChatPanel() {
+export default function LiveChatPanel({ ticketId }) {
   const { isChatOnline, user } = useAuthStore();
   const [isExpanded, setIsExpanded] = useState(false);
   const [messages, setMessages] = useState([]);
