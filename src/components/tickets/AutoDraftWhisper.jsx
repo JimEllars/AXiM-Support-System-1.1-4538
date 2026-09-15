@@ -1,3 +1,4 @@
+import { sanitizePayload } from '../../lib/sanitize';
 import React, { useState } from 'react';
 import { FiCpu, FiCheck, FiX, FiSend, FiEdit2 } from 'react-icons/fi';
 import toast from 'react-hot-toast';
@@ -130,7 +131,7 @@ export default function AutoDraftWhisper({ draftText, onApplyDraft, ticketId }) 
         />
       ) : (
         <p className="text-zinc-300 font-sans leading-relaxed text-xs whitespace-pre-wrap bg-black/40 p-3 rounded-xl border border-indigo-500/10">
-          {editedText}
+          {typeof editedText === 'string' ? sanitizePayload({ text: editedText }).text : editedText}
         </p>
       )}
 

@@ -1,3 +1,4 @@
+import { sanitizePayload } from '../../lib/sanitize';
 import React, { useState, useEffect, useRef } from 'react';
 import { motion } from 'framer-motion';
 import { FiCode, FiExternalLink, FiChevronDown, FiChevronRight, FiGitCommit, FiUser, FiCpu, FiFileText, FiMail, FiCheck, FiEye, FiAlertCircle, FiDatabase, FiGlobe } from 'react-icons/fi';
@@ -188,7 +189,7 @@ export default function MessageThread({ messages = [], ticketStatus, isLoading }
 
             {/* Message Body */}
             <p className="text-xs text-zinc-300 whitespace-pre-wrap leading-relaxed font-sans">
-              {msg.message_body}
+              {typeof msg.message_body === 'string' ? sanitizePayload({ text: msg.message_body }).text : msg.message_body}
             </p>
 
             {translatedMessages[msg.id] && (
