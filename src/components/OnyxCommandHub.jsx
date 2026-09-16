@@ -12,11 +12,37 @@ export default function OnyxCommandHub({ isOpen, onClose }) {
   const { activeTicket, fetchTickets } = useTicketStore();
   const inputRef = useRef(null);
 
+  const [history, setHistory] = useState([]);
+  const [historyIndex, setHistoryIndex] = useState(-1);
+
   useEffect(() => {
     if (isOpen && inputRef.current) {
       inputRef.current.focus();
     }
   }, [isOpen]);
+
+  const handleKeyDown = (e) => {
+    if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      if (history.length > 0 && historyIndex < history.length - 1) {
+        const nextIndex = historyIndex + 1;
+        setHistoryIndex(nextIndex);
+        setCommandInput(history[history.length - 1 - nextIndex]);
+      }
+    } else if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      if (historyIndex > 0) {
+        const nextIndex = historyIndex - 1;
+        setHistoryIndex(nextIndex);
+        setCommandInput(history[history.length - 1 - nextIndex]);
+      } else if (historyIndex === 0) {
+        setHistoryIndex(-1);
+        setCommandInput('');
+      }
+    } else if (e.key === 'Escape') {
+      if (onClose) onClose();
+    }
+  };
 
   if (!isOpen) return null;
 
@@ -92,6 +118,8 @@ export default function OnyxCommandHub({ isOpen, onClose }) {
         showToast.success(`Command ${command} executed successfully!`);
       }
 
+      setHistory([...history, rawInput]);
+      setHistoryIndex(-1);
       setCommandInput('');
       fetchTickets();
       if (onClose) onClose();
@@ -108,7 +136,7 @@ export default function OnyxCommandHub({ isOpen, onClose }) {
         <div className="flex items-center justify-between border-b border-zinc-900 pb-3">
           <div className="flex items-center gap-2 text-xs font-bold text-indigo-400">
             <SafeIcon icon={null} name="Terminal" className="text-sm"/>
-            <span className="uppercase tracking-wider">Onyx Command Terminal</span>
+            <span className="uppercase tracking-wider">Onyx Command Terminal <span className="ml-2 px-1.5 py-0.5 rounded bg-zinc-800/80 border border-zinc-700 text-[9px] text-zinc-500 hidden sm:inline">⌘K</span></span>
           </div>
           <button
             onClick={onClose}
@@ -125,8 +153,9 @@ export default function OnyxCommandHub({ isOpen, onClose }) {
               ref={inputRef}
               type="text"
               value={commandInput}
+              onKeyDown={handleKeyDown}
               onChange={(e) => setCommandInput(e.target.value)}
-              placeholder="Type command: /escalate, /resolve, /reassign [dept], /draft, or /brief"
+              placeholder="Type command: /escalate, /resolve, /reassign [dept] (Use ↑↓ for history)"
               className="w-full pl-8 pr-12 py-3 rounded-2xl bg-black/60 border border-zinc-800 text-xs text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-indigo-500/50 transition-all"
             />
             <button
