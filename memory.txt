@@ -30,3 +30,13 @@ Tests pass successfully (frontend tests via `npm test` and worker tests via `cd 
 - **Milestone 4**: UI/UX. `MessageThread.jsx`, `AutoDraftWhisper.jsx`, and `OnyxInvestigationPanel.jsx` import and apply `sanitizePayload`. `CoreHealthIndicator.jsx` throttled to 30s.
 
 All tests (`npm test`) pass across root and `onyx-edge-worker`. Build executes successfully.
+
+--- EmailIt API v2 with Resend Fallback (Phase Complete) ---
+- Deployed EmailDispatchManager inside onyx-edge-worker with dual-provider architecture: EmailIt (Primary) and Resend (Fallback).
+- Implemented 5-minute circuit breaker triggered by timeouts (>3500ms), quotas (HTTP 429), access issues (HTTP 403), or provider errors (HTTP 5xx).
+- Telemetry extraction extracts `ratelimit-remaining`, `ratelimit-daily-remaining`, and `ratelimit-daily-reset` to proactively failover when daily quota is depleted.
+- Completed webhook ingress parsing via POST /api/onyx/email/webhook with Cloudflare Web Crypto HMAC-SHA256 signature verification (checking against X-Emailit-Signature header).
+- Frontend UI updated to display "EmailIt v2 Verified" vs "Resend Fallback Used" provenance pills.
+- Added diagnostics polling to /api/email/telemetry to visualize system carrier state and rate limits inside CoreHealthDiagnosticsModal.jsx.
+- Achieved 100% test pass rate across Vitest suites, including custom fallback mocking arrays.
+- Bound new environment secrets: EMAILIT_API_KEY, EMAILIT_WEBHOOK_SECRET, RESEND_API_KEY. SPF combined mapping recorded to PROVISIONING_SECRETS.md.
