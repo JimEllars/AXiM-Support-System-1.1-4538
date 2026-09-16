@@ -118,11 +118,19 @@ export default function CoreHealthIndicator() {
         <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-zinc-900 border border-zinc-800/80 text-zinc-300 shadow-sm transition-all hover:bg-zinc-800 hover:border-zinc-700 hover:text-white">
           <SafeIcon icon={null} name="Activity" className={`text-xs ${edgeStatus === 'healthy' ? 'text-emerald-400 animate-pulse' : 'text-amber-400'}`} />
           <span className="font-bold uppercase tracking-wider">Edge Worker</span>
-          <span className={`px-1 rounded text-[9px] uppercase ${edgeStatus === 'healthy' ? 'bg-emerald-500/10 text-emerald-400 animate-pulse' : 'bg-amber-500/10 text-amber-400'}`}>
+          <span className={`px-1 rounded text-[9px] uppercase ${
+             edgeStatus === 'healthy' && latency < 150 ? 'bg-emerald-500/10 text-emerald-400 animate-pulse' :
+             edgeStatus === 'healthy' && latency <= 450 ? 'bg-amber-500/10 text-amber-400' :
+             'bg-rose-500/10 text-rose-400'
+          }`}>
             {edgeStatus}
           </span>
-          {latency !== null && edgeStatus === 'healthy' && (
-            <span className="text-[9px] text-zinc-500 ml-1">{latency}ms</span>
+          {latency !== null && (
+            <span className={`text-[9px] ml-1 ${
+                latency < 150 ? 'text-emerald-500' :
+                latency <= 450 ? 'text-amber-500' :
+                'text-rose-500'
+            }`}>{latency}ms</span>
           )}
         </div>
 

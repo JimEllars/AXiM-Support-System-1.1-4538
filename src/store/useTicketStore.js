@@ -441,7 +441,12 @@ export const useTicketStore = create((set, get) => ({
       )
       .subscribe((status) => {
         if (status === 'SUBSCRIBED') set({ realtimeStatus: 'SUBSCRIBED' });
-        if (status === 'CHANNEL_ERROR') set({ realtimeStatus: 'ERROR' });
+        if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+           set({ realtimeStatus: 'ERROR' });
+           setTimeout(() => {
+             get().subscribeToRealtime();
+           }, 2000);
+        }
       });
 
     const messageChannel = supabase
@@ -460,7 +465,13 @@ export const useTicketStore = create((set, get) => ({
           }
         }
       )
-      .subscribe();
+      .subscribe((status) => {
+        if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+           setTimeout(() => {
+             get().subscribeToRealtime();
+           }, 2000);
+        }
+      });
 
     const hitlChannel = supabase
       .channel('public:hitl_audit_logs')
@@ -484,7 +495,13 @@ export const useTicketStore = create((set, get) => ({
           }
         }
       )
-      .subscribe();
+      .subscribe((status) => {
+        if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+           setTimeout(() => {
+             get().subscribeToRealtime();
+           }, 2000);
+        }
+      });
 
     const eventsChannel = supabase
       .channel('public:events_ax2024')
@@ -539,7 +556,13 @@ export const useTicketStore = create((set, get) => ({
           }
         }
       )
-      .subscribe();
+      .subscribe((status) => {
+        if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+           setTimeout(() => {
+             get().subscribeToRealtime();
+           }, 2000);
+        }
+      });
 
     return () => {
       supabase.removeChannel(ticketChannel);

@@ -1092,7 +1092,23 @@ export default {
       })());
     }
   },
+  formatErrorResponse(env: any, request: Request, error: any, status: number = 500) {
+    const code = error?.code || "INTERNAL_ERROR";
+    const message = error instanceof Error ? error.message : String(error);
+    const edge_colo = request.headers.get("cf-ray")?.split("-")[1] || request.cf?.colo || "unknown";
+    return new Response(JSON.stringify({
+      success: false,
+      error: {
+        code,
+        message,
+        edge_colo,
+        timestamp: new Date().toISOString()
+      }
+    }), { status, headers: { "Content-Type": "application/json", ...getCorsHeaders(env, request) } });
+  },
+
   async fetch(request: Request, env: Env, ctx: any): Promise<Response> {
+    try {
     const url = new URL(request.url);
 
     // STRICT ENVIRONMENT SECRET SANITY FILTER
@@ -2471,11 +2487,15 @@ export default {
         let count = 0;
         if (dlqEvents && dlqEvents.length > 0) {
           for (const ev of dlqEvents) {
+            const attemptCount = ev.payload?.attempt_count ? ev.payload.attempt_count + 1 : 1;
+            const jitter = Math.random();
             await supabase.from("events_ax2024").insert({
               type: "dlq_retry_executed",
               payload: {
                 original_event_id: ev.id,
                 flushed_in_batch: true,
+                attempt_count: attemptCount,
+                backoff_jitter: attemptCount * 1.5 + jitter,
                 timestamp: new Date().toISOString()
               }
             });
@@ -2825,6 +2845,8 @@ if (url.pathname === "/api/v1/tickets/callback" && request.method === "POST") {
 
     // --- CENTRAL TELEMETRY INGRESS VALVE (Headless HMAC Protected Node) ---
     if (url.pathname === "/api/v1/telemetry/event" && request.method === "POST") {
+      const cfRayId = request.headers.get("cf-ray") || "unknown_ray";
+      const cfColo = request.headers.get("cf-ray")?.split("-")[1] || request.cf?.colo || "unknown_colo";
       const inboundSignature = request.headers.get("X-Axim-Signature") || "";
 
       if (!inboundSignature || !env.AXIM_TELEMETRY_SECRET) {
@@ -2851,18 +2873,30 @@ if (url.pathname === "/api/v1/tickets/callback" && request.method === "POST") {
         const isValid = await crypto.subtle.verify("HMAC", cryptoKey, sigBuffer, encoder.encode(bodyText));
 
         if (!isValid) {
-          return new Response(JSON.stringify({ error: "CRYPTOGRAPHIC_SIGNATURE_MISMATCH" }), {
-            status: 403, headers: { "Content-Type": "application/json", ...getCorsHeaders(env, request) }
-          });
+          return this.formatErrorResponse(env, request, { code: "CRYPTOGRAPHIC_SIGNATURE_MISMATCH", message: "Invalid signature" }, 403);
         }
       } catch (cryptoError) {
-        return new Response(JSON.stringify({ error: "SIGNATURE_VERIFICATION_FAULT" }), {
-          status: 400, headers: { "Content-Type": "application/json", ...getCorsHeaders(env, request) }
-        });
+        return this.formatErrorResponse(env, request, { code: "SIGNATURE_VERIFICATION_FAULT", message: "Signature verification failed" }, 400);
       }
 
       // Re-hydrate the verified string body to JSON for processing hooks
       const anomalyPayload = JSON.parse(bodyText);
+
+      // If it's a batch from the new frontend in-memory queue
+      if (Array.isArray(anomalyPayload)) {
+          const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
+          await supabase.from("events_ax2024").insert({
+             type: "ui_telemetry_batch",
+             payload: {
+               events: anomalyPayload,
+               cf_ray: cfRayId,
+               cf_colo: cfColo,
+               timestamp: new Date().toISOString()
+             }
+          });
+          return new Response(JSON.stringify({ success: true, batched: true }), { status: 200, headers: getCorsHeaders(env, request) });
+      }
+
       return await handleTelemetryIngress(anomalyPayload, env, ctx, request);
     }
 
@@ -3867,7 +3901,10 @@ ${notes}`,
 
     // Default route (ticket ingestion)
     return handleTicketIngestion(request, env, ctx);
-  },
+    } catch (globalError: any) {
+      return this.formatErrorResponse(env, request, globalError, 500);
+    }
+  }
 };
 
 // --- Route Handlers ---
@@ -6523,6 +6560,8 @@ async function handleTelemetryIngress(payload: any, env: Env, ctx: any, request:
   const targetApplicationCode = payload.source_app || "UNKNOWN_MICRO_APP";
   const incidentErrorCode = payload.error_code || "GENERIC_ANOMALY";
   const incidentDescription = payload.details || "No structural trace logs provided.";
+  const cfRayId = request.headers.get("cf-ray") || "unknown_ray";
+  const cfColo = request.headers.get("cf-ray")?.split("-")[1] || request.cf?.colo || "unknown_colo";
 
   // Construct a deterministic signature hash to group high-frequency alert floods
   const debouncingCacheKey = `telemetry_cooldown:${targetApplicationCode}:${incidentErrorCode}`;
@@ -6608,6 +6647,8 @@ async function handleTelemetryIngress(payload: any, env: Env, ctx: any, request:
       const synchronizedMetrics = {
         ...(onyxAnalysis.metrics || {}),
         edge_colo: logCtx.edge_colo,
+        cf_ray: cfRayId,
+        cf_colo: cfColo,
         ingest_method: "universal_telemetry_valve"
       };
 

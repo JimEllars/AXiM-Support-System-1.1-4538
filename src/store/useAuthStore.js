@@ -88,5 +88,28 @@ export const useAuthStore = create((set) => ({
   logout: async () => {
     await supabase.auth.signOut();
     set({ user: null, session: null, activeOrganization: null, isAuthenticated: false, isChatOnline: false });
+  },
+
+  startTokenWatchdog: () => {
+    const checkToken = async () => {
+      const state = useAuthStore.getState();
+      if (state.session && state.session.expires_at) {
+        const expiresInSeconds = state.session.expires_at - Math.floor(Date.now() / 1000);
+        if (expiresInSeconds < 60 && expiresInSeconds > 0) {
+          try {
+            const { data, error } = await supabase.auth.refreshSession();
+            if (data?.session && !error) {
+              set({ session: data.session, user: data.session.user });
+            }
+          } catch (err) {
+            console.error('[AuthGuard] Failed to proactively refresh token:', err);
+          }
+        }
+      }
+    };
+
+    // Check every 30 seconds
+    const interval = setInterval(checkToken, 30000);
+    return () => clearInterval(interval);
   }
 }));

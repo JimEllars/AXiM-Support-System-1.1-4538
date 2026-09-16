@@ -4,14 +4,13 @@ const EVENT_QUEUE = [];
 
 const scheduleFlush = () => {
   if (timeoutId) {
-    if (window.cancelIdleCallback) window.cancelIdleCallback(timeoutId);
-    else clearTimeout(timeoutId);
+    clearTimeout(timeoutId);
   }
 
-  if (window.requestIdleCallback) {
-    timeoutId = window.requestIdleCallback(() => flushQueue(), { timeout: 2000 });
+  if (EVENT_QUEUE.length >= 10) {
+    flushQueue();
   } else {
-    timeoutId = setTimeout(() => flushQueue(), 1000);
+    timeoutId = setTimeout(() => flushQueue(), 15000); // 15 seconds
   }
 };
 
@@ -29,30 +28,23 @@ const flushQueue = async () => {
     const workerUrl = import.meta.env.VITE_EDGE_WORKER_URL || import.meta.env.VITE_ONYX_WORKER_URL || '';
     if (!workerUrl) return;
 
-    // Send each event without blocking
-    events.forEach(eventObj => {
-      const data = JSON.stringify(eventObj);
-      const url = `${workerUrl}/api/v1/telemetry/event`;
+    const data = JSON.stringify(events);
+    const url = `${workerUrl}/api/v1/telemetry/event`;
 
-      const sendRequest = async () => {
-        try {
-          if (navigator.sendBeacon) {
-            navigator.sendBeacon(url, data);
-          } else {
-            await fetch(url, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: data,
-              keepalive: true
-            });
-          }
-        } catch (e) {
-          console.debug("Telemetry send failed, caught to prevent blocking:", e);
-        }
-      };
-
-      sendRequest();
-    });
+    try {
+      if (navigator.sendBeacon) {
+        navigator.sendBeacon(url, data);
+      } else {
+        await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: data,
+          keepalive: true
+        });
+      }
+    } catch (e) {
+      console.debug("Telemetry batch send failed, caught to prevent blocking:", e);
+    }
   } catch (e) {
     console.debug("Telemetry flush error", e);
   }

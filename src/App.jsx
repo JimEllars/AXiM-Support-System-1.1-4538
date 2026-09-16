@@ -79,6 +79,10 @@ function App() {
     });
 
     // Listen for auth changes
+    // Start watchdog
+    const cleanupWatchdog = useAuthStore.getState().startTokenWatchdog();
+
+    // Listen for auth changes
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((event, session) => {
@@ -97,7 +101,10 @@ function App() {
       }
     });
 
-    return () => subscription.unsubscribe();
+    return () => {
+      subscription.unsubscribe();
+      if (cleanupWatchdog) cleanupWatchdog();
+    };
   }, [setSession]);
 
   useEffect(() => {

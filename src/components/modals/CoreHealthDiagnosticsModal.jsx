@@ -305,6 +305,23 @@ export default function CoreHealthDiagnosticsModal({isOpen, onClose }) {
               <FiDownload/>
               <span>Live Report</span>
             </button>
+            <button
+              onClick={() => {
+                const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify({ edgeHealth, cronHealth, secHealth, telemetryStats, emailHealth }, null, 2));
+                const downloadAnchorNode = document.createElement('a');
+                downloadAnchorNode.setAttribute("href", dataStr);
+                downloadAnchorNode.setAttribute("download", `axim-diagnostics-snapshot-${new Date().toISOString()}.json`);
+                document.body.appendChild(downloadAnchorNode);
+                downloadAnchorNode.click();
+                downloadAnchorNode.remove();
+              }}
+              disabled={isLoading}
+              className="flex items-center gap-1 px-3 py-1.5 rounded-xl bg-emerald-500/10 text-emerald-300 border border-emerald-500/20 hover:bg-emerald-500/20 text-[10px] font-mono font-bold uppercase transition-all disabled:opacity-50"
+              title="Export Snapshot JSON"
+            >
+              <FiDownload/>
+              <span>Export JSON Snapshot</span>
+            </button>
           </div>
 
           <button
