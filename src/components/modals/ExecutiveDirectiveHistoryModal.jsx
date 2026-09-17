@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { FiUserCheck, FiX, FiCheckCircle, FiXCircle, FiRefreshCw } from 'react-icons/fi';
 import { supabase } from '../../lib/supabaseClient';
+import { trackEvent } from '../../lib/telemetry';
+import toast from 'react-hot-toast';
 
 export default function ExecutiveDirectiveHistoryModal({isOpen, onClose }) {
   useEffect(() => {
@@ -98,10 +100,12 @@ export default function ExecutiveDirectiveHistoryModal({isOpen, onClose }) {
                   }
                 });
                 if (!res.ok) throw new Error("Failed to nudge exec");
-                alert("Nudge triggered successfully.");
+                trackEvent('executive_nudge_triggered', { success: true });
+                toast.success("Nudge triggered successfully.");
               } catch (err) {
                 console.error(err);
-                alert("Failed to nudge exec.");
+                trackEvent('executive_nudge_triggered', { success: false, error: err.message });
+                toast.error("Failed to nudge exec.");
               }
             }}
             className="px-3 py-1 rounded-lg border transition-all bg-amber-500/20 text-amber-300 border-amber-500/40 hover:bg-amber-500/30 text-xs flex items-center gap-2"

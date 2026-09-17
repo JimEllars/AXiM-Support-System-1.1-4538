@@ -15,6 +15,16 @@ const { FiGrid, FiActivity, FiUsers, FiSettings, FiZap, FiShield, FiCpu, FiLogOu
 export default function Sidebar({ isOpen, setIsOpen }) {
   const { t } = useTranslation();
 
+  React.useEffect(() => {
+    const handleEsc = (e) => {
+      if (e.key === 'Escape' && isOpen) {
+        setIsOpen(false);
+      }
+    };
+    window.addEventListener('keydown', handleEsc);
+    return () => window.removeEventListener('keydown', handleEsc);
+  }, [isOpen, setIsOpen]);
+
   const NAV_ITEMS = [
     { id: 'dashboard', label: t('nav.dashboard', 'Dashboard'), path: '/', icon: FiGrid },
     { id: 'analytics', label: t('nav.queue', 'Queue'), path: '/analytics', icon: FiActivity },

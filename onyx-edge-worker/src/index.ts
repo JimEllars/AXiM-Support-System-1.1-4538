@@ -94,18 +94,18 @@ function getCorsHeaders(env: Env, request: Request) {
   const allowedOrigins = env.ALLOWED_ORIGINS?.split(",") || [
     "http://localhost:5173",
     "https://axim.us.com",
+    "http://127.0.0.1:5173"
   ];
-  const allowOrigin =
-    origin && allowedOrigins.includes(origin) ? origin : allowedOrigins[0];
+  const allowOrigin = origin && allowedOrigins.includes(origin) ? origin : allowedOrigins[0];
 
   return {
     "Access-Control-Allow-Origin": allowOrigin,
     "Access-Control-Allow-Methods": "GET, POST, OPTIONS, PUT, DELETE, PATCH",
     "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Axim-Signature, Idempotency-Key",
     "Access-Control-Max-Age": "86400",
+    "X-Content-Type-Options": "nosniff"
   };
 }
-
 
 async function handleSLASweep(env: Env, ctx?: any) {
   try {
@@ -979,6 +979,46 @@ async function handleGlobalAnalytics(request: Request, env: Env): Promise<Respon
       }
     });
   }
+}
+
+
+async function handleHealthCheck(env: Env, request: Request, ctx: any): Promise<Response> {
+  const checks = {
+    database: false,
+    statusKv: false
+  };
+
+  try {
+    const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
+    const { error } = await supabase.from('support_tickets').select('id').limit(1);
+    checks.database = !error;
+  } catch (e) {
+    checks.database = false;
+  }
+
+  try {
+    if (env.STATUS_KV) {
+      checks.statusKv = true;
+    }
+  } catch (e) {
+    checks.statusKv = false;
+  }
+
+  const allHealthy = checks.database;
+
+  return new Response(JSON.stringify({
+    status: allHealthy ? 'healthy' : 'degraded',
+    checks,
+    timestamp: new Date().toISOString(),
+  }), {
+    status: allHealthy ? 200 : 503,
+    headers: {
+      'Content-Type': 'application/json',
+      'Cache-Control': 'no-store',
+      'X-Content-Type-Options': 'nosniff',
+      ...getCorsHeaders(env, request)
+    }
+  });
 }
 
 export default {

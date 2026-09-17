@@ -2,6 +2,7 @@ import { sanitizePayload } from '../../lib/sanitize';
 import React, { useState } from 'react';
 import { FiCpu, FiCheck, FiX, FiSend, FiEdit2 } from 'react-icons/fi';
 import toast from 'react-hot-toast';
+import { trackEvent } from '../../lib/telemetry';
 import { supabase } from '../../lib/supabaseClient';
 import { getEdgeWorkerUrl } from '../../lib/edgeWorkerUrl';
 
@@ -23,28 +24,12 @@ export default function AutoDraftWhisper({ draftText, onApplyDraft, ticketId }) 
 
   if (!draftText || isDismissed) return null;
 
-  const sendFeedbackTelemetry = async (action) => {
-    try {
-      const { data: { session } } = await supabase.auth.getSession();
-      const token = session?.access_token;
-      if (!token) return;
-
-      const workerUrl = getEdgeWorkerUrl();
-      fetch(`${workerUrl}/api/v1/telemetry/autodraft-feedback`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
-        },
-        body: JSON.stringify({
-          ticketId: ticketId || 'unknown',
-          action,
-          draftLength: editedText.length
-        })
-      }).catch((e) => console.warn('[FEEDBACK TELEMETRY BYPASS]', e));
-    } catch (err) {
-      console.warn('[FEEDBACK SESSION ERROR]', err);
-    }
+  const sendFeedbackTelemetry = (action) => {
+    trackEvent('autodraft_feedback', {
+        ticketId: ticketId || 'unknown',
+        action,
+        draftLength: editedText.length
+    });
   };
 
   const handleApply = () => {

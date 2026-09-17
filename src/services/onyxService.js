@@ -11,7 +11,7 @@ const ONYX_SECRET = import.meta.env.VITE_ONYX_SECURE_KEY;
 
 // Safe fetch wrapper with 3000ms timeout and standardized error handling
 async function fetchWithTimeout(url, options = {}) {
-  const timeoutMs = options.timeout || 4000;
+  const timeoutMs = options.timeout || 8000;
   const controller = new AbortController();
   const id = setTimeout(() => controller.abort(), timeoutMs);
 
@@ -39,6 +39,12 @@ async function fetchWithTimeout(url, options = {}) {
       } catch (e) {
          // ignore
       }
+
+      toast.error(`Edge Worker Error (${response.status}): Operating in manual mode.`, {
+        style: { background: '#09090b', color: '#f43f5e', border: '1px solid rgba(244,63,94,0.4)' },
+        duration: 4000
+      });
+
       return { success: false, data: null, error: errorMsg, traceId };
     }
 
@@ -50,7 +56,14 @@ async function fetchWithTimeout(url, options = {}) {
     return { success: true, data, error: null, traceId };
   } catch (err) {
     clearTimeout(id);
-    if (err.name === 'AbortError') {
+    const isTimeout = err.name === 'AbortError' || err.message.includes('Timeout');
+
+    toast.error(isTimeout ? 'Edge Request Timeout: Operating in manual mode.' : `Edge Network Error: ${err.message}`, {
+      style: { background: '#09090b', color: '#f43f5e', border: '1px solid rgba(244,63,94,0.4)' },
+      duration: 4000
+    });
+
+    if (isTimeout) {
       return { success: false, data: null, error: 'Edge Request Timeout', traceId };
     }
     return { success: false, data: null, error: err.message, traceId };
