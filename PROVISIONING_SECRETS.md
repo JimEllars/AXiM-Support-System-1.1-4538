@@ -55,3 +55,9 @@ npx wrangler secret list
    npx wrangler secret put EMAILIT_WEBHOOK_SECRET
    ```
    *(Paste the key when prompted)*
+
+### LLM Integration
+- **DEEPSEEK_API_KEY**: Primary AI engine API key
+- **ANTHROPIC_API_KEY**: Secondary fallback AI engine API key
+- **DEEPSEEK_MODEL**: Defaults to 'deepseek-chat'
+- **ANTHROPIC_MODEL**: Defaults to 'claude-3-5-sonnet-20241022'

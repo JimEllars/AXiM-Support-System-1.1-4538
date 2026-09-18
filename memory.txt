@@ -40,3 +40,7 @@ All tests (`npm test`) pass across root and `onyx-edge-worker`. Build executes s
 - Added diagnostics polling to /api/email/telemetry to visualize system carrier state and rate limits inside CoreHealthDiagnosticsModal.jsx.
 - Achieved 100% test pass rate across Vitest suites, including custom fallback mocking arrays.
 - Bound new environment secrets: EMAILIT_API_KEY, EMAILIT_WEBHOOK_SECRET, RESEND_API_KEY. SPF combined mapping recorded to PROVISIONING_SECRETS.md.
+* AI Dual-Engine Integration (DeepSeek + Anthropic): Integrated `llmClient.ts` to support dual-engine failover in the edge worker (DeepSeek primary, Anthropic fallback, graceful offline).
+* Telemetry Logging: Updated `index.ts` to securely log model telemetry (provider, latency_ms, tokens_used) into `ticket_ai_telemetry` using a schema-safe `logTelemetry()` function.
+* Test Coverage: Established robust Vitest suites in `llm-provider.test.js` validating the failover pipeline.
+* Frontend AI Badges: Augmented `AutoDraftWhisper.jsx` and `ActionProposalBlock.jsx` to render dynamic AI metadata tags (emerald for DeepSeek V3, amber for Anthropic Backup) alongside response latency.

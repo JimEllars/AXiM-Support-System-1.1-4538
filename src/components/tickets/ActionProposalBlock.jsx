@@ -113,7 +113,17 @@ export default function ActionProposalBlock({ proposalData, ticketId, onActionEx
             {executionState === 'success' ? <FiCheckCircle /> : <FiShield />}
           </div>
           <div>
-            <h4 className="text-[11px] font-black uppercase tracking-widest text-zinc-400">Proposed Structural Remedy</h4>
+
+            <h4 className="text-[11px] font-black uppercase tracking-widest text-zinc-400 flex items-center gap-2">
+              Proposed Structural Remedy
+              {proposalData.payload?.metrics?.provider && (
+                <span className={`px-1.5 py-0.5 rounded-full text-[8px] border ${proposalData.payload.metrics.provider === 'deepseek' ? 'border-emerald-500/30 text-emerald-400 bg-emerald-500/10' : 'border-amber-500/30 text-amber-400 bg-amber-500/10'}`}>
+                  {proposalData.payload.metrics.provider === 'deepseek' ? 'DeepSeek V3' : proposalData.payload.metrics.provider === 'anthropic' ? 'Anthropic Backup' : 'Offline Fallback'}
+                  {proposalData.payload.metrics.latency && <span className="ml-1 opacity-60 tracking-tighter">{proposalData.payload.metrics.latency}ms</span>}
+                </span>
+              )}
+            </h4>
+
             <p className="text-xs font-mono font-bold text-white mt-1">{proposalData.tool_type || 'Custom Core Operation'}</p>
             <p className="text-[11px] text-zinc-400 mt-1.5 leading-relaxed">{proposalData.action_required || 'Review data parameters before manual clearance.'}</p>
           </div>
