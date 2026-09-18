@@ -34,10 +34,16 @@ async function fetchWithTimeout(url, options = {}) {
     if (!response.ok) {
       let errorMsg = `HTTP Error: ${response.status}`;
       try {
-        const errorData = await response.json();
-        errorMsg = errorData.error || errorMsg;
+        const text = await response.text();
+        try {
+            const errorData = JSON.parse(text);
+            errorMsg = errorData.error || errorMsg;
+        } catch (jsonErr) {
+            // Probably raw HTML from a 502/504 gateway drop
+            errorMsg = `Gateway error: ${response.status} (Non-JSON response)`;
+        }
       } catch (e) {
-         // ignore
+         // ignore network read errors
       }
 
       toast.error(`Edge Worker Error (${response.status}): Operating in manual mode.`, {
@@ -48,7 +54,13 @@ async function fetchWithTimeout(url, options = {}) {
       return { success: false, data: null, error: errorMsg, traceId };
     }
 
-    const data = await response.json();
+    let data;
+    try {
+      data = await response.json();
+    } catch (e) {
+      // In case of 502/504 edge html error when OK was somehow true or just bad json
+      data = { success: false, error: 'Upstream gateway error (HTML)', code: 'EDGE_GATEWAY_ERROR', requestId: traceId };
+    }
 
     if (data && data.synthetic) {
       return { success: false, data, error: "Synthetic response (edge-cached), core unreachable", traceId, synthetic: true };
