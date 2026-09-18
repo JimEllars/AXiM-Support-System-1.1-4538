@@ -24,6 +24,8 @@ const playAlertChime = () => {
   }
 };
 
+let reconnectFailures = 0;
+
 export const useTicketStore = create((set, get) => ({
   tickets: [],
   activeTicket: null,
@@ -414,6 +416,16 @@ export const useTicketStore = create((set, get) => ({
   subscribeToRealtime: () => {
     set({ realtimeStatus: 'CONNECTING' });
 
+    const handleDisconnect = () => {
+      set({ realtimeStatus: 'ERROR' });
+      reconnectFailures += 1;
+      const backoffMs = Math.min(2000 * Math.pow(1.5, reconnectFailures), 30000);
+      console.log(`Realtime channel disconnected. Attempting reconnect in ${backoffMs}ms... (Attempt ${reconnectFailures})`);
+      setTimeout(() => {
+        get().subscribeToRealtime();
+      }, backoffMs);
+    };
+
     const ticketChannel = supabase
       .channel('public:support_tickets')
       .on(
@@ -440,12 +452,12 @@ export const useTicketStore = create((set, get) => ({
         }
       )
       .subscribe((status) => {
-        if (status === 'SUBSCRIBED') set({ realtimeStatus: 'SUBSCRIBED' });
-        if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
-           set({ realtimeStatus: 'ERROR' });
-           setTimeout(() => {
-             get().subscribeToRealtime();
-           }, 2000);
+        if (status === 'SUBSCRIBED') {
+          reconnectFailures = 0;
+          set({ realtimeStatus: 'SUBSCRIBED' });
+        }
+        if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
+           handleDisconnect();
         }
       });
 
@@ -466,10 +478,8 @@ export const useTicketStore = create((set, get) => ({
         }
       )
       .subscribe((status) => {
-        if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
-           setTimeout(() => {
-             get().subscribeToRealtime();
-           }, 2000);
+        if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
+           handleDisconnect();
         }
       });
 
@@ -496,10 +506,8 @@ export const useTicketStore = create((set, get) => ({
         }
       )
       .subscribe((status) => {
-        if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
-           setTimeout(() => {
-             get().subscribeToRealtime();
-           }, 2000);
+        if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
+           handleDisconnect();
         }
       });
 
@@ -557,10 +565,8 @@ export const useTicketStore = create((set, get) => ({
         }
       )
       .subscribe((status) => {
-        if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
-           setTimeout(() => {
-             get().subscribeToRealtime();
-           }, 2000);
+        if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
+           handleDisconnect();
         }
       });
 

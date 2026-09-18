@@ -69,6 +69,9 @@ export default function AppLayout({ children }) {
         e.preventDefault();
         setIsCommandHubOpen(prev => !prev);
       }
+      if (e.key === 'Escape') {
+        setIsCommandHubOpen(false);
+      }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);

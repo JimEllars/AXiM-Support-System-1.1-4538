@@ -6,6 +6,7 @@ import { useTicketStore } from '../../store/useTicketStore';
 import { useAuthStore } from '../../store/useAuthStore';
 import { onyxService } from '../../services/onyxService';
 import toast from 'react-hot-toast';
+import { trackEvent } from '../../lib/telemetry';
 
 const { FiCpu, FiX, FiCheck, FiAlertTriangle, FiLoader } = FiIcons;
 
@@ -32,16 +33,30 @@ export default function BatchTriageModal({isOpen, onClose }) {
     }
 
     setProcessing(true);
+    const startTime = performance.now();
     try {
         const result = await onyxService.executeBatchTriage(selectedTicketIds);
+        const latency = Math.round(performance.now() - startTime);
         if (result.success) {
             setCompleted(true);
             await fetchTickets(activeOrganization); // Refresh queue
+            trackEvent('batch_triage_executed', {
+                count: selectedTicketIds.length,
+                latency_ms: latency,
+                success: true
+            });
             setSelectedTicketIds([]); // Clear selection
         } else {
             throw new Error(result.error || "Batch triage failed.");
         }
     } catch (e) {
+        const latency = Math.round(performance.now() - startTime);
+        trackEvent('batch_triage_executed', {
+            count: selectedTicketIds.length,
+            latency_ms: latency,
+            success: false,
+            error: e.message
+        });
         toast.error("Onyx failed to process batch triage.");
         onClose();
     } finally {

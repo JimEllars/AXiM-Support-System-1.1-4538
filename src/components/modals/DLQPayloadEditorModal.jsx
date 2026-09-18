@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { FiX, FiRefreshCw, FiTrash2, FiAlertCircle } from 'react-icons/fi';
 import toast from 'react-hot-toast';
+import { trackEvent } from '../../lib/telemetry';
 import { supabase } from '../../lib/supabaseClient';
 import { getEdgeWorkerUrl } from '../../lib/edgeWorkerUrl';
 import { onyxService } from '../../services/onyxService';
@@ -30,6 +31,7 @@ export default function DLQPayloadEditorModal({isOpen, onClose, event, onRefresh
 
   const handleForceRetry = async () => {
     setIsSubmitting(true);
+    const startTime = performance.now();
     try {
       let parsedPayload;
       try {
@@ -55,9 +57,14 @@ export default function DLQPayloadEditorModal({isOpen, onClose, event, onRefresh
         }
       );
 
+      const latency = Math.round(performance.now() - startTime);
+
       if (!res.success || !res.data?.success) {
+        trackEvent('dlq_force_retry', { event_id: event.id, success: false, latency_ms: latency, error: res.error || res.data?.error });
         throw new Error(res.error || res.data?.error || 'Force retry failed.');
       }
+
+      trackEvent('dlq_force_retry', { event_id: event.id, success: true, latency_ms: latency });
 
       toast.success('Payload forced retried successfully!', {
         style: { background: '#09090b', color: '#10b981', border: '1px solid rgba(16,185,129,0.3)' }
@@ -65,6 +72,8 @@ export default function DLQPayloadEditorModal({isOpen, onClose, event, onRefresh
       if (onRefresh) onRefresh();
       onClose();
     } catch (err) {
+      const latency = Math.round(performance.now() - startTime);
+      trackEvent('dlq_force_retry', { event_id: event.id, success: false, latency_ms: latency, error: err.message });
       toast.error(`Retry Error: ${err.message}`);
     } finally {
       setIsSubmitting(false);
