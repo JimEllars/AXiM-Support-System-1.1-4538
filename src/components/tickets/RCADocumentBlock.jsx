@@ -16,7 +16,22 @@ export default function RCADocumentBlock({ rcaRecord, onFinalized, ticketId, sev
   const isDraft = rcaRecord?.status?.toLowerCase() !== 'finalized' && rcaRecord?.status?.toLowerCase() !== 'locked';
   const hasRecord = !!rcaRecord && Object.keys(rcaRecord).length > 0;
 
+  const abortControllerRef = React.useRef(null);
+
+  React.useEffect(() => {
+    return () => {
+       if (abortControllerRef.current) {
+           abortControllerRef.current.abort();
+       }
+    };
+  }, [ticketId]);
+
   const handleGenerateRCA = async () => {
+    if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+    }
+    abortControllerRef.current = new AbortController();
+
     setIsGenerating(true);
     const toastId = toast.loading("Generating RCA...");
     try {
@@ -30,7 +45,8 @@ export default function RCADocumentBlock({ rcaRecord, onFinalized, ticketId, sev
         headers: {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${token}`
-        }
+        },
+        signal: abortControllerRef.current.signal
       });
       const data = await res.json();
       if (!res.ok || !data.success) throw new Error(data.error || 'Failed to generate RCA.');
@@ -41,7 +57,9 @@ export default function RCADocumentBlock({ rcaRecord, onFinalized, ticketId, sev
       });
       if (onFinalized) onFinalized();
     } catch (err) {
-      toast.error(`RCA Generation Error: ${err.message}`, { id: toastId });
+      if (err.name !== 'AbortError') {
+        toast.error(`RCA Generation Error: ${err.message}`, { id: toastId });
+      }
     } finally {
       setIsGenerating(false);
     }

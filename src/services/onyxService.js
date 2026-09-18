@@ -12,8 +12,22 @@ const ONYX_SECRET = import.meta.env.VITE_ONYX_SECURE_KEY;
 // Safe fetch wrapper with 3000ms timeout and standardized error handling
 async function fetchWithTimeout(url, options = {}) {
   const timeoutMs = options.timeout || 8000;
+
+  // Create AbortController, or use the signal passed in
   const controller = new AbortController();
-  const id = setTimeout(() => controller.abort(), timeoutMs);
+  let signal = controller.signal;
+  let id = null;
+
+  if (options.signal) {
+     signal = options.signal;
+  } else {
+     // Use AbortSignal.timeout if available for standard behavior, fallback to manual timeout
+     if (AbortSignal.timeout) {
+         signal = AbortSignal.timeout(timeoutMs);
+     } else {
+         id = setTimeout(() => controller.abort(), timeoutMs);
+     }
+  }
 
   const traceId = crypto.randomUUID();
   const headers = {
@@ -27,7 +41,7 @@ async function fetchWithTimeout(url, options = {}) {
     const response = await fetch(url, {
       ...options,
       headers,
-      signal: controller.signal
+      signal
     });
     clearTimeout(id);
 

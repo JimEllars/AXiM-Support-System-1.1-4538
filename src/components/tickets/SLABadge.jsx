@@ -19,7 +19,7 @@ const SLABadge = ({ breachAt, status, metadata }) => {
 
   if (status === 'Review-Patch-Pending') {
     return (
-      <div className="px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest flex items-center gap-1.5 bg-cyan-500/20 text-cyan-400 border border-cyan-500/50 shadow-[0_0_10px_rgba(6,182,212,0.2)] animate-pulse">
+      <div aria-live="polite" role="status" className="px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest flex items-center gap-1.5 bg-cyan-500/20 text-cyan-400 ring-1 ring-inset ring-cyan-500/50 ring-opacity-20 shadow-[0_0_10px_rgba(6,182,212,0.2)] animate-pulse">
         <SafeIcon icon={FiIcons.FiGitPullRequest || FiClock} className="text-xs" />
         PATCH REVIEW PENDING
       </div>
@@ -33,24 +33,24 @@ const SLABadge = ({ breachAt, status, metadata }) => {
 
   if (diffMs <= 0) {
     label = 'BREACHED';
-    className = 'bg-rose-500/20 text-rose-500 border border-rose-500 shadow-[0_0_10px_rgba(244,63,94,0.3)]';
+    className = 'bg-rose-500/20 text-rose-500 ring-1 ring-inset ring-rose-500 ring-opacity-20 shadow-[0_0_10px_rgba(244,63,94,0.3)]';
   } else if (metadata?.sla_warning === true) {
     label = '⚠️ SLA WARNING (< 1h)';
-    className = 'bg-amber-500/20 text-amber-400 border border-amber-500 shadow-[0_0_15px_rgba(245,158,11,0.4)] animate-pulse';
+    className = 'bg-amber-500/20 text-amber-400 ring-1 ring-inset ring-amber-500 ring-opacity-20 shadow-[0_0_15px_rgba(245,158,11,0.4)] animate-pulse';
   } else if (diffMs < 7200000) { // Under 2 hours
     const h = Math.floor(diffMs / 3600000);
     const m = Math.floor((diffMs % 3600000) / 60000);
     label = `${h}h ${m}m left`;
-    className = 'animate-pulse text-rose-400 bg-rose-500/10 border-rose-500/30';
+    className = 'animate-pulse text-rose-400 bg-rose-500/10 ring-1 ring-inset ring-rose-500/30 ring-opacity-20';
   } else {
     const h = Math.floor(diffMs / 3600000);
     const m = Math.floor((diffMs % 3600000) / 60000);
     label = `${h}h ${m}m left`;
-    className = 'text-zinc-400 bg-zinc-800/50 border-zinc-700';
+    className = 'text-zinc-400 bg-zinc-800/50 ring-1 ring-inset ring-zinc-700 ring-opacity-20';
   }
 
   return (
-    <div className={`px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest flex items-center gap-1.5 ${className}`}>
+    <div aria-live="polite" role="status" className={`px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest flex items-center gap-1.5 ${className}`}>
       <SafeIcon icon={FiClock} className="text-xs" />
       {label}
     </div>

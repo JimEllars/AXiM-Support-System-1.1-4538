@@ -155,7 +155,7 @@ export default function DLQMonitorBlock() {
   };
 
   return (
-    <div className="p-5 rounded-3xl bg-zinc-950/60 border border-slate-800/60 backdrop-blur-md space-y-4 font-mono">
+    <div aria-live="polite" role="status" className="p-5 rounded-3xl bg-zinc-950/60 ring-1 ring-inset ring-slate-800/60 ring-opacity-20 backdrop-blur-md space-y-4 font-mono">
       <div className="flex items-center justify-between border-b border-zinc-900 pb-3">
         <div className="flex items-center gap-2 text-rose-400 text-xs font-bold">
           <FiAlertTriangle className="text-sm animate-pulse"/>
@@ -167,7 +167,7 @@ export default function DLQMonitorBlock() {
             <button
               onClick={handleDrainAll}
               disabled={isFlushing}
-              className="flex items-center gap-1 px-2 py-0.5 rounded text-[9px] font-bold uppercase text-purple-300 bg-purple-500/10 border border-purple-500/20 hover:bg-purple-500/20 transition-all disabled:opacity-50"
+              className="flex items-center gap-1 px-2 py-0.5 rounded text-[9px] font-bold uppercase text-purple-300 bg-purple-500/10 ring-1 ring-inset ring-purple-500/20 ring-opacity-20 hover:bg-purple-500/20 transition-all disabled:opacity-50"
               title="Drain DLQ and replay all pending payloads"
             >
               <FiZap className={isFlushing ? 'animate-spin' : ''} />
@@ -179,7 +179,7 @@ export default function DLQMonitorBlock() {
             <button
               onClick={handleFlushAll}
               disabled={isFlushing}
-              className="flex items-center gap-1 px-2 py-0.5 rounded text-[9px] font-bold uppercase text-amber-300 bg-amber-500/10 border border-amber-500/20 hover:bg-amber-500/20 transition-all disabled:opacity-50"
+              className="flex items-center gap-1 px-2 py-0.5 rounded text-[9px] font-bold uppercase text-amber-300 bg-amber-500/10 ring-1 ring-inset ring-amber-500/20 ring-opacity-20 hover:bg-amber-500/20 transition-all disabled:opacity-50"
               title="Re-process all pending dead-letter queue items in a single batch"
             >
               <FiZap className={isFlushing ? 'animate-spin' : ''} />
@@ -187,10 +187,10 @@ export default function DLQMonitorBlock() {
             </button>
           )}
 
-          <span className="text-[9px] text-amber-300 bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/20 flex items-center gap-1">
+          <span className="text-[9px] text-amber-300 bg-amber-500/10 px-2 py-0.5 rounded ring-1 ring-inset ring-amber-500/20 ring-opacity-20 flex items-center gap-1">
             <FiCheckCircle2 className="text-[9px]"/> 24h Recoveries: {recoveredCount24h}
           </span>
-          <span className="text-[9px] text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/20 flex items-center gap-1">
+          <span className="text-[9px] text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded ring-1 ring-inset ring-emerald-500/20 ring-opacity-20 flex items-center gap-1">
             <FiShield className="text-[9px]"/> DLQ Guard Active
           </span>
         </div>
@@ -200,7 +200,7 @@ export default function DLQMonitorBlock() {
         {isLoading ? (
           <div className="space-y-2">
             {[1, 2, 3].map(i => (
-              <div key={i} className="p-3 rounded-xl bg-black/30 border border-zinc-900 flex items-center justify-between">
+              <div key={i} className="p-3 rounded-xl bg-black/30 ring-1 ring-inset ring-zinc-900 ring-opacity-20 flex items-center justify-between">
                  <div className="space-y-2 flex-1">
                    <div className="h-3 w-1/4 bg-zinc-800 rounded animate-pulse"></div>
                    <div className="h-2 w-1/2 bg-zinc-800 rounded animate-pulse"></div>
@@ -223,7 +223,7 @@ export default function DLQMonitorBlock() {
                 <button
                   onClick={() => handleEchoReplay(item.id, item.payload?.job_id || item.payload?.metadata?.job_id)}
                   disabled={retryingId === item.id}
-                  className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-zinc-900 hover:bg-zinc-800 text-[10px] text-emerald-400 border border-emerald-900/50 transition-all flex-shrink-0 disabled:opacity-50"
+                  className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-zinc-900 hover:bg-zinc-800 text-[10px] text-emerald-400 ring-1 ring-inset ring-emerald-900/50 ring-opacity-20 transition-all flex-shrink-0 disabled:opacity-50"
                 >
                   <FiRefreshCw className={retryingId === item.id ? 'animate-spin' : ''} />
                   <span>{retryingId === item.id ? 'Replaying...' : 'Replay via Echo'}</span>
@@ -234,7 +234,7 @@ export default function DLQMonitorBlock() {
                   setSelectedEvent(item);
                   setIsEditorModalOpen(true);
                 }}
-                className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-zinc-900 hover:bg-zinc-800 text-[10px] text-indigo-300 border border-zinc-800 transition-all flex-shrink-0 disabled:opacity-50"
+                className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-zinc-900 hover:bg-zinc-800 text-[10px] text-indigo-300 ring-1 ring-inset ring-zinc-800 ring-opacity-20 transition-all flex-shrink-0 disabled:opacity-50"
               >
                 <FiSearch />
                 <span>Inspect Payload</span>

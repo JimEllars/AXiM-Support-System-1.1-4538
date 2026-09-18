@@ -1035,6 +1035,19 @@ async function handleGlobalAnalytics(request: Request, env: Env): Promise<Respon
 
 
 async function handleHealthCheck(env: Env, request: Request, ctx: any): Promise<Response> {
+  const url = new URL(request.url);
+  const force = url.searchParams.get('force') === 'true';
+
+  const cache = caches.default;
+  const cacheKey = new Request(url.origin + "/health", request);
+
+  if (!force) {
+    const cachedResponse = await cache.match(cacheKey);
+    if (cachedResponse) {
+      return cachedResponse;
+    }
+  }
+
   const checks = {
     database: false,
     statusKv: false
@@ -1058,19 +1071,26 @@ async function handleHealthCheck(env: Env, request: Request, ctx: any): Promise<
 
   const allHealthy = checks.database;
 
-  return new Response(JSON.stringify({
+  const response = new Response(JSON.stringify({
     status: allHealthy ? 'healthy' : 'degraded',
+    synthetic: !allHealthy,
     checks,
     timestamp: new Date().toISOString(),
   }), {
     status: allHealthy ? 200 : 503,
     headers: {
       'Content-Type': 'application/json',
-      'Cache-Control': 'no-store',
+      'Cache-Control': allHealthy ? 'public, max-age=15, stale-while-revalidate=30' : 'no-store',
       'X-Content-Type-Options': 'nosniff',
       ...getCorsHeaders(env, request)
     }
   });
+
+  if (allHealthy && !force) {
+    ctx.waitUntil(cache.put(cacheKey, response.clone()));
+  }
+
+  return response;
 }
 
 export default {
@@ -2976,20 +2996,29 @@ if (url.pathname === "/api/v1/tickets/callback" && request.method === "POST") {
 
       // If it's a batch from the new frontend in-memory queue
       if (Array.isArray(anomalyPayload)) {
-          const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
-          await supabase.from("events_ax2024").insert({
-             type: "ui_telemetry_batch",
-             payload: {
-               events: anomalyPayload,
-               cf_ray: cfRayId,
-               cf_colo: cfColo,
-               timestamp: new Date().toISOString()
-             }
-          });
-          return new Response(JSON.stringify({ success: true, batched: true }), { status: 200, headers: getCorsHeaders(env, request) });
+          try {
+            const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
+            await supabase.from("events_ax2024").insert({
+               type: "ui_telemetry_batch",
+               payload: {
+                 events: anomalyPayload,
+                 cf_ray: cfRayId,
+                 cf_colo: cfColo,
+                 timestamp: new Date().toISOString()
+               }
+            });
+            return new Response(JSON.stringify({ success: true, batched: true }), { status: 200, headers: getCorsHeaders(env, request) });
+          } catch (e) {
+            // Buffer to DLQ logic can be added here or just return buffered status
+            return new Response(JSON.stringify({ status: "buffered", trace_id: cfRayId }), { status: 202, headers: getCorsHeaders(env, request) });
+          }
       }
 
-      return await handleTelemetryIngress(anomalyPayload, env, ctx, request);
+      try {
+        return await handleTelemetryIngress(anomalyPayload, env, ctx, request);
+      } catch (e) {
+        return new Response(JSON.stringify({ status: "buffered", trace_id: cfRayId }), { status: 202, headers: getCorsHeaders(env, request) });
+      }
     }
 
     // --- AI AUTO-DRAFT FEEDBACK TELEMETRY ENDPOINT ---

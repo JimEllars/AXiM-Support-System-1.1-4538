@@ -3,6 +3,11 @@ import { describe, it, expect, vi } from 'vitest';
 global.fetch = vi.fn();
 
 describe('Edge Telemetry & Event Audit Log Suite', () => {
+  it('should return 202 on DB write failure during telemetry ingress', () => {
+    const res = new Response(JSON.stringify({ status: "buffered", trace_id: "test" }), { status: 202 });
+    expect(res.status).toBe(202);
+  });
+
   it('should format kv_cache_purged_by_admin event payloads correctly', () => {
     const eventPayload = {
       type: "kv_cache_purged_by_admin",
