@@ -6,7 +6,7 @@ import { trackEvent } from '../../lib/telemetry';
 import { supabase } from '../../lib/supabaseClient';
 import { getEdgeWorkerUrl } from '../../lib/edgeWorkerUrl';
 
-export default function AutoDraftWhisper({ draftText, onApplyDraft, ticketId }) {
+export default function AutoDraftWhisper({ draftText, onApplyDraft, ticketId, metadata }) {
   const [isDismissed, setIsDismissed] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
 
@@ -94,10 +94,20 @@ export default function AutoDraftWhisper({ draftText, onApplyDraft, ticketId }) 
   return (
     <div className="p-4 rounded-2xl bg-indigo-950/30 border border-indigo-500/30 backdrop-blur-md space-y-3 font-mono text-xs shadow-lg">
       <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2 text-indigo-300 font-bold uppercase tracking-wider text-[11px]">
-          <FiCpu className="text-indigo-400 animate-pulse"/>
-          <span>Onyx AI Response Whisper</span>
+
+        <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 text-indigo-300 font-bold uppercase tracking-wider text-[11px]">
+            <FiCpu className="text-indigo-400 animate-pulse"/>
+            <span>Onyx AI Response Whisper</span>
+          </div>
+          {metadata && metadata.provider && (
+            <div className={`flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[9px] border ${metadata.provider === 'deepseek' ? 'border-emerald-500/30 text-emerald-400 bg-emerald-500/10' : 'border-amber-500/30 text-amber-400 bg-amber-500/10'}`}>
+              {metadata.provider === 'deepseek' ? 'DeepSeek V3' : metadata.provider === 'anthropic' ? 'Anthropic Backup' : 'Offline Fallback'}
+              {metadata.latencyMs && <span className="opacity-60 ml-1 text-[8px] tracking-tighter">{metadata.latencyMs}ms</span>}
+            </div>
+          )}
         </div>
+
 
         <button
           onClick={handleDismiss}

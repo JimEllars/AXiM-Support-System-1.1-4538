@@ -20,6 +20,19 @@ async function generateHitlActionToken(hitlId: string, secret: string): Promise<
 
 import { createClient } from "@supabase/supabase-js";
 import { EmailDispatchManager } from "./email/dispatch";
+import { callAIWithFailover } from "./ai/llmClient";
+
+
+
+export interface Env {
+  SUPABASE_URL: string;
+  SUPABASE_SERVICE_ROLE_KEY: string;
+  DEEPSEEK_API_KEY: string;
+  ANTHROPIC_API_KEY: string;
+  DEEPSEEK_MODEL?: string;
+  ANTHROPIC_MODEL?: string;
+  [key: string]: any;
+}
 
 import { z } from "zod";
 
@@ -30,6 +43,44 @@ const WebhookIntakeSchema = z.object({
   customer_name: z.string().optional(),
   priority: z.enum(["low", "medium", "high", "urgent"]).optional(),
 });
+
+
+async function logTelemetry(supabase: any, ticketId: string, aiResult: any, env: Env) {
+  try {
+    const payload: any = {
+      ticket_id: ticketId,
+      analyzed_sentiment: aiResult.sentiment,
+      suggested_category: aiResult.category,
+      auto_response_draft: aiResult.draft,
+      confidence_score: aiResult.confidence,
+      provider: aiResult.metrics?.provider_provenance,
+      model: aiResult.metrics?.model,
+      latency_ms: aiResult.metrics?.generation_latency_ms,
+      tokens_used: aiResult.metrics?.tokensUsed?.total,
+      metadata: aiResult.metrics
+    };
+
+    // We will attempt to insert everything. If the table doesn't have provider/model/latency_ms/tokens_used,
+    // Supabase will throw an error, which we will catch and then do a fallback insert with just metadata.
+    const { error } = await supabase.from("ticket_ai_telemetry").insert(payload);
+    if (error && error.code === '42703') { // undefined_column
+       console.warn("Schema missing strict telemetry columns, falling back to metadata JSONB object.");
+       const fallbackPayload = {
+         ticket_id: ticketId,
+         analyzed_sentiment: aiResult.sentiment,
+         suggested_category: aiResult.category,
+         auto_response_draft: aiResult.draft,
+         confidence_score: aiResult.confidence,
+         metadata: aiResult.metrics
+       };
+       await supabase.from("ticket_ai_telemetry").insert(fallbackPayload);
+    } else if (error) {
+       console.error("Failed to log telemetry", error);
+    }
+  } catch (e) {
+    console.warn("Exception in logTelemetry", e);
+  }
+}
 
 async function verifyWebhookSignature(request: Request, env: Env, payloadText: string): Promise<boolean> {
   const signature = request.headers.get("x-axim-signature");
@@ -5275,123 +5326,36 @@ ${contextText || "No context playbooks available."}
 Ticket Subject: ${subject}
 Ticket Description: ${description}`;
 
-  let priority: "low" | "medium" | "urgent" = "medium";
-  let sentiment = "neutral";
-  let category = "general";
-  let draft = "";
-  let confidence = 85;
-  let modelProvenance = "system_fallback";
 
-  const aiStartMarker = performance.now();
+  const options = {
+    systemPrompt: "You are Onyx, the advanced support AI for AXiM. Analyze this ticket and respond strictly in valid JSON matching this schema:\n{\n  \"priority\": \"low\" | \"medium\" | \"urgent\",\n  \"sentiment\": \"positive\" | \"neutral\" | \"negative\",\n  \"category\": \"technical\" | \"billing\" | \"account\" | \"general\",\n  \"confidence\": 0-100,\n  \"draft_reply\": \"your text response\"\n}",
+    userPrompt: "Context playbooks:\n" + (contextText || "None") + "\n\nTicket Subject: " + subject + "\nTicket Description: " + description,
+    temperature: 0.1,
+    maxTokens: 1000,
+    responseFormatJson: true
+  };
 
-  // Tier 1: Zero-Latency Cloudflare Workers AI (Edge Native)
-  if (env?.AI) {
-    try {
-      const aiResult: any = await runWorkersAiWithRetry(env, "@cf/meta/llama-3.1-8b-instruct", {
-        messages: [
-          { role: "system", content: "You are Onyx, an expert support AI. Always output valid JSON objects." },
-          { role: "user", content: prompt }
-        ],
-        response_format: { type: "json_object" }
-      });
+  const llmResponse = await callAIWithFailover(options, env);
 
-      const parsed = typeof aiResult.response === "string"
-        ? JSON.parse(aiResult.response)
-        : aiResult.response;
-
-      if (parsed && (parsed.draft_reply || parsed.draft)) {
-        priority = parsed.priority || "medium";
-        sentiment = parsed.sentiment || "neutral";
-        category = parsed.category || "general";
-        draft = parsed.draft_reply || parsed.draft || "";
-        confidence = parsed.confidence || 90;
-        modelProvenance = "Cloudflare-Workers-AI-Llama3.1";
-      }
-    } catch (cfAiErr) {
-      console.warn("[WORKERS_AI TRIAGE BYPASS] Edge inference failed, executing failover LLM path:", cfAiErr);
-    }
+  let parsedContent;
+  try {
+    parsedContent = JSON.parse(llmResponse.content);
+  } catch (e) {
+    console.error("Failed to parse triage JSON response from LLM:", llmResponse.content);
+    parsedContent = {};
   }
-
-  // Tier 2: Cost-Optimized DeepSeek-V3 Fallback Path
-  if (!draft && env?.DEEPSEEK_API_KEY) {
-    try {
-      const response = await fetch("https://api.deepseek.com/v1/chat/completions", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${env.DEEPSEEK_API_KEY}`
-        },
-        body: JSON.stringify({
-          model: "deepseek-chat",
-          response_format: { type: "json_object" },
-          messages: [{ role: "user", content: prompt }]
-        })
-      });
-
-      if (response.ok) {
-        const data = await response.json() as any;
-        const parsed = JSON.parse(data.choices[0].message.content);
-        priority = parsed.priority || "medium";
-        sentiment = parsed.sentiment || "neutral";
-        category = parsed.category || "general";
-        draft = parsed.draft_reply || "";
-        confidence = parsed.confidence || 80;
-        modelProvenance = "DeepSeek-V3";
-      }
-    } catch (dsErr) {
-      console.error("DeepSeek triage gateway failure, moving to tertiary failover path.");
-    }
-  }
-
-  // Tier 3: Anthropic Claude Fallback Path
-  if (!draft && anthropicApiKey) {
-    try {
-      const response = await fetch("https://api.anthropic.com/v1/messages", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-api-key": anthropicApiKey,
-          "anthropic-version": "2023-06-01",
-        },
-        body: JSON.stringify({
-          model: "claude-3-haiku-20240307",
-          max_tokens: 600,
-          messages: [{ role: "user", content: prompt }],
-        }),
-      });
-
-      if (response.ok) {
-        const data = await response.json() as any;
-        const rawText = data.content[0].text;
-        const parsed = JSON.parse(rawText.substring(rawText.indexOf("{"), rawText.lastIndexOf("}") + 1));
-        priority = parsed.priority || "medium";
-        sentiment = parsed.sentiment || "neutral";
-        category = parsed.category || "general";
-        draft = parsed.draft_reply || "";
-        confidence = parsed.confidence || 75;
-        modelProvenance = "Anthropic-Claude-3-Haiku";
-      }
-    } catch (anthropicErr) {
-      console.error("Critical: All upstream LLM routing paths exhausted.");
-    }
-  }
-
-  if (!draft) {
-    draft = `Hello, thank you for contacting support regarding "${subject}". An internal systems engineer has been flagged to investigate this case manually.`;
-  }
-
-  const aiDurationDeltaMs = Math.round(performance.now() - aiStartMarker);
 
   return {
-    priority,
-    sentiment,
-    category,
-    draft,
-    confidence,
+    priority: parsedContent.priority || "medium",
+    sentiment: parsedContent.sentiment || "neutral",
+    category: parsedContent.category || "general",
+    draft: parsedContent.draft_reply || "",
+    confidence: parsedContent.confidence || (llmResponse.provider === 'offline-fallback' ? 0 : 85),
     metrics: {
-      provider_provenance: modelProvenance,
-      generation_latency_ms: aiDurationDeltaMs,
-      cloudflare_edge_processed: true
+      generation_latency_ms: llmResponse.latencyMs,
+      provider_provenance: llmResponse.provider,
+      tokensUsed: llmResponse.tokensUsed,
+      failoverTriggered: llmResponse.failoverTriggered
     }
   };
 }
@@ -6047,57 +6011,25 @@ async function handleAutoDraft(request: Request, env: Env, ctx: any): Promise<Re
     const systemPrompt = "You are an expert technical support agent. Draft a professional, concise reply to the customer based ONLY on the provided knowledge base context.";
     const userPrompt = `Ticket Subject: ${ticketData.subject}\n\nKnowledge Base:\n${contextText}\n\nDraft a concise, helpful reply:`;
 
-    let draft = "";
 
-    if (env.DEEPSEEK_API_KEY) {
-      try {
-        const deepseekRes = await fetch("https://api.deepseek.com/v1/chat/completions", {
-          method: "POST",
-          headers: { "Content-Type": "application/json", "Authorization": `Bearer ${env.DEEPSEEK_API_KEY}` },
-          body: JSON.stringify({
-            model: "deepseek-chat",
-            max_tokens: 500,
-            messages: [
-              { role: "system", content: systemPrompt },
-              { role: "user", content: userPrompt }
-            ]
-          })
-        });
-        if (deepseekRes.ok) {
-          const data: any = await deepseekRes.json();
-          draft = data.choices[0].message.content;
-        }
-      } catch (dsDraftErr) { console.error("Deepseek auto-draft fallback engaged."); }
-    }
+    const options = {
+      systemPrompt,
+      userPrompt,
+      temperature: 0.5,
+      maxTokens: 500,
+      responseFormatJson: false
+    };
 
-    if (!draft && env.ANTHROPIC_API_KEY) {
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 12000);
-      try {
-        const response = await fetch("https://api.anthropic.com/v1/messages", {
-          method: "POST",
-          headers: { "x-api-key": env.ANTHROPIC_API_KEY, "anthropic-version": "2023-06-01", "content-type": "application/json" },
-          body: JSON.stringify({
-            model: "claude-3-haiku-20240307",
-            max_tokens: 500,
-            system: systemPrompt,
-            messages: [{ role: "user", content: userPrompt }]
-          }),
-          signal: controller.signal
-        });
-        clearTimeout(timeoutId);
-        if (response.ok) {
-          const data: any = await response.json();
-          draft = data.content[0].text;
-        }
-      } catch (e) {}
-    }
+    const llmResponse = await callAIWithFailover(options, env);
+    const draft = llmResponse.content;
+    const metadata = {
+      provider: llmResponse.provider,
+      latencyMs: llmResponse.latencyMs,
+      failoverTriggered: llmResponse.failoverTriggered,
+      failoverReason: llmResponse.failoverReason
+    };
 
-    if (!draft) {
-      draft = `Hello ${ticketData?.contacts_ax2024?.name || "there"},\n\nBased on our knowledge base findings, we are actively looking into this request.`;
-    }
-
-    return new Response(JSON.stringify({ draft }), { headers: { "Content-Type": "application/json", ...getCorsHeaders(env, request) } });
+    return new Response(JSON.stringify({ draft, metadata }), { headers: { "Content-Type": "application/json", ...getCorsHeaders(env, request) } });
   } catch (e: any) {
     logErr(supabase, logCtx, e, ctx);
     return new Response(JSON.stringify({ error: e.message }), { status: 500, headers: getCorsHeaders(env, request) });
