@@ -18,14 +18,30 @@ export default function TicketDetail({ ticketId }) {
 
 
 
+  const setDraft = useTicketStore(state => state.setDraft);
+  const getDraft = useTicketStore(state => state.getDraft);
+
   const [replyText, setReplyText] = useState(() => {
+    const draft = getDraft(ticketId);
+    if (draft) return draft;
     const saved = localStorage.getItem(`composer_${ticketId}`);
-    return saved !== null ? saved : '';
+    if (saved) {
+      setDraft(ticketId, saved);
+      setDraft(ticketId, '');
+      return saved;
+    }
+    return '';
   });
 
   useEffect(() => {
-    localStorage.setItem(`composer_${ticketId}`, replyText);
-  }, [replyText, ticketId]);
+    setReplyText(getDraft(ticketId) || '');
+  }, [ticketId]);
+
+  const handleReplyChange = (e) => {
+    setReplyText(e.target.value);
+    setDraft(ticketId, e.target.value);
+  };
+
   const [isSending, setIsSending] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
   const [isTyping, setIsTyping] = useState(false);
@@ -175,7 +191,7 @@ export default function TicketDetail({ ticketId }) {
       if (error) throw error;
 
       setReplyText('');
-      localStorage.removeItem(`composer_${ticketId}`);
+      setDraft(ticketId, '');
       showToast.success('Response dispatched successfully!');
     } catch (err) {
       showToast.error(`Failed to send message: ${err.message}`);

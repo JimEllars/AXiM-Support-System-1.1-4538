@@ -151,6 +151,7 @@ function getCorsHeaders(env: Env, request: Request) {
 
   return {
     "Access-Control-Allow-Origin": allowOrigin,
+    "Access-Control-Expose-Headers": "x-request-id",
     "Access-Control-Allow-Methods": "GET, POST, OPTIONS, PUT, DELETE, PATCH",
     "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Axim-Signature, Idempotency-Key",
     "Access-Control-Max-Age": "86400",
