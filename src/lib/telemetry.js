@@ -16,31 +16,61 @@ const scheduleFlush = () => {
 
 export function trackEvent(eventName, payload) {
   EVENT_QUEUE.push({ event: eventName, payload, timestamp: new Date().toISOString() });
+
+  // Save to sessionStorage as a transient ring buffer up to 50 items
+  try {
+     let sessionBuffer = JSON.parse(sessionStorage.getItem('telemetry_buffer') || '[]');
+     sessionBuffer.push({ event: eventName, payload, timestamp: new Date().toISOString() });
+     if (sessionBuffer.length > 50) {
+        sessionBuffer = sessionBuffer.slice(sessionBuffer.length - 50);
+     }
+     sessionStorage.setItem('telemetry_buffer', JSON.stringify(sessionBuffer));
+  } catch(e) {}
+
   scheduleFlush();
 }
 
 const flushQueue = async () => {
-  if (EVENT_QUEUE.length === 0) return;
-  const events = [...EVENT_QUEUE];
+  let sessionBuffer = [];
+  try {
+      sessionBuffer = JSON.parse(sessionStorage.getItem('telemetry_buffer') || '[]');
+  } catch (e) {}
+
+  if (EVENT_QUEUE.length === 0 && sessionBuffer.length === 0) return;
+
+  // Combine memory queue and session buffer
+  const combined = [...EVENT_QUEUE];
+  for (const item of sessionBuffer) {
+      if (!combined.some(e => JSON.stringify(e) === JSON.stringify(item))) {
+          combined.push(item);
+      }
+  }
+
   EVENT_QUEUE.length = 0;
 
   try {
     const workerUrl = import.meta.env.VITE_EDGE_WORKER_URL || import.meta.env.VITE_ONYX_WORKER_URL || '';
     if (!workerUrl) return;
 
-    const data = JSON.stringify(events);
+    const data = JSON.stringify(combined);
     const url = `${workerUrl}/api/v1/telemetry/event`;
 
+    let success = false;
     try {
       if (navigator.sendBeacon) {
-        navigator.sendBeacon(url, data);
+        success = navigator.sendBeacon(url, data);
       } else {
-        await fetch(url, {
+        const res = await fetch(url, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: data,
           keepalive: true
         });
+        success = res.ok || res.status === 202;
+      }
+
+      if (success) {
+         sessionStorage.removeItem('telemetry_buffer');
       }
     } catch (e) {
       console.debug("Telemetry batch send failed, caught to prevent blocking:", e);

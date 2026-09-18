@@ -7,6 +7,14 @@ import { supabase } from '../../lib/supabaseClient';
 import { getEdgeWorkerUrl } from '../../lib/edgeWorkerUrl';
 
 export default function AutoDraftWhisper({ draftText, onApplyDraft, ticketId, metadata }) {
+  const abortControllerRef = React.useRef(null);
+  React.useEffect(() => {
+    return () => {
+      if (abortControllerRef.current) {
+         abortControllerRef.current.abort();
+      }
+    };
+  }, [ticketId]);
   const [isDismissed, setIsDismissed] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
 
@@ -56,6 +64,9 @@ export default function AutoDraftWhisper({ draftText, onApplyDraft, ticketId, me
     setIsSending(true);
     sendFeedbackTelemetry('approved_and_dispatched');
 
+    if (abortControllerRef.current) abortControllerRef.current.abort();
+    abortControllerRef.current = new AbortController();
+
     try {
       const { data: { session } } = await supabase.auth.getSession();
       const token = session?.access_token;
@@ -67,6 +78,7 @@ export default function AutoDraftWhisper({ draftText, onApplyDraft, ticketId, me
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${token}`
         },
+        signal: abortControllerRef.current.signal,
         body: JSON.stringify({
           ticketId,
           content: editedText
@@ -85,7 +97,9 @@ export default function AutoDraftWhisper({ draftText, onApplyDraft, ticketId, me
       localStorage.removeItem(`draft_${ticketId}`);
       setIsDismissed(true);
     } catch (error) {
-      toast.error(error.message || "Failed to dispatch. Please try again.");
+      if (error.name !== 'AbortError') {
+         toast.error(error.message || "Failed to dispatch. Please try again.");
+      }
     } finally {
       setIsSending(false);
     }
