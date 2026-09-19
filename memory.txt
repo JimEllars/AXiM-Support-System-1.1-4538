@@ -56,3 +56,12 @@ In this phase, we solidified the handshake between the React clients and the Clo
 - Agent presence lifecycle cleanup added via beforeunload and heartbeat tracking in useTicketStore.js.
 - Added defensive viewport styling (max-height, scroll) on modal payloads.
 - Verified TypeScript builds passing in onyx-edge-worker and main frontend build.
+
+--- Phase 148: DeepSeek Primary Orchestrator & Multi-Provider Extensibility ---
+- Refactored `llmClient.ts` to act as an extensible multi-provider orchestrator, using DeepSeek (flash/pro) as primary, Anthropic as secondary, Workers AI as tertiary, and a graceful offline fallback.
+- Added DeepSeek disk cache telemetry extraction (`prompt_cache_hit_tokens`, `prompt_cache_miss_tokens`, `cache_hit_ratio`) and passed multi-tenant `user_id` context segmentation.
+- Replaced scattered raw `fetch` calls across `index.ts` with unified `callAIWithFailover` invocations (RCA generation, suggestions, stream, action proposals).
+- Unified outbound transactional messaging under `EmailDispatchManager`, migrating legacy `sendEmailItNotification` calls to use the dispatch manager with automatic Resend failover.
+- Wired automated customer receipt confirmation dispatch upon public intake submission in `handleWebhookIntake`.
+- Updated UI provenance badges in `AutoDraftWhisper.jsx`, `ActionProposalBlock.jsx`, and `CoreHealthDiagnosticsModal.jsx` to render active model origins and disk cache hit pills.
+- Verified 100% pass rate across Vitest suites and clean production build.

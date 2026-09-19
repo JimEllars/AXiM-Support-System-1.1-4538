@@ -44,7 +44,7 @@ describe('callAIWithFailover', () => {
     vi.mocked(fetch).mockResolvedValueOnce({
       ok: true,
       json: async () => ({
-        content: [{ text: 'Anthropic response' }],
+        content: [{ type: 'text', text: 'Anthropic response' }],
         usage: { input_tokens: 15, output_tokens: 25 }
       })
     });
