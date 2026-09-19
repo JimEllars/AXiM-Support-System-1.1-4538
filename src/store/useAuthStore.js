@@ -6,6 +6,7 @@ export const useAuthStore = create((set) => ({
   session: null,
   activeOrganization: null, // NEW
   isAuthenticated: false,
+  isInitialized: false,
   isChatOnline: false,
 
   setChatOnline: (status) => set({ isChatOnline: status }),
@@ -42,7 +43,7 @@ export const useAuthStore = create((set) => ({
       }
 
       // If we completely exhausted retries or didn't have a user, do hard reset
-      set({ session: null, user: null, activeOrganization: null, isAuthenticated: false });
+      set({ session: null, user: null, activeOrganization: null, isAuthenticated: false, isInitialized: true });
       return;
     }
 
@@ -52,7 +53,8 @@ export const useAuthStore = create((set) => ({
        // Only update session without touching user/org to prevent flashing UI elements
        set({
          session: session,
-         isAuthenticated: true
+         isAuthenticated: true,
+         isInitialized: true
        });
        return;
     }
@@ -64,7 +66,8 @@ export const useAuthStore = create((set) => ({
       user: session.user,
       session: session,
       activeOrganization: profile?.organization_id || null,
-      isAuthenticated: true
+      isAuthenticated: true,
+      isInitialized: true
     });
   },
 
@@ -87,7 +90,8 @@ export const useAuthStore = create((set) => ({
 
   logout: async () => {
     await supabase.auth.signOut();
-    set({ user: null, session: null, activeOrganization: null, isAuthenticated: false, isChatOnline: false });
+    set({ user: null, session: null, activeOrganization: null, isAuthenticated: false,
+  isInitialized: false, isChatOnline: false });
   },
 
   startTokenWatchdog: () => {
