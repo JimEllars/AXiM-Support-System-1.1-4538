@@ -20,6 +20,8 @@ export default function DLQPayloadEditorModal({isOpen, onClose, event, onRefresh
   const [payloadText, setPayloadText] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isPurging, setIsPurging] = useState(false);
+  const [isValidating, setIsValidating] = useState(false);
+  const [validationResult, setValidationResult] = useState(null);
 
   useEffect(() => {
     if (isOpen && event) {
@@ -28,6 +30,42 @@ export default function DLQPayloadEditorModal({isOpen, onClose, event, onRefresh
   }, [isOpen, event]);
 
   if (!isOpen || !event) return null;
+
+
+  const handleDryRunValidation = async () => {
+    setIsValidating(true);
+    setValidationResult(null);
+    try {
+      let parsedPayload;
+      try {
+        parsedPayload = JSON.parse(payloadText);
+      } catch (e) {
+        setValidationResult({ valid: false, error: 'Invalid JSON format. Check syntax.' });
+        setIsValidating(false);
+        return;
+      }
+
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) throw new Error("Session required.");
+
+      const workerUrl = getEdgeWorkerUrl();
+      const res = await fetch(`${workerUrl}/api/v1/dlq/validate`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${session.access_token}`
+        },
+        body: JSON.stringify(parsedPayload)
+      });
+
+      const data = await res.json();
+      setValidationResult(data);
+    } catch (err) {
+      setValidationResult({ valid: false, error: err.message });
+    } finally {
+      setIsValidating(false);
+    }
+  };
 
   const handleForceRetry = async () => {
     setIsSubmitting(true);
@@ -132,29 +170,48 @@ export default function DLQPayloadEditorModal({isOpen, onClose, event, onRefresh
           <textarea
             className="w-full h-full min-h-[300px] bg-black text-emerald-400 font-mono text-xs p-4 rounded border border-zinc-800 focus:border-emerald-500/50 focus:outline-none focus:ring-1 focus:ring-emerald-500/50 transition-all resize-y whitespace-pre"
             value={payloadText}
-            onChange={(e) => setPayloadText(e.target.value)}
+            onChange={(e) => { setPayloadText(e.target.value); setValidationResult(null); }}
             spellCheck="false"
           />
         </div>
 
-        <div className="flex items-center justify-between p-4 border-t border-zinc-900 bg-zinc-900/50">
-          <button
-            onClick={handlePurge}
-            disabled={isPurging || isSubmitting}
-            className="flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-bold uppercase text-rose-400 bg-rose-500/10 border border-rose-500/20 hover:bg-rose-500/20 transition-all disabled:opacity-50"
-          >
-            {isPurging ? <FiRefreshCw className="animate-spin" /> : <FiTrash2 />}
-            <span>Discard / Purge</span>
-          </button>
+        <div className="flex flex-col p-4 border-t border-zinc-900 bg-zinc-900/50">
+          {validationResult && (
+            <div className={`mb-3 p-2 text-xs rounded border flex items-center gap-2 ${validationResult.valid ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400' : 'bg-rose-500/10 border-rose-500/30 text-rose-400'}`}>
+              <FiAlertCircle />
+              <span>{validationResult.valid ? "Validation Passed" : validationResult.error}</span>
+            </div>
+          )}
+          <div className="flex items-center justify-between w-full">
+            <button
+              onClick={handlePurge}
+              disabled={isPurging || isSubmitting}
+              className="flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-bold uppercase text-rose-400 bg-rose-500/10 border border-rose-500/20 hover:bg-rose-500/20 transition-all disabled:opacity-50"
+            >
+              {isPurging ? <FiRefreshCw className="animate-spin" /> : <FiTrash2 />}
+              <span>Discard</span>
+            </button>
 
-          <button
-            onClick={handleForceRetry}
-            disabled={isSubmitting || isPurging}
-            className="flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-bold uppercase text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 hover:bg-emerald-500/20 transition-all disabled:opacity-50"
-          >
-            {isSubmitting ? <FiRefreshCw className="animate-spin" /> : <FiRefreshCw />}
-            <span>Force Retry</span>
-          </button>
+            <div className="flex gap-2">
+              <button
+                onClick={handleDryRunValidation}
+                disabled={isValidating || isSubmitting || isPurging}
+                className="flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-bold uppercase text-indigo-400 bg-indigo-500/10 border border-indigo-500/20 hover:bg-indigo-500/20 transition-all disabled:opacity-50"
+              >
+                {isValidating ? <FiRefreshCw className="animate-spin" /> : <FiRefreshCw />}
+                <span>Dry Run Validate</span>
+              </button>
+
+              <button
+                onClick={handleForceRetry}
+                disabled={isSubmitting || isPurging || (validationResult && !validationResult.valid)}
+                className="flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-bold uppercase text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 hover:bg-emerald-500/20 transition-all disabled:opacity-50"
+              >
+                {isSubmitting ? <FiRefreshCw className="animate-spin" /> : <FiRefreshCw />}
+                <span>Force Retry</span>
+              </button>
+            </div>
+          </div>
         </div>
       </div>
     </div>

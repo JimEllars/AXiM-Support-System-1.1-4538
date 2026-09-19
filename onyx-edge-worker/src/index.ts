@@ -3021,6 +3021,49 @@ if (url.pathname === "/api/v1/tickets/callback" && request.method === "POST") {
       }
     }
 
+
+    // --- DLQ DRY RUN VALIDATOR ---
+    if (url.pathname === "/api/v1/dlq/validate" && request.method === "POST") {
+      try {
+        const payload = await request.json();
+
+        // 1. Basic format validation
+        if (!payload || typeof payload !== 'object') {
+           return new Response(JSON.stringify({
+             success: false,
+             valid: false,
+             error: "Root structure must be a JSON object"
+           }), { status: 400, headers: getCorsHeaders(env, request) });
+        }
+
+        // 2. Validate routing keys if required
+        // (Assuming standard payload requirements based on our schema context)
+        const requiredKeys = ['meta', 'telemetry'];
+        const missingKeys = requiredKeys.filter(k => !(k in payload));
+
+        if (missingKeys.length > 0) {
+            return new Response(JSON.stringify({
+             success: false,
+             valid: false,
+             error: `Missing required schema keys: ${missingKeys.join(', ')}`
+           }), { status: 400, headers: getCorsHeaders(env, request) });
+        }
+
+        return new Response(JSON.stringify({
+          success: true,
+          valid: true,
+          message: "Syntax and schema validation passed."
+        }), { status: 200, headers: getCorsHeaders(env, request) });
+
+      } catch (err: any) {
+        return new Response(JSON.stringify({
+          success: false,
+          valid: false,
+          error: "Invalid JSON format: " + err.message
+        }), { status: 400, headers: getCorsHeaders(env, request) });
+      }
+    }
+
     // --- AI AUTO-DRAFT FEEDBACK TELEMETRY ENDPOINT ---
     if (url.pathname === "/api/v1/telemetry/autodraft-feedback" && request.method === "POST") {
       const authHeader = request.headers.get("Authorization") || "";

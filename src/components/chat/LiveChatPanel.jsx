@@ -1,11 +1,14 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { FiX, FiSend, FiMinimize2, FiMaximize2, FiMessageCircle, FiPaperclip } from 'react-icons/fi';
 import { useAuthStore } from '../../store/useAuthStore';
+import { useTicketStore } from '../../store/useTicketStore';
+import { trackEvent } from '../../lib/telemetry';
 import { getEdgeWorkerUrl } from '../../lib/edgeWorkerUrl';
 import toast from 'react-hot-toast';
 
 export default function LiveChatPanel({ ticketId }) {
   const { isChatOnline, user } = useAuthStore();
+  const { fetchTicketMessages } = useTicketStore();
   const [isExpanded, setIsExpanded] = useState(false);
   const [messages, setMessages] = useState([]);
     const [inputValue, setInputValue] = useState(() => {
@@ -28,6 +31,8 @@ export default function LiveChatPanel({ ticketId }) {
   const [showOriginal, setShowOriginal] = useState({});
   const [kbSuggestion, setKbSuggestion] = useState(null);
   const fileInputRef = useRef(null);
+  const pollingRef = useRef(null);
+
 
   const wsRef = useRef(null);
   const messagesEndRef = useRef(null);
@@ -60,6 +65,7 @@ export default function LiveChatPanel({ ticketId }) {
 
     return () => {
       disconnectWebSocket();
+      if (pollingRef.current) clearInterval(pollingRef.current);
     };
   }, [isChatOnline]);
 
@@ -81,6 +87,11 @@ export default function LiveChatPanel({ ticketId }) {
       ws.onopen = () => {
         setIsConnected(true);
         console.log('[LiveChat] Connected to WebSocket');
+        trackEvent('chat_connection_state', { status: 'SUBSCRIBED', ticketId });
+        if (pollingRef.current) {
+          clearInterval(pollingRef.current);
+          pollingRef.current = null;
+        }
       };
 
       ws.onmessage = (event) => {
@@ -192,6 +203,7 @@ export default function LiveChatPanel({ ticketId }) {
 
       ws.onerror = (error) => {
         console.error('[LiveChat] WebSocket error:', error);
+        trackEvent('chat_connection_state', { status: 'CHANNEL_ERROR', ticketId });
       };
 
       wsRef.current = ws;
@@ -343,18 +355,21 @@ export default function LiveChatPanel({ ticketId }) {
     if (!inputValue.trim() || !isConnected || isReadOnly) return;
     setTimeoutWarning(false);
 
+    const tempId = `temp_${Date.now()}`;
     const newMessage = {
       type: isInternalNote ? 'internal_whisper' : 'chat_message',
       text: inputValue.trim(),
       sender: user?.email || 'Operator',
-      timestamp: new Date().toISOString()
+      timestamp: new Date().toISOString(),
+      metadata: { temp_id: tempId }
     };
 
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
        wsRef.current.send(JSON.stringify(newMessage));
 
        setMessages(prev => [...prev, {
-          id: 'local-' + Date.now(),
+          id: tempId,
+          type: newMessage.type,
           sender: newMessage.sender,
           text: newMessage.text,
           timestamp: newMessage.timestamp,
@@ -362,8 +377,8 @@ export default function LiveChatPanel({ ticketId }) {
           isIncoming: false
        }]);
 
-           setInputValue('');
-    localStorage.removeItem('chat_draft_' + ticketId);
+       setInputValue('');
+       localStorage.removeItem('chat_draft_' + ticketId);
     } else {
        toast.error("Not connected to chat server.");
     }

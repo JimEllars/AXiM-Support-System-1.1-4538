@@ -10,7 +10,10 @@ import MemoryHub from './pages/MemoryHub';
 
 import AppLayout from './components/layout/AppLayout';
 import { Toaster } from 'react-hot-toast';
+
 import { useAuthStore } from './store/useAuthStore';
+
+
 import { useTicketStore } from './store/useTicketStore';
 import { supabase } from './lib/supabaseClient';
 import { useState } from 'react';
@@ -39,7 +42,7 @@ function AuthListener({ children }) {
 }
 
 function App() {
-  const { setSession } = useAuthStore();
+  const { setSession, isInitialized } = useAuthStore();
   const [activeOutage, setActiveOutage] = useState(null);
 
   useEffect(() => {
@@ -164,6 +167,16 @@ function App() {
     };
   }, []);
 
+
+  if (!isInitialized) {
+    return (
+      <div className="min-h-screen bg-black flex flex-col items-center justify-center p-8 space-y-6">
+         <div className="w-16 h-16 rounded-2xl bg-zinc-900 animate-pulse border border-zinc-800" />
+         <div className="w-48 h-4 rounded-full bg-zinc-900 animate-pulse" />
+         <div className="w-32 h-3 rounded-full bg-zinc-900 animate-pulse" />
+      </div>
+    );
+  }
   return (
     <QueryClientProvider client={queryClient}>
       <BrowserRouter>
