@@ -1,0 +1,9 @@
+feat(ai): integrate deepseek primary orchestrator with multi-provider failover and emailit v2 unification
+
+- Refactor `llmClient.ts` into an extensible multi-provider orchestrator featuring DeepSeek (`deepseek-flash` / `deepseek-v4-pro`) as primary with a 10s timeout, Anthropic Claude as secondary failover, Cloudflare Workers AI as tertiary, and graceful offline degradation.
+- Replace scattered raw `fetch` calls across `onyx-edge-worker/src/index.ts` (`/generate-rca`, `/stream`, `handleExecuteAction`, `processRCA`, `handleGenerateSuggestion`) with unified `callAIWithFailover` invocations.
+- Capture DeepSeek disk context caching telemetry (`prompt_cache_hit_tokens`, `prompt_cache_miss_tokens`, and calculated `cacheHitRatio`) and pass multi-tenant `user_id` context segmentation[cite: 14].
+- Unify outbound transactional messaging under `EmailDispatchManager`, standardizing EmailIt API v2 with automatic Resend failover across all legacy `sendEmailItNotification` callsites.
+- Wire automated customer receipt confirmation dispatch upon public intake submission.
+- Update UI provenance badges in `AutoDraftWhisper.jsx`, `ActionProposalBlock.jsx`, and `CoreHealthDiagnosticsModal.jsx` to render active model origins and disk cache hit status[cite: 14].
+- Verify 100% pass rate across all Vitest suites and clean production compilation on both client and edge worker.
