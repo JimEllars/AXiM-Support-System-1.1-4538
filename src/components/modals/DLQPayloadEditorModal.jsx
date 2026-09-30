@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { FiX, FiRefreshCw, FiTrash2, FiAlertCircle } from 'react-icons/fi';
-import toast from 'react-hot-toast';
-import { trackEvent } from '../../lib/telemetry';
+import { showToast as toast } from '../../lib/toast';
+import { trackAiTelemetry, trackEvent } from '../../lib/telemetry';
 import { supabase } from '../../lib/supabaseClient';
 import { getEdgeWorkerUrl } from '../../lib/edgeWorkerUrl';
 import { onyxService } from '../../services/onyxService';
@@ -83,35 +83,33 @@ export default function DLQPayloadEditorModal({isOpen, onClose, event, onRefresh
       if (!token) throw new Error("Session token required.");
 
       const workerUrl = getEdgeWorkerUrl();
-      const res = await onyxService.fetchWithTimeout(
-        `${workerUrl}/api/v1/admin/dlq/force-retry`,
-        {
+
+      const res = await fetch(`${workerUrl}/api/dlq`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
             'Authorization': `Bearer ${token}`
           },
-          body: JSON.stringify({ event_id: event.id, updated_payload: parsedPayload })
-        }
-      );
+          body: JSON.stringify({ action: 'retry', payload: parsedPayload, ticketId: event.payload?.ticket_id })
+      });
+
+      const data = await res.json();
 
       const latency = Math.round(performance.now() - startTime);
 
-      if (!res.success || !res.data?.success) {
-        trackEvent('dlq_force_retry', { event_id: event.id, success: false, latency_ms: latency, error: res.error || res.data?.error });
-        throw new Error(res.error || res.data?.error || 'Force retry failed.');
+      if (!res.ok || !data.success) {
+        trackAiTelemetry({ ticketId: event.payload?.ticket_id, actionType: 'dlq_retry', latencyMs: latency, metadata: { success: false, error: data.error }});
+        throw new Error(data.error || 'Force retry failed.');
       }
 
-      trackEvent('dlq_force_retry', { event_id: event.id, success: true, latency_ms: latency });
+      trackAiTelemetry({ ticketId: event.payload?.ticket_id, actionType: 'dlq_retry', latencyMs: latency, metadata: { success: true }});
 
-      toast.success('Payload forced retried successfully!', {
-        style: { background: '#09090b', color: '#10b981', border: '1px solid rgba(16,185,129,0.3)' }
-      });
+      toast.success('Payload forced retried successfully!');
       if (onRefresh) onRefresh();
       onClose();
     } catch (err) {
       const latency = Math.round(performance.now() - startTime);
-      trackEvent('dlq_force_retry', { event_id: event.id, success: false, latency_ms: latency, error: err.message });
+      trackAiTelemetry({ ticketId: event.payload?.ticket_id, actionType: 'dlq_retry', latencyMs: latency, metadata: { success: false, error: err.message }});
       toast.error(`Retry Error: ${err.message}`);
     } finally {
       setIsSubmitting(false);
@@ -140,9 +138,7 @@ export default function DLQPayloadEditorModal({isOpen, onClose, event, onRefresh
         throw new Error(res.error || res.data?.error || 'Purge failed.');
       }
 
-      toast.success('Payload purged successfully!', {
-        style: { background: '#09090b', color: '#10b981', border: '1px solid rgba(16,185,129,0.3)' }
-      });
+      toast.success('Payload purged successfully!');
       if (onRefresh) onRefresh();
       onClose();
     } catch (err) {

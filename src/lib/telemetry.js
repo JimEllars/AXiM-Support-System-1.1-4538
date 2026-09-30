@@ -91,3 +91,16 @@ export function logError(error, context = {}) {
     context
   });
 }
+
+export function trackAiTelemetry({ ticketId, actionType, latencyMs, modelProvider, promptTokens, completionTokens, isCurated, metadata }) {
+  trackEvent('ai_telemetry', {
+    ticket_id: ticketId,
+    action_type: actionType,
+    latency_ms: latencyMs,
+    model_provider: modelProvider,
+    prompt_tokens: promptTokens,
+    completion_tokens: completionTokens,
+    is_curated: isCurated,
+    metadata
+  });
+}

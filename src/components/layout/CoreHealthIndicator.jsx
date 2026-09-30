@@ -3,6 +3,7 @@ import SafeIcon from '../../common/SafeIcon';
 import { getEdgeWorkerUrl } from '../../lib/edgeWorkerUrl';
 import CoreHealthDiagnosticsModal from '../modals/CoreHealthDiagnosticsModal';
 import { onyxService } from '../../services/onyxService';
+import { FiChevronDown } from 'react-icons/fi';
 
 export default function CoreHealthIndicator() {
   const [edgeStatus, setEdgeStatus] = useState('checking');
@@ -12,6 +13,7 @@ export default function CoreHealthIndicator() {
   const [lastCronRun, setLastCronRun] = useState(null);
   const [isDiagOpen, setIsDiagOpen] = useState(false);
   const [latency, setLatency] = useState(null);
+  const [isDropdownOpen, setIsDropdownOpen] = useState(false);
 
   // Track consecutive failures to apply exponential backoff
   const [failures, setFailures] = useState(0);
@@ -55,7 +57,7 @@ export default function CoreHealthIndicator() {
         setShieldStatus(secData.status === 'shield_active' ? 'active' : 'degraded');
       } else {
          setShieldStatus('degraded');
-      setOnyxStatus('degraded');
+         setOnyxStatus('degraded');
       }
 
       const onyxRes = await onyxService.checkOnyxHealth();
@@ -107,62 +109,81 @@ export default function CoreHealthIndicator() {
     return () => clearTimeout(timeoutId);
   }, [failures]); // Re-run effect if failures state changes so next schedule reflects backoff
 
+  // Determine global status
+  const isAllHealthy = edgeStatus === 'healthy' && cronStatus === 'healthy' && shieldStatus === 'active' && onyxStatus === 'healthy';
+  const hasDegraded = edgeStatus.includes('degraded') || cronStatus === 'degraded' || shieldStatus === 'degraded' || onyxStatus.includes('degraded');
+
+  const globalStatusColor = isAllHealthy ? 'bg-emerald-500' : hasDegraded ? 'bg-amber-500' : 'bg-rose-500';
+
   return (
-    <>
+    <div className="relative">
       <div
-        onClick={() => setIsDiagOpen(true)}
-        className="flex flex-wrap items-center gap-2 font-mono text-[10px] cursor-pointer hover:opacity-90 transition-opacity p-2"
-        title="Click to open interactive system diagnostics & telemetry modal"
+        onClick={() => setIsDropdownOpen(!isDropdownOpen)}
+        className="flex items-center gap-2 font-mono text-[10px] cursor-pointer hover:opacity-90 transition-opacity px-3 py-1.5 rounded-xl bg-zinc-900 border border-zinc-800 shadow-md"
       >
-        {/* Edge Worker Health Indicator */}
-        <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-zinc-900 border border-zinc-800/80 text-zinc-300 shadow-sm transition-all hover:bg-zinc-800 hover:border-zinc-700 hover:text-white">
-          <SafeIcon icon={null} name="Activity" className={`text-xs ${edgeStatus === 'healthy' ? 'text-emerald-400 animate-pulse' : 'text-amber-400'}`} />
-          <span className="font-bold uppercase tracking-wider">Edge Worker</span>
-          <span className={`px-1 rounded text-[9px] uppercase ${
-             edgeStatus === 'healthy' && latency < 150 ? 'bg-emerald-500/10 text-emerald-400 animate-pulse' :
-             edgeStatus === 'healthy' && latency <= 450 ? 'bg-amber-500/10 text-amber-400' :
-             'bg-rose-500/10 text-rose-400'
-          }`}>
-            {edgeStatus}
-          </span>
-          {latency !== null && (
-            <span className={`text-[9px] ml-1 ${
-                latency < 150 ? 'text-emerald-500' :
-                latency <= 450 ? 'text-amber-500' :
-                'text-rose-500'
+        <div className={`w-2 h-2 rounded-full ${globalStatusColor} ${isAllHealthy ? 'animate-pulse' : ''}`} />
+        <span className="font-bold uppercase tracking-wider text-zinc-300">System Status</span>
+        {latency !== null && (
+            <span className={`px-1.5 py-0.5 rounded text-[9px] ${
+                latency < 150 ? 'bg-emerald-500/10 text-emerald-400' :
+                latency <= 450 ? 'bg-amber-500/10 text-amber-400' :
+                'bg-rose-500/10 text-rose-400'
             }`}>{latency}ms</span>
-          )}
-        </div>
-
-        {/* Cloudflare CRON Schedule Pulse Indicator */}
-        <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-zinc-900 border border-zinc-800/80 text-zinc-300 shadow-sm transition-all hover:bg-zinc-800 hover:border-zinc-700 hover:text-white">
-          <SafeIcon icon={null} name="Clock" className={`text-xs ${cronStatus === 'healthy' ? 'text-sky-400 animate-pulse' : 'text-amber-400'}`} />
-          <span className="font-bold uppercase tracking-wider">CRON 08:00 UTC</span>
-          <span className={`px-1 rounded text-[9px] uppercase ${cronStatus === 'healthy' ? 'bg-sky-500/10 text-sky-400 animate-pulse' : 'bg-amber-500/10 text-amber-400'}`}>
-            {cronStatus === 'healthy' ? (lastCronRun ? `Run: ${lastCronRun}` : 'Active') : 'Pending'}
-          </span>
-        </div>
-
-        {/* Edge Shield Rate-Limiting & HMAC Guard Indicator */}
-        <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-zinc-900 border border-zinc-800/80 text-zinc-300 shadow-sm transition-all hover:bg-zinc-800 hover:border-zinc-700 hover:text-white">
-          <SafeIcon icon={null} name="Shield" className={`text-xs ${shieldStatus === 'active' ? 'text-indigo-400 animate-pulse' : 'text-amber-400'}`} />
-          <span className="font-bold uppercase tracking-wider">Edge Shield</span>
-          <span className={`px-1 rounded text-[9px] uppercase ${shieldStatus === 'active' ? 'bg-indigo-500/10 text-indigo-400 animate-pulse' : 'bg-amber-500/10 text-amber-400'}`}>
-            {shieldStatus === 'active' ? 'Active' : 'Degraded'}
-          </span>
-        </div>
-
-        {/* Onyx Health Indicator */}
-        <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-zinc-900 border border-zinc-800/80 text-zinc-300 shadow-sm transition-all hover:bg-zinc-800 hover:border-zinc-700 hover:text-white">
-          <SafeIcon icon={null} name="Activity" className={`text-xs ${onyxStatus === 'healthy' ? 'text-purple-400 animate-pulse' : 'text-amber-400'}`} />
-          <span className="font-bold uppercase tracking-wider">Onyx Core</span>
-          <span className={`px-1 rounded text-[9px] uppercase ${onyxStatus === 'healthy' ? 'bg-purple-500/10 text-purple-400 animate-pulse' : 'bg-amber-500/10 text-amber-400'}`}>
-            {onyxStatus === 'degraded (edge-cached)' ? 'DEGRADED (EDGE-CACHED)' : onyxStatus}
-          </span>
-        </div>
+        )}
+        <FiChevronDown className="text-zinc-500" />
       </div>
 
+      {isDropdownOpen && (
+        <div className="absolute top-full left-0 mt-2 w-64 bg-zinc-950 border border-zinc-800 rounded-xl shadow-2xl p-2 flex flex-col gap-2 z-50">
+
+            <div className="flex items-center gap-2 p-2 rounded-lg bg-zinc-900 hover:bg-zinc-800 transition-colors border border-zinc-800/80">
+              <SafeIcon icon={null} name="Activity" className={`text-xs ${edgeStatus === 'healthy' ? 'text-emerald-400' : 'text-amber-400'}`} />
+              <div className="flex flex-col flex-1">
+                <span className="font-bold uppercase tracking-wider text-zinc-300 text-[10px]">Edge Worker</span>
+                <span className={`text-[9px] uppercase ${edgeStatus === 'healthy' ? 'text-emerald-500' : 'text-amber-500'}`}>{edgeStatus}</span>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2 p-2 rounded-lg bg-zinc-900 hover:bg-zinc-800 transition-colors border border-zinc-800/80">
+              <SafeIcon icon={null} name="Clock" className={`text-xs ${cronStatus === 'healthy' ? 'text-sky-400' : 'text-amber-400'}`} />
+              <div className="flex flex-col flex-1">
+                <span className="font-bold uppercase tracking-wider text-zinc-300 text-[10px]">CRON Schedule</span>
+                <span className={`text-[9px] uppercase ${cronStatus === 'healthy' ? 'text-sky-500' : 'text-amber-500'}`}>
+                  {cronStatus === 'healthy' ? (lastCronRun ? `Run: ${lastCronRun}` : 'Active') : 'Pending'}
+                </span>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2 p-2 rounded-lg bg-zinc-900 hover:bg-zinc-800 transition-colors border border-zinc-800/80">
+              <SafeIcon icon={null} name="Shield" className={`text-xs ${shieldStatus === 'active' ? 'text-indigo-400' : 'text-amber-400'}`} />
+              <div className="flex flex-col flex-1">
+                <span className="font-bold uppercase tracking-wider text-zinc-300 text-[10px]">Edge Shield</span>
+                <span className={`text-[9px] uppercase ${shieldStatus === 'active' ? 'text-indigo-500' : 'text-amber-500'}`}>
+                  {shieldStatus === 'active' ? 'Active' : 'Degraded'}
+                </span>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2 p-2 rounded-lg bg-zinc-900 hover:bg-zinc-800 transition-colors border border-zinc-800/80">
+              <SafeIcon icon={null} name="Activity" className={`text-xs ${onyxStatus === 'healthy' ? 'text-purple-400' : 'text-amber-400'}`} />
+              <div className="flex flex-col flex-1">
+                <span className="font-bold uppercase tracking-wider text-zinc-300 text-[10px]">Onyx Core</span>
+                <span className={`text-[9px] uppercase ${onyxStatus === 'healthy' ? 'text-purple-500' : 'text-amber-500'}`}>
+                  {onyxStatus === 'degraded (edge-cached)' ? 'DEGRADED (EDGE-CACHED)' : onyxStatus}
+                </span>
+              </div>
+            </div>
+
+            <button
+               onClick={() => { setIsDiagOpen(true); setIsDropdownOpen(false); }}
+               className="mt-1 p-2 text-[10px] uppercase font-bold text-center rounded-lg bg-zinc-800 hover:bg-zinc-700 text-white transition-colors"
+            >
+               Open Detailed Diagnostics
+            </button>
+        </div>
+      )}
+
       <CoreHealthDiagnosticsModal isOpen={isDiagOpen} onClose={() => setIsDiagOpen(false)} />
-    </>
+    </div>
   );
 }

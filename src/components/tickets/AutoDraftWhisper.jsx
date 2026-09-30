@@ -1,12 +1,12 @@
 import { sanitizePayload } from '../../lib/sanitize';
 import React, { useState } from 'react';
 import { FiCpu, FiCheck, FiX, FiSend, FiEdit2 } from 'react-icons/fi';
-import toast from 'react-hot-toast';
-import { trackEvent } from '../../lib/telemetry';
+import { showToast as toast } from '../../lib/toast';
+import { trackEvent, trackAiTelemetry } from '../../lib/telemetry';
 import { supabase } from '../../lib/supabaseClient';
 import { getEdgeWorkerUrl } from '../../lib/edgeWorkerUrl';
 
-export default function AutoDraftWhisper({ draftText, onApplyDraft, ticketId, metadata }) {
+export default function AutoDraftWhisper({ draftText, onApplyDraft, ticketId, metadata, onInsertReply }) {
   const abortControllerRef = React.useRef(null);
   React.useEffect(() => {
     return () => {
@@ -17,6 +17,7 @@ export default function AutoDraftWhisper({ draftText, onApplyDraft, ticketId, me
   }, [ticketId]);
   const [isDismissed, setIsDismissed] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
+  const [isGenerating, setIsGenerating] = useState(false); // added loading state
 
   // Use localStorage or persist the state safely so re-renders don't blast the edit
   const [editedText, setEditedText] = useState(() => {
@@ -30,6 +31,18 @@ export default function AutoDraftWhisper({ draftText, onApplyDraft, ticketId, me
 
   const [isSending, setIsSending] = useState(false);
 
+  // Keyboard shortcut hint (Alt + Enter)
+  React.useEffect(() => {
+    const handleKeyDown = (e) => {
+      if (e.altKey && e.key === 'Enter' && !isDismissed && draftText) {
+        handleApply();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isDismissed, draftText, editedText]); // Added editedText dependency since handleApply uses it
+
+
   if (!draftText || isDismissed) return null;
 
   const sendFeedbackTelemetry = (action) => {
@@ -40,14 +53,40 @@ export default function AutoDraftWhisper({ draftText, onApplyDraft, ticketId, me
     });
   };
 
-  const handleApply = () => {
-    sendFeedbackTelemetry('applied');
-    if (onApplyDraft) onApplyDraft(editedText);
-    toast.success("AI draft whisper applied to composer!", {
-      style: { background: '#09090b', color: '#10b981', border: '1px solid rgba(16,185,129,0.3)' }
-    });
+  const handleApply = async () => {
+    const wasModified = editedText !== draftText;
+    const startTime = performance.now();
+    try {
+      if (onInsertReply) {
+          onInsertReply(editedText);
+      } else if (onApplyDraft) {
+          onApplyDraft(editedText); // fallback just in case
+      }
+
+      const latency = Math.round(performance.now() - startTime);
+
+      await trackAiTelemetry({
+        ticketId: ticketId,
+        actionType: 'autodraft_applied',
+        modelProvider: metadata?.provider || 'gemini-1.5-flash',
+        isCurated: wasModified,
+        latencyMs: latency,
+        metadata: {
+          originalLength: draftText?.length || 0,
+          appliedLength: editedText.length,
+          wasModified,
+          confidence: metadata?.confidence
+        }
+      });
+
+      toast.success(wasModified ? 'Curated draft applied' : 'AI draft inserted into reply');
+    } catch (err) {
+      console.error('Telemetry logging failed:', err);
+    }
     localStorage.removeItem(`draft_${ticketId}`);
+    // setIsDismissed(true); // Don't dismiss immediately, let them see it applied or maybe they want to send directly
   };
+
 
   const handleDismiss = () => {
     sendFeedbackTelemetry('dismissed');
@@ -91,9 +130,7 @@ export default function AutoDraftWhisper({ draftText, onApplyDraft, ticketId, me
         throw new Error(data.error || 'Failed to dispatch email');
       }
 
-      toast.success("Response dispatched via EmailIt successfully!", {
-        style: { background: '#09090b', color: '#10b981', border: '1px solid rgba(16,185,129,0.3)' }
-      });
+      toast.success("Response dispatched via EmailIt successfully!");
       localStorage.removeItem(`draft_${ticketId}`);
       setIsDismissed(true);
     } catch (error) {
@@ -106,19 +143,24 @@ export default function AutoDraftWhisper({ draftText, onApplyDraft, ticketId, me
   };
 
   return (
-    <div className="p-4 rounded-2xl bg-indigo-950/30 border border-indigo-500/30 backdrop-blur-md space-y-3 font-mono text-xs shadow-lg">
+    <div className={`p-4 rounded-2xl bg-indigo-950/30 border border-indigo-500/30 backdrop-blur-md space-y-3 font-mono text-xs shadow-lg ${isGenerating ? 'animate-pulse' : ''}`}>
       <div className="flex items-center justify-between">
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
           <div className="flex items-center gap-2 text-indigo-300 font-bold uppercase tracking-wider text-[11px]">
             <FiCpu className="text-indigo-400 animate-pulse"/>
             <span>Onyx AI Response Whisper</span>
           </div>
           {metadata && metadata.provider && (
-            <div className={`flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[9px] border ${metadata.provider === 'deepseek' ? 'border-emerald-500/30 text-emerald-400 bg-emerald-500/10' : 'border-amber-500/30 text-amber-400 bg-amber-500/10'}`}>
-              {metadata.provider === 'deepseek' ? 'DeepSeek V3' : metadata.provider === 'anthropic' ? 'Anthropic Backup' : 'Offline Fallback'}
+            <div className={`flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[9px] border ${metadata.provider === 'deepseek' ? 'border-emerald-500/30 text-emerald-400 bg-emerald-500/10' : metadata.provider === 'anthropic' ? 'border-amber-500/30 text-amber-400 bg-amber-500/10' : 'border-blue-500/30 text-blue-400 bg-blue-500/10'}`}>
+              {metadata.provider === 'deepseek' ? 'DeepSeek V3' : metadata.provider === 'anthropic' ? 'Anthropic Backup' : metadata.provider}
               {metadata.latencyMs && <span className="opacity-60 ml-1 text-[8px] tracking-tighter">{metadata.latencyMs}ms</span>}
             </div>
+          )}
+          {metadata && metadata.confidence && (
+              <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[9px] border border-cyan-500/30 text-cyan-400 bg-cyan-500/10" title="Confidence Score">
+                  Confidence: {metadata.confidence}%
+              </div>
           )}
         </div>
 
@@ -165,10 +207,11 @@ export default function AutoDraftWhisper({ draftText, onApplyDraft, ticketId, me
           <button
             onClick={handleApply}
             disabled={isSending}
+            title="Alt + Enter"
             className="flex items-center gap-1.5 px-3 py-1 rounded-xl bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-white font-bold uppercase text-[10px] transition-all shadow-md disabled:opacity-50"
           >
             <FiCheck className="text-xs"/>
-            <span>Apply</span>
+            <span>Insert into Reply</span>
           </button>
 
           <button

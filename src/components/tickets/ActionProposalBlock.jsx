@@ -1,10 +1,10 @@
-import { onyxService } from '../../services/onyxService';
 import React, { useState } from 'react';
-import { FiShield, FiAlertTriangle, FiCheckCircle, FiPlay, FiLoader, FiXCircle, FiSend } from 'react-icons/fi';
-import toast from 'react-hot-toast';
+import { FiCheckCircle, FiXCircle, FiPlay, FiLoader, FiShield, FiAlertTriangle, FiSend } from 'react-icons/fi';
 import { supabase } from '../../lib/supabaseClient';
+import { showToast as toast } from '../../lib/toast';
 import { getEdgeWorkerUrl } from '../../lib/edgeWorkerUrl';
 import useTicketStore from '../../store/useTicketStore';
+import { trackAiTelemetry } from '../../lib/telemetry';
 
 export default function ActionProposalBlock({ proposalData, ticketId, onActionExecuted }) {
   const [executionState, setExecutionState] = useState('idle'); // 'idle' | 'executing' | 'success' | 'rejected' | 'failed'
@@ -37,6 +37,7 @@ export default function ActionProposalBlock({ proposalData, ticketId, onActionEx
     if (executionState === 'executing' || executionState === 'success' || executionState === 'rejected') return;
     setExecutionState('executing');
     setErrorMessage('');
+    const startTime = performance.now();
 
     try {
       const { data: { session } } = await supabase.auth.getSession();
@@ -77,16 +78,25 @@ export default function ActionProposalBlock({ proposalData, ticketId, onActionEx
         throw new Error(outcome.error || outcome.message || 'Upstream vault network handshake declined.');
       }
 
+      const latency = Math.round(performance.now() - startTime);
+      trackAiTelemetry({
+        ticketId: ticketId,
+        actionType: 'action_proposal',
+        latencyMs: latency,
+        modelProvider: proposalData.payload?.metrics?.provider || 'unknown',
+        isCurated: targetDisposition === 'approved',
+        metadata: {
+            disposition: targetDisposition,
+            toolType: proposalData.tool_type
+        }
+      });
+
       if (targetDisposition === 'rejected') {
         setExecutionState('rejected');
-        toast.error('Proposed remedy successfully dismissed and archived.', {
-          style: { background: '#09090b', color: '#f43f5e', border: '1px solid rgba(244,63,94,0.3)' }
-        });
+        toast.error('Proposed remedy successfully dismissed and archived.');
       } else {
         setExecutionState('success');
-        toast.success(`Action successfully executed.\nTrace ID: ${outcome.cf_ray || 'edge_cache'}`, {
-          style: { background: '#09090b', color: '#10b981', border: '1px solid rgba(16,185,129,0.3)' }
-        });
+        toast.success(`Action successfully executed.\nTrace ID: ${outcome.cf_ray || 'edge_cache'}`);
       }
 
       if (onActionExecuted) onActionExecuted(proposalData.id);

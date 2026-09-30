@@ -1,30 +1,30 @@
-import { onyxService } from "../../services/onyxService";
 import React, { useState, useEffect } from 'react';
-import DLQPayloadEditorModal from '../modals/DLQPayloadEditorModal';
-import { FiAlertTriangle, FiRefreshCw, FiCheckCircle2, FiShield, FiZap, FiSearch } from 'react-icons/fi';
+import { FiAlertTriangle, FiZap, FiCheckCircle2, FiShield, FiRefreshCw, FiSearch } from 'react-icons/fi';
+import { showToast as toast } from '../../lib/toast';
 import { supabase } from '../../lib/supabaseClient';
 import { getEdgeWorkerUrl } from '../../lib/edgeWorkerUrl';
-import toast from 'react-hot-toast';
+import { onyxService } from '../../services/onyxService';
+import DLQPayloadEditorModal from '../modals/DLQPayloadEditorModal';
 
 export default function DLQMonitorBlock() {
   const [dlqItems, setDlqItems] = useState([]);
-  const [recoveredCount24h, setRecoveredCount24h] = useState(0);
-  const [isLoading, setIsLoading] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
   const [isFlushing, setIsFlushing] = useState(false);
   const [retryingId, setRetryingId] = useState(null);
-  const [isEditorModalOpen, setIsEditorModalOpen] = useState(false);
+  const [recoveredCount24h, setRecoveredCount24h] = useState(0);
+
   const [selectedEvent, setSelectedEvent] = useState(null);
+  const [isEditorModalOpen, setIsEditorModalOpen] = useState(false);
 
   const fetchDLQData = async () => {
     setIsLoading(true);
     try {
-      const past24h = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
-
+      const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
       const { count: recovered } = await supabase
         .from('events_ax2024')
-        .select('id', { count: 'exact', head: true })
-        .gte('timestamp', past24h)
-        .eq('type', 'dlq_retry_executed');
+        .select('*', { count: 'exact', head: true })
+        .eq('type', 'dlq_retry_executed')
+        .gte('timestamp', yesterday);
 
       setRecoveredCount24h(recovered || 0);
 
@@ -62,9 +62,7 @@ export default function DLQMonitorBlock() {
       if (!res.success || !res.data?.success) throw new Error(res.error || res.data?.error || 'DLQ drain failed.');
       const data = res.data;
 
-      toast.success(`DLQ drain completed! Re-queued ${data.replayed_count || 0} payloads.`, {
-        style: { background: '#09090b', color: '#10b981', border: '1px solid rgba(16,185,129,0.3)' }
-      });
+      toast.success(`DLQ drain completed! Re-queued ${data.replayed_count || 0} payloads.`);
       fetchDLQData();
     } catch (err) {
       toast.error(`Drain Error: ${err.message}`);
@@ -88,9 +86,7 @@ export default function DLQMonitorBlock() {
       if (!res.success || !res.data?.success) throw new Error(res.error || res.data?.error || 'Batch DLQ flush failed.');
       const data = res.data;
 
-      toast.success(`DLQ batch flush completed! Re-queued ${data.flushed_count || 0} payloads.`, {
-        style: { background: '#09090b', color: '#10b981', border: '1px solid rgba(16,185,129,0.3)' }
-      });
+      toast.success(`DLQ batch flush completed! Re-queued ${data.flushed_count || 0} payloads.`);
       fetchDLQData();
     } catch (err) {
       toast.error(`Flush Error: ${err.message}`);
@@ -120,9 +116,7 @@ export default function DLQMonitorBlock() {
          throw new Error(errData.error || 'Echo recovery replay failed');
       }
 
-      toast.success("Payload successfully replayed via Echo Recovery!", {
-        style: { background: '#09090b', color: '#10b981', border: '1px solid rgba(16,185,129,0.3)' }
-      });
+      toast.success("Payload successfully replayed via Echo Recovery!");
       fetchDLQData();
     } catch (err) {
       toast.error(`Replay Failed: ${err.message}`);
@@ -143,9 +137,7 @@ export default function DLQMonitorBlock() {
 
       if (!res.success) throw new Error(res.error || 'DLQ payload re-ingestion failed.');
 
-      toast.success("DLQ payload successfully re-queued!", {
-        style: { background: '#09090b', color: '#10b981', border: '1px solid rgba(16,185,129,0.3)' }
-      });
+      toast.success("DLQ payload successfully re-queued!");
       fetchDLQData();
     } catch (err) {
       toast.error(`Retry Failed: ${err.message}`);
