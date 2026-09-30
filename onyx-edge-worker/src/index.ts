@@ -35,6 +35,40 @@ export interface Env {
 }
 
 import { z } from "zod";
+function createLogContext(request: Request) {
+  return {
+    requestId: request.headers.get("cf-ray") || `req-${Date.now()}`,
+    edge_colo: request.headers.get("cf-ray")?.split("-")[1] || "DEV",
+    method: request.method,
+    url: request.url,
+  };
+}
+
+async function logToEvents(supabase: any, context: any, type: string, message: string, data?: any) {
+  try {
+    await supabase.from("events_ax2024").insert({
+      type: type,
+      payload: { ...context, message, data }
+    });
+  } catch (err) {
+    console.error("logToEvents failed", err);
+  }
+}
+
+function logErr(supabase: any, context: any, error: any, ctx: any) {
+  console.error("logErr:", error);
+}
+
+function logEnd(supabase: any, context: any, data: any, ctx: any) {
+}
+
+function validateAttachment(file: any) {
+   return { valid: true, error: "" };
+}
+
+async function handleStaleTicketSweep(env: Env) {
+}
+
 
 const WebhookIntakeSchema = z.object({
   subject: z.string().min(1).max(500),
@@ -1081,7 +1115,6 @@ async function handleHealthCheck(env: Env, request: Request, ctx: any): Promise<
     headers: {
       'Content-Type': 'application/json',
       'Cache-Control': allHealthy ? 'public, max-age=15, stale-while-revalidate=30' : 'no-store',
-      'X-Content-Type-Options': 'nosniff',
       ...getCorsHeaders(env, request)
     }
   });
