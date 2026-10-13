@@ -13,7 +13,7 @@ import SLABadge from './tickets/SLABadge';
 
 import { FiCopy, FiLayers } from 'react-icons/fi';
 const getEdgeWorkerUrl = () => {
-    return import.meta.env.VITE_EDGE_WORKER_URL || "http://127.0.0.1:54321/functions/v1/onyx-edge-worker";
+    return import.meta.env.VITE_EDGE_WORKER_URL || "${workerUrl}";
 };
 
 

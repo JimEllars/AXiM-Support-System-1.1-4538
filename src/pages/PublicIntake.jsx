@@ -106,8 +106,7 @@ export default function PublicIntake() {
       // We will send the sanitized payload to edge worker. If encryption is required, we use Web Crypto API.
 
       const encoder = new TextEncoder();
-      const secret = import.meta.env.VITE_AXIM_ONYX_SECRET || import.meta.env.VITE_TURNSTILE_SITE_KEY || 'fallback_secret_do_not_use_in_prod';
-      const hashBuffer = await crypto.subtle.digest("SHA-256", encoder.encode(secret));
+            const hashBuffer = await crypto.subtle.digest("SHA-256", encoder.encode(secret));
       const key = await crypto.subtle.importKey("raw", hashBuffer, { name: "AES-GCM" }, false, ["encrypt"]);
 
       const iv = crypto.getRandomValues(new Uint8Array(12));
@@ -173,17 +172,17 @@ export default function PublicIntake() {
 
   if (submitSuccess) {
     return (
-      <div className="min-h-screen bg-black flex items-center justify-center p-4">
-        <div className="max-w-md w-full glass-panel bg-zinc-950/80 border-emerald-500/30 p-8 rounded-3xl text-center space-y-4">
+      <div className="min-h-screen bg-axim-slate flex items-center justify-center p-4">
+        <div className="max-w-md w-full glass-panel bg-axim-slate/80 border-emerald-500/30 p-8 rounded-3xl text-center space-y-4">
           <div className="w-16 h-16 bg-emerald-500/10 border border-emerald-500/30 rounded-full flex items-center justify-center mx-auto text-emerald-400 text-2xl mb-4">
             ✓
           </div>
           <h2 className="text-2xl font-black text-emerald-400 tracking-tight">Request Ingested</h2>
           <p className="text-zinc-400 text-sm">Your support diagnostics have been securely routed to the active resolution swarm.</p>
-          <div className="bg-black/50 border border-zinc-800 p-4 rounded-xl font-mono text-xs text-zinc-500">
+          <div className="bg-axim-slate/50 border border-axim-border p-4 rounded-xl font-mono text-xs text-zinc-500">
             TRACE_ID: <span className="text-cyan-400">{ticketIdReceipt || 'PENDING_CONFIRMATION'}</span>
           </div>
-          <button onClick={() => window.location.reload()} className="mt-6 w-full py-3 bg-zinc-900 hover:bg-zinc-800 text-zinc-300 text-xs font-bold uppercase tracking-widest rounded-xl transition-colors">
+          <button onClick={() => window.location.reload()} className="mt-6 w-full py-3 bg-axim-surface hover:bg-zinc-800 text-zinc-300 text-xs font-bold uppercase tracking-widest rounded-xl transition-colors">
             Submit Another Trace
           </button>
         </div>
@@ -192,9 +191,9 @@ export default function PublicIntake() {
   }
 
   return (
-    <div className="min-h-screen bg-black flex flex-col justify-center items-center p-4 relative overflow-hidden">
+    <div className="min-h-screen bg-axim-slate flex flex-col justify-center items-center p-4 relative overflow-hidden">
       {/* Background Glow */}
-      <div className="absolute top-0 left-1/4 w-[500px] h-[500px] bg-cyan-900/20 rounded-full blur-[150px] pointer-events-none" />
+      <div className="absolute top-0 left-1/4 w-[500px] h-[500px] bg-yellow-900/10 rounded-full blur-[150px] pointer-events-none" />
       <div className="absolute bottom-0 right-1/4 w-[500px] h-[500px] bg-indigo-900/20 rounded-full blur-[150px] pointer-events-none" />
 
       <div className="max-w-xl w-full z-10">
@@ -206,13 +205,13 @@ export default function PublicIntake() {
         {/* Progress Bar */}
         <div className="flex gap-2 mb-8">
             {[1, 2, 3].map((num) => (
-                <div key={num} className={`h-1 flex-1 rounded-full transition-colors duration-300 ${step >= num ? 'bg-cyan-500 shadow-[0_0_10px_rgba(34,211,238,0.5)]' : 'bg-zinc-800'}`} />
+                <div key={num} className={`h-1 flex-1 rounded-full transition-colors duration-300 ${step >= num ? 'bg-axim-yellow text-black shadow-[0_0_10px_rgba(253,208,35,0.5)]' : 'bg-zinc-800'}`} />
             ))}
         </div>
 
         <motion.div
             layout
-            className="bg-zinc-900/50 backdrop-blur-xl border border-zinc-800 rounded-[2rem] p-6 sm:p-8 shadow-2xl"
+            className="bg-axim-surface/50 backdrop-blur-xl border border-axim-border rounded-[2rem] p-6 sm:p-8 shadow-2xl"
         >
            <AnimatePresence mode="wait">
             {step === 1 && (
@@ -235,7 +234,7 @@ export default function PublicIntake() {
                                 type="text"
                                 value={formData.customer_name}
                                 onChange={e => setFormData({ ...formData, customer_name: e.target.value })}
-                                className="w-full bg-black/50 border border-zinc-800 focus:border-cyan-500/50 rounded-xl py-3 pl-11 pr-4 text-white placeholder-zinc-600 focus:outline-none focus:ring-1 focus:ring-cyan-500/50 transition-all"
+                                className="w-full bg-axim-slate/50 border border-axim-border focus:border-axim-yellow/50 rounded-xl py-3 pl-11 pr-4 text-white placeholder-zinc-600 focus:outline-none focus:ring-1 focus:ring-axim-yellow/50 transition-all"
                                 placeholder="Jane Doe"
                             />
                         </div>
@@ -251,7 +250,7 @@ export default function PublicIntake() {
                                 type="email"
                                 value={formData.customer_email}
                                 onChange={e => setFormData({ ...formData, customer_email: e.target.value })}
-                                className="w-full bg-black/50 border border-zinc-800 focus:border-cyan-500/50 rounded-xl py-3 pl-11 pr-4 text-white placeholder-zinc-600 focus:outline-none focus:ring-1 focus:ring-cyan-500/50 transition-all"
+                                className="w-full bg-axim-slate/50 border border-axim-border focus:border-axim-yellow/50 rounded-xl py-3 pl-11 pr-4 text-white placeholder-zinc-600 focus:outline-none focus:ring-1 focus:ring-axim-yellow/50 transition-all"
                                 placeholder="jane@example.com"
                             />
                         </div>
@@ -266,7 +265,7 @@ export default function PublicIntake() {
                             <select
                                 value={formData.workflow_category}
                                 onChange={e => setFormData({ ...formData, workflow_category: e.target.value })}
-                                className="w-full bg-black/50 border border-zinc-800 focus:border-cyan-500/50 rounded-xl py-3 pl-11 pr-4 text-white focus:outline-none focus:ring-1 focus:ring-cyan-500/50 transition-all appearance-none"
+                                className="w-full bg-axim-slate/50 border border-axim-border focus:border-axim-yellow/50 rounded-xl py-3 pl-11 pr-4 text-white focus:outline-none focus:ring-1 focus:ring-axim-yellow/50 transition-all appearance-none"
                             >
                                 {workflowCategories.map(cat => (
                                     <option key={cat.id} value={cat.id}>{cat.label}</option>
@@ -278,7 +277,7 @@ export default function PublicIntake() {
                     <button
                         onClick={handleNext}
                         disabled={!formData.customer_name || !formData.customer_email}
-                        className="w-full bg-cyan-500 hover:bg-cyan-400 text-black font-semibold rounded-xl py-3 mt-4 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                        className="w-full bg-axim-yellow text-black hover:bg-yellow-400 text-black font-semibold rounded-xl py-3 mt-4 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                     >
                         Continue to Details
                     </button>
@@ -305,7 +304,7 @@ export default function PublicIntake() {
                                 type="text"
                                 value={formData.subject}
                                 onChange={e => setFormData({ ...formData, subject: e.target.value })}
-                                className="w-full bg-black/50 border border-zinc-800 focus:border-cyan-500/50 rounded-xl py-3 pl-11 pr-4 text-white placeholder-zinc-600 focus:outline-none focus:ring-1 focus:ring-cyan-500/50 transition-all"
+                                className="w-full bg-axim-slate/50 border border-axim-border focus:border-axim-yellow/50 rounded-xl py-3 pl-11 pr-4 text-white placeholder-zinc-600 focus:outline-none focus:ring-1 focus:ring-axim-yellow/50 transition-all"
                                 placeholder="Brief summary of the issue"
                             />
                         </div>
@@ -321,7 +320,7 @@ export default function PublicIntake() {
                                 value={formData.description}
                                 onChange={e => setFormData({ ...formData, description: e.target.value })}
                                 rows={4}
-                                className="w-full bg-black/50 border border-zinc-800 focus:border-cyan-500/50 rounded-xl py-3 pl-11 pr-4 text-white placeholder-zinc-600 focus:outline-none focus:ring-1 focus:ring-cyan-500/50 transition-all resize-none"
+                                className="w-full bg-axim-slate/50 border border-axim-border focus:border-axim-yellow/50 rounded-xl py-3 pl-11 pr-4 text-white placeholder-zinc-600 focus:outline-none focus:ring-1 focus:ring-axim-yellow/50 transition-all resize-none"
                                 placeholder="Please provide as much detail as possible..."
                             />
                         </div>
@@ -338,7 +337,7 @@ export default function PublicIntake() {
                             />
                             <label
                                 htmlFor="file-upload"
-                                className={`flex items-center justify-center gap-2 w-full bg-black/50 border border-dashed rounded-xl py-4 cursor-pointer transition-all ${fileError ? 'border-red-500/50 text-red-400' : 'border-zinc-700 hover:border-cyan-500/50 text-zinc-400 hover:text-cyan-400'}`}
+                                className={`flex items-center justify-center gap-2 w-full bg-axim-slate/50 border border-dashed rounded-xl py-4 cursor-pointer transition-all ${fileError ? 'border-red-500/50 text-red-400' : 'border-zinc-700 hover:border-cyan-500/50 text-zinc-400 hover:text-cyan-400'}`}
                             >
                                 <FiPaperclip />
                                 <span className="text-sm">
@@ -351,7 +350,7 @@ export default function PublicIntake() {
                                 </p>
                             )}
                             {file && !fileError && (
-                              <div className="mt-3 px-4 py-2 bg-cyan-500/5 border border-cyan-500/20 rounded-xl flex items-center justify-between font-mono text-[10px] text-cyan-400">
+                              <div className="mt-3 px-4 py-2 bg-axim-yellow text-black/5 border border-cyan-500/20 rounded-xl flex items-center justify-between font-mono text-[10px] text-cyan-400">
                                 <span className="uppercase tracking-wider">File Staged for Handshake Ingestion</span>
                                 <span>{parseFloat(file.size / (1024 * 1024)).toFixed(2)} MB</span>
                               </div>
@@ -369,7 +368,7 @@ export default function PublicIntake() {
                         <button
                             onClick={handleNext}
                             disabled={!formData.subject || !formData.description || fileError}
-                            className="flex-1 bg-cyan-500 hover:bg-cyan-400 text-black font-semibold rounded-xl py-3 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                            className="flex-1 bg-axim-yellow text-black hover:bg-yellow-400 text-black font-semibold rounded-xl py-3 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                         >
                             Review
                         </button>
@@ -394,7 +393,7 @@ export default function PublicIntake() {
                         </div>
                     )}
 
-                    <div className="space-y-4 bg-black/30 rounded-xl p-6 border border-zinc-800">
+                    <div className="space-y-4 bg-axim-slate/30 rounded-xl p-6 border border-axim-border">
                         <div>
                             <p className="text-xs text-zinc-500 uppercase tracking-widest mb-1">From</p>
                             <p className="text-white text-sm">{formData.customer_name} ({formData.customer_email})</p>

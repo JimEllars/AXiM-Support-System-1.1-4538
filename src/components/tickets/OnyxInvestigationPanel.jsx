@@ -1,3 +1,4 @@
+import { getEdgeWorkerUrl } from '../../lib/edgeWorkerUrl';
 import { sanitizePayload } from '../../lib/sanitize';
 import React, { useState, useEffect } from 'react';
 import { FiCpu, FiClock, FiCheckCircle, FiMail, FiAlertTriangle } from 'react-icons/fi';

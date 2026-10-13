@@ -7,7 +7,6 @@ import toast from 'react-hot-toast';
  */
 
 const ONYX_WORKER_URL = getEdgeWorkerUrl();
-const ONYX_SECRET = import.meta.env.VITE_ONYX_SECURE_KEY;
 
 // Safe fetch wrapper with 3000ms timeout and standardized error handling
 async function fetchWithTimeout(url, options = {}) {
@@ -32,7 +31,6 @@ async function fetchWithTimeout(url, options = {}) {
   const traceId = crypto.randomUUID();
   const headers = {
     'Content-Type': 'application/json',
-    'Authorization': `Bearer ${ONYX_SECRET}`,
     'X-Onyx-Trace-ID': traceId,
     ...(options.headers || {})
   };
@@ -179,7 +177,7 @@ export const onyxService = {
         ];
     }
 
-    const result = await fetchWithTimeout(`${ONYX_WORKER_URL}/vector-search`, {
+    const result = await fetchWithTimeout(`${ONYX_WORKER_URL}/api/v1/memory/search`, {
         method: 'POST',
         body: JSON.stringify({ query: `${subject} ${description}` })
     });
@@ -210,7 +208,7 @@ export const onyxService = {
           };
       }
 
-      const result = await fetchWithTimeout(`${ONYX_WORKER_URL}/batch-triage`, {
+      const result = await fetchWithTimeout(`${ONYX_WORKER_URL}/api/v1/triage`, {
           method: 'POST',
           body: JSON.stringify({ ticketIds })
       });
@@ -236,7 +234,7 @@ export const onyxService = {
 
   async parseCommand(query, ticketId = null) {
         if (ticketId && (query.toLowerCase().includes('refund') || query.toLowerCase().includes('password') || query.toLowerCase().includes('beta'))) {
-        const result = await fetchWithTimeout(`${ONYX_WORKER_URL}/tool-command`, {
+        const result = await fetchWithTimeout(`${ONYX_WORKER_URL}/api/v1/tool-command`, {
             method: 'POST',
             body: JSON.stringify({ command: query, ticketId })
         });

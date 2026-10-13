@@ -21,14 +21,18 @@ export default function CreateTicketModal({ isOpen, onClose, onSuccess }) {
 
     try {
       const workerUrl = getEdgeWorkerUrl();
-      const secret = import.meta.env.VITE_AXIM_ONYX_SECRET || 'fallback';
 
-      // CRITICAL FIX: Route to /webhooks/intake so the worker properly upserts the contact from the email
-      const res = await fetch(`${workerUrl}/webhooks/intake`, {
+      // CRITICAL FIX: Route to /api/v1/intake so the worker properly upserts the contact from the email
+
+      const { supabase } = await import('../lib/supabaseClient');
+      const { data: { session } } = await supabase.auth.getSession();
+      const token = session?.access_token || '';
+
+      const res = await fetch(`${workerUrl}/api/v1/intake`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${secret}`,
+          'Authorization': `Bearer ${token}`,
           'X-Axim-Default-Source': 'internal_agent'
         },
         body: JSON.stringify({

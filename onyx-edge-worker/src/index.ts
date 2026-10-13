@@ -24,7 +24,75 @@ import { callAIWithFailover } from "./ai/llmClient";
 
 
 
+
+
+async function validateInternalSignature(request: Request, env: Env): Promise<boolean> {
+  if (!env.AXIM_INTERNAL_KEY || !env.SUPABASE_SERVICE_ROLE_KEY) {
+    return false;
+  }
+  const signatureHex = request.headers.get("X-Axim-Signature");
+  if (!signatureHex) {
+    return false;
+  }
+
+  try {
+    const payload = await request.clone().text();
+    const encoder = new TextEncoder();
+    const key = await crypto.subtle.importKey(
+      "raw",
+      encoder.encode(env.AXIM_INTERNAL_KEY),
+      { name: "HMAC", hash: "SHA-256" },
+      false,
+      ["sign", "verify"]
+    );
+
+    const sigBytes = new Uint8Array(signatureHex.match(/.{1,2}/g)?.map(byte => parseInt(byte, 16)) || []);
+    const isValid = await crypto.subtle.verify("HMAC", key, sigBytes, encoder.encode(payload));
+
+    return isValid;
+  } catch (e) {
+    return false;
+  }
+}
+
+
+
+async function forwardTelemetryToCore(events: any[], env: Env, traceId: string) {
+  if (!env.CORE_API_URL || !env.AXIM_INTERNAL_KEY) return;
+
+  const payload = JSON.stringify({
+    source: "axim-support-system",
+    trace_id: traceId,
+    timestamp: new Date().toISOString(),
+    events
+  });
+
+  const encoder = new TextEncoder();
+  const key = await crypto.subtle.importKey(
+    "raw",
+    encoder.encode(env.AXIM_INTERNAL_KEY),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"]
+  );
+  const signatureBuffer = await crypto.subtle.sign("HMAC", key, encoder.encode(payload));
+  const signatureHex = Array.from(new Uint8Array(signatureBuffer))
+    .map(b => b.toString(16).padStart(2, "0"))
+    .join("");
+
+  await fetch(`${env.CORE_API_URL}/api/v1/telemetry`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-Axim-Signature": `sha256=${signatureHex}`,
+      "x-onyx-trace-id": traceId
+    },
+    body: payload
+  }).catch(err => console.error("Core telemetry relay error:", err));
+}
+
 export interface Env {
+  AXIM_INTERNAL_KEY: string;
   SUPABASE_URL: string;
   SUPABASE_SERVICE_ROLE_KEY: string;
   DEEPSEEK_API_KEY: string;
@@ -1252,7 +1320,11 @@ export default {
     }), { status, headers: { "Content-Type": "application/json", ...getCorsHeaders(env, request) } });
   },
 
-  async fetch(request: Request, env: Env, ctx: any): Promise<Response> {
+    async fetch(request: Request, env: Env, ctx: any): Promise<Response> {
+    if (!env.AXIM_INTERNAL_KEY || !env.SUPABASE_SERVICE_ROLE_KEY) {
+      return new Response(JSON.stringify({ error: "Server Configuration Error" }), { status: 500, headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" } });
+    }
+
     try {
     const url = new URL(request.url);
 
