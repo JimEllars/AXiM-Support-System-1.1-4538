@@ -5,7 +5,7 @@ import { sanitizePayload } from "../../lib/sanitize";
 import { supabase } from '../../lib/supabaseClient';
 
 const getEdgeWorkerUrl = () => {
-    return import.meta.env.VITE_EDGE_WORKER_URL || "http://127.0.0.1:54321/functions/v1/onyx-edge-worker";
+    return import.meta.env.VITE_EDGE_WORKER_URL || "${workerUrl}";
 };
 
 export default function RCADocumentBlock({ rcaRecord, onFinalized, ticketId, severity }) {

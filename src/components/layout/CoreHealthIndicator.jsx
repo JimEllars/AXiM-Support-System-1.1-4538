@@ -113,7 +113,7 @@ export default function CoreHealthIndicator() {
   const isAllHealthy = edgeStatus === 'healthy' && cronStatus === 'healthy' && shieldStatus === 'active' && onyxStatus === 'healthy';
   const hasDegraded = edgeStatus.includes('degraded') || cronStatus === 'degraded' || shieldStatus === 'degraded' || onyxStatus.includes('degraded');
 
-  const globalStatusColor = isAllHealthy ? 'bg-emerald-500' : hasDegraded ? 'bg-amber-500' : 'bg-rose-500';
+  const globalStatusColor = isAllHealthy ? 'bg-emerald-500' : hasDegraded ? 'bg-amber-500' : 'bg-rose-600';
 
   return (
     <div className="relative">
@@ -127,7 +127,7 @@ export default function CoreHealthIndicator() {
             <span className={`px-1.5 py-0.5 rounded text-[9px] ${
                 latency < 150 ? 'bg-emerald-500/10 text-emerald-400' :
                 latency <= 450 ? 'bg-amber-500/10 text-amber-400' :
-                'bg-rose-500/10 text-rose-400'
+                'bg-rose-600/10 text-rose-500'
             }`}>{latency}ms</span>
         )}
         <FiChevronDown className="text-zinc-500" />

@@ -33,7 +33,7 @@ export default function Dashboard() {
   return (
     <div className="flex flex-col h-full space-y-6">
       {/* Realtime Stream Status Header Bar */}
-      <div className="flex items-center justify-between px-4 py-2 rounded-2xl bg-zinc-950/60 border border-zinc-800/80 backdrop-blur-md">
+      <div className="flex items-center justify-between px-4 py-2 rounded-2xl bg-axim-slate/60 border border-axim-border backdrop-blur-md">
         <div className="flex items-center gap-2">
           <FiRadio className={`text-xs ${realtimeStatus === 'SUBSCRIBED' ? 'text-emerald-400 animate-pulse' : realtimeStatus === 'CONNECTING' ? 'text-amber-400 animate-spin' : 'text-zinc-500'}`}/>
           <span className="text-[11px] font-mono font-bold uppercase text-zinc-400">
@@ -62,13 +62,13 @@ export default function Dashboard() {
           {activeTicket ? (
             <TicketDetail ticketId={activeTicket.id}/>
           ) : (
-            <div className="h-full flex flex-col p-6 bg-zinc-950/20 rounded-3xl border border-zinc-800/50 relative overflow-hidden items-center justify-center opacity-50">
+            <div className="h-full flex flex-col p-6 bg-axim-slate/20 rounded-3xl border border-axim-border relative overflow-hidden items-center justify-center opacity-50">
               <div className="absolute inset-0 -translate-x-full animate-[shimmer_2s_infinite] bg-gradient-to-r from-transparent via-white/5 to-transparent z-0"></div>
               <div className="relative z-10 w-full max-w-md space-y-6 text-center">
-                 <div className="w-16 h-16 rounded-2xl bg-zinc-900 border border-zinc-800 mx-auto flex items-center justify-center animate-pulse"></div>
+                 <div className="w-16 h-16 rounded-2xl bg-axim-surface border border-axim-border mx-auto flex items-center justify-center animate-pulse"></div>
                  <div className="space-y-3">
                     <div className="h-4 w-3/4 bg-zinc-800 rounded-lg mx-auto animate-pulse"></div>
-                    <div className="h-3 w-1/2 bg-zinc-900 rounded mx-auto animate-pulse"></div>
+                    <div className="h-3 w-1/2 bg-axim-surface rounded mx-auto animate-pulse"></div>
                  </div>
                  <div className="pt-8 text-zinc-600 font-mono text-xs uppercase tracking-widest animate-pulse">
                     Select a ticket from the queue to enter the workstation HUD

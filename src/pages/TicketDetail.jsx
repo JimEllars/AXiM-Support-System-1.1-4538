@@ -209,7 +209,7 @@ export default function TicketDetail({ ticketId }) {
 
   if (isLoading || !activeTicket) {
     return (
-      <div className="h-full flex flex-col p-6 bg-zinc-950/50 rounded-3xl border border-zinc-800/80 relative overflow-hidden">
+      <div className="h-full flex flex-col p-6 bg-axim-slate/50 rounded-3xl border border-axim-border relative overflow-hidden">
         <div className="absolute inset-0 -translate-x-full animate-[shimmer_2s_infinite] bg-gradient-to-r from-transparent via-white/5 to-transparent z-0"></div>
         <div className="relative z-10 w-full space-y-6">
           <div className="flex justify-between items-start">
@@ -226,9 +226,9 @@ export default function TicketDetail({ ticketId }) {
              </div>
           </div>
           <div className="grid grid-cols-3 gap-4">
-             <div className="h-24 bg-zinc-900/80 rounded-xl border border-zinc-800 animate-pulse"></div>
-             <div className="h-24 bg-zinc-900/80 rounded-xl border border-zinc-800 animate-pulse"></div>
-             <div className="h-24 bg-zinc-900/80 rounded-xl border border-zinc-800 animate-pulse"></div>
+             <div className="h-24 bg-axim-surface/80 rounded-xl border border-axim-border animate-pulse"></div>
+             <div className="h-24 bg-axim-surface/80 rounded-xl border border-axim-border animate-pulse"></div>
+             <div className="h-24 bg-axim-surface/80 rounded-xl border border-axim-border animate-pulse"></div>
           </div>
           <div className="flex-1 space-y-4 mt-8">
              <div className="h-16 w-full bg-zinc-900/60 rounded-xl animate-pulse"></div>
@@ -247,7 +247,7 @@ const sampleDraft = llmDraftText || activeTicket.metadata?.auto_response_draft |
   return (
     <div className="flex flex-col h-full space-y-6 overflow-y-auto pr-2">
       {/* Ticket Header & Presence Bar */}
-      <div className="p-6 rounded-3xl bg-zinc-950/60 border border-zinc-800/80 backdrop-blur-md space-y-3">
+      <div className="p-6 rounded-3xl bg-axim-slate/60 border border-axim-border backdrop-blur-md space-y-3">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div className="flex items-center gap-3">
             <span className="text-xs font-mono font-bold text-zinc-400">#{activeTicket.id.slice(0, 8)}</span>
@@ -329,10 +329,10 @@ const sampleDraft = llmDraftText || activeTicket.metadata?.auto_response_draft |
           })()}
 
           {/* Reply Composer Form */}
-          <form onSubmit={handleSendMessage} className="p-4 rounded-2xl bg-zinc-950/80 border border-zinc-800/80 space-y-3">
+          <form onSubmit={handleSendMessage} className="p-4 rounded-2xl bg-axim-slate/80 border border-axim-border space-y-3">
             <div className="flex items-center justify-between text-xs text-zinc-400 font-mono">
               <span className="font-bold uppercase tracking-wider">Reply Composer</span>
-              <span className="flex items-center gap-1 text-[10px] text-zinc-500 bg-zinc-900 px-2 py-0.5 rounded border border-zinc-800">
+              <span className="flex items-center gap-1 text-[10px] text-zinc-500 bg-zinc-900 px-2 py-0.5 rounded border border-axim-border">
                 <FiCommand className="text-[9px]"/> + Enter to send
               </span>
             </div>
@@ -344,12 +344,12 @@ const sampleDraft = llmDraftText || activeTicket.metadata?.auto_response_draft |
               onKeyDown={handleKeyDown}
               placeholder="Type your response or apply an AI draft whisper..."
               rows={4}
-              className="w-full p-3 rounded-xl bg-black/50 border border-zinc-800 text-xs text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-indigo-500/50 transition-all resize-none font-sans"
+              className="w-full p-3 rounded-xl bg-black/50 border border-axim-border text-xs text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-indigo-500/50 transition-all resize-none font-sans"
             />
             <div className="flex items-center justify-between">
               <button
                 type="button"
-                className="p-2 rounded-lg bg-zinc-900 hover:bg-zinc-800 text-zinc-400 border border-zinc-800 text-xs transition-colors"
+                className="p-2 rounded-lg bg-zinc-900 hover:bg-zinc-800 text-zinc-400 border border-axim-border text-xs transition-colors"
                 title="Attach file"
               >
                 <FiPaperclip/>

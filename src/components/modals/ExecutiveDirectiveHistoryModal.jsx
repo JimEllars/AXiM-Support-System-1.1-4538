@@ -1,3 +1,4 @@
+import { getEdgeWorkerUrl } from '../../lib/edgeWorkerUrl';
 import React, { useState, useEffect } from 'react';
 import { FiUserCheck, FiX, FiCheckCircle, FiXCircle, FiRefreshCw } from 'react-icons/fi';
 import { supabase } from '../../lib/supabaseClient';
@@ -92,7 +93,7 @@ export default function ExecutiveDirectiveHistoryModal({isOpen, onClose }) {
                 const session = await supabase.auth.getSession();
                 const token = session.data?.session?.access_token;
                 if (!token) throw new Error("No session token");
-                const res = await fetch("http://localhost:8787/api/v1/executive/remind-stale", {
+                const res = await fetch(`${getEdgeWorkerUrl()}/api/v1/executive/remind-stale`, {
                   method: "POST",
                   headers: {
                     "Content-Type": "application/json",

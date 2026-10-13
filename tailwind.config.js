@@ -4,8 +4,18 @@ export default {
     "./index.html",
     "./src/**/*.{js,ts,jsx,tsx}",
   ],
-    theme: {
+
+  theme: {
     extend: {
+      colors: {
+        axim: {
+          slate: '#0B0F19',
+          surface: '#111827',
+          border: '#1F2937',
+          yellow: '#FDD023',
+        }
+      },
+
       keyframes: {
         shimmer: {
           '100%': { transform: 'translateX(100%)' },

@@ -24,3 +24,14 @@ dist-ssr
 *.sw?
 .env.wrangler
 onyx-edge-worker/.wrangler
+
+# Agent scratch & patch files
+patch*.py
+patch*.js
+patch*.cjs
+plan*.txt
+plan*.cjs
+memory.txt
+commit_message.txt
+fix_*.cjs
+update_*.cjs
