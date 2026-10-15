@@ -6,6 +6,7 @@ import { ErrorBoundary } from './ErrorBoundary';
 import * as FiIcons from 'react-icons/fi';
 import SafeIcon from '../../common/SafeIcon';
 import { useTicketStore } from '../../store/useTicketStore';
+import { useAuthStore } from '../../store/useAuthStore';
 import Sidebar from './Sidebar';
 import OnyxCommandHub from '../OnyxCommandHub';
 
@@ -14,6 +15,21 @@ export default function AppLayout({ children }) {
   const [isSocketConnected, setIsSocketConnected] = useState(true);
   const [hasImminentBreach, setHasImminentBreach] = useState(false);
   const [isCommandHubOpen, setIsCommandHubOpen] = useState(false);
+  const isInitialized = useAuthStore(state => state.isInitialized);
+
+  useEffect(() => {
+    const initSession = async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session) {
+         useAuthStore.setState({ isInitialized: true, session: session, user: session.user, isAuthenticated: true });
+      } else {
+         useAuthStore.setState({ isInitialized: true });
+      }
+    };
+    if (!isInitialized) {
+       initSession();
+    }
+  }, [isInitialized]);
 
   const { subscribeToDLQChanges } = useTicketStore();
 
@@ -21,6 +37,16 @@ export default function AppLayout({ children }) {
     const unsubscribe = subscribeToDLQChanges();
     return () => unsubscribe();
   }, [subscribeToDLQChanges]);
+
+  if (!isInitialized) {
+    return (
+      <div className="min-h-screen bg-[#0B0F19] flex items-center justify-center">
+        <div className="w-64 h-64 border border-[#1F2937] rounded-xl flex items-center justify-center">
+          <div className="w-8 h-8 border-2 border-[#1F2937] border-t-cyan-500 rounded-full animate-spin"></div>
+        </div>
+      </div>
+    );
+  }
 
   useEffect(() => {
     const urgentChannel = supabase.channel('global:urgent_alerts')
