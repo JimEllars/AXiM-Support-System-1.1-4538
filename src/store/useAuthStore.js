@@ -1,6 +1,31 @@
 import { create } from 'zustand';
 import { supabase } from '../lib/supabaseClient';
 
+let isRefreshingSession = false;
+
+supabase.auth.onAuthStateChange(async (event, session) => {
+  if (event === 'TOKEN_REFRESHED' || event === 'USER_UPDATED' || event === 'SIGNED_IN') {
+    if (isRefreshingSession) return;
+    isRefreshingSession = true;
+    try {
+      if (session?.user) {
+        useAuthStore.setState({
+          user: session.user,
+          session: session,
+          isAuthenticated: true,
+          isInitialized: true
+        });
+      }
+    } finally {
+      isRefreshingSession = false;
+    }
+  } else if (event === 'SIGNED_OUT') {
+    useAuthStore.setState({ user: null, session: null, isAuthenticated: false, isInitialized: true, activeOrganization: null, isChatOnline: false });
+  } else if (event === 'INITIAL_SESSION') {
+     useAuthStore.setState({ isInitialized: true });
+  }
+});
+
 export const useAuthStore = create((set) => ({
   user: null,
   session: null,

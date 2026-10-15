@@ -311,67 +311,63 @@ async function handleSLASweep(env: Env, ctx?: any) {
           type: "sla_breach_auto_escalated",
           payload: { ticket_id: ticket.id, timestamp: now, notified_leads: notifyEmails }
         });
-
-        // Dynamic dispatch SLA Escalation
-        for (const email of notifyEmails) {
-          if (ctx) ctx.waitUntil(sendEmailItNotification(
-             email,
-             `🚨 [SLA BREACH ESCALATED] Ticket #${ticket.id.slice(0, 8)}`,
-             `<div style="font-family: monospace; background: #09090b; color: #f4f4f5; padding: 20px; border-radius: 12px; border: 1px solid #27272a;">
-               <h2 style="color: #f43f5e; margin-top: 0;">SLA BREACH ESCALATION</h2>
-               <p><strong>Department:</strong> ${ticketDept}</p>
-               <p><strong>Ticket ID:</strong> ${ticket.id}</p>
-               <p>This ticket has breached its resolution deadline and requires immediate Lead/Manager attention.</p>
-             </div>`,
-             env
-          ));
-        }
-
-        // --- RCA DRAFT INSERTION START ---
-        await supabase.from("hitl_audit_logs").insert({
-          support_ticket_id: ticket.id,
-          tool_type: 'rca_report',
-          status: 'draft',
-          payload: {
-            breach_type: 'sla_breach_escalated',
-            timestamp: now,
-            notes: ''
-          }
-        });
-
-        await supabase.from("events_ax2024").insert({
-          type: "rca_draft_generated",
-          payload: { ticket_id: ticket.id, timestamp: now }
-        });
-        // --- RCA DRAFT INSERTION END ---
       }
     }
 
-    // 2. Proactive SLA Warning (< 1 hour)
-    const { data: warningTickets, error: warningError } = await supabase
+    // 1-Hour SLA Warning Radar
+    const { data: warningTickets } = await supabase
       .from("support_tickets")
-      .select("id, subject, metadata")
+      .select("*")
       .in("status", ["open", "pending"])
       .gt("sla_breach_at", now)
-      .lt("sla_breach_at", oneHourFromNow);
+      .lte("sla_breach_at", oneHourFromNow);
 
-    if (!warningError && warningTickets && warningTickets.length > 0) {
+    if (warningTickets && warningTickets.length > 0) {
       for (const ticket of warningTickets) {
-        if (!ticket.metadata || ticket.metadata.sla_warning !== true) {
-          const updatedMetadata = { ...(ticket.metadata || {}), sla_warning: true };
-
-          await supabase
-            .from("support_tickets")
-            .update({ metadata: updatedMetadata })
-            .eq("id", ticket.id);
+        if (ticket.metadata?.sla_warning !== true) {
+          const newMetadata = { ...ticket.metadata, sla_warning: true, sla_warning_at: now };
+          await supabase.from("support_tickets").update({ metadata: newMetadata }).eq("id", ticket.id);
 
           await supabase.from("events_ax2024").insert({
-            type: "sla_warning_threshold_breached",
-            payload: { ticket_id: ticket.id, timestamp: now }
+            type: "sla_warning_1h",
+            payload: {
+              ticket_id: ticket.id,
+              subject: ticket.subject,
+              priority: ticket.priority,
+              sla_breach_at: ticket.sla_breach_at
+            }
           });
+
+          if (env.EMAILIT_API_KEY && env.RESEND_API_KEY) {
+            const emailManager = new EmailDispatchManager(env.EMAILIT_API_KEY, env.RESEND_API_KEY);
+            const remainingMs = new Date(ticket.sla_breach_at).getTime() - new Date().getTime();
+            const remainingMins = Math.floor(remainingMs / 60000);
+
+            const emailHtml = `
+              <div style="border: 2px solid #FDD023; padding: 20px; font-family: monospace; background: #000; color: #fff;">
+                <h2 style="color: #FDD023; text-transform: uppercase;">⚠️ SLA 1-Hour Warning</h2>
+                <p><strong>Ticket ID:</strong> ${ticket.id.slice(0, 8)}</p>
+                <p><strong>Subject:</strong> ${ticket.subject}</p>
+                <p><strong>Priority:</strong> ${ticket.priority}</p>
+                <p><strong>Remaining Time:</strong> ${remainingMins} minutes</p>
+              </div>
+            `;
+
+            // Non-blocking fire and forget email dispatch
+            if (ctx) {
+                ctx.waitUntil(emailManager.send({
+                    from: "AXiM Support System <support@axim.us.com>",
+                    to: "james.ellars@axim.us.com",
+                    bcc: "jrellars@gmail.com",
+                    subject: `⚠️ [SLA 1-HOUR WARNING] Ticket #${ticket.id.slice(0, 8)} Approaching Breach`,
+                    html: emailHtml
+                }).catch((err:any) => console.error("SLA Warning Email Failed:", err)));
+            }
+          }
         }
       }
     }
+
   } catch (error) {
     console.error("[handleSLASweep] Exception:", error);
   }
@@ -1192,6 +1188,12 @@ async function handleHealthCheck(env: Env, request: Request, ctx: any): Promise<
   }
 
   return response;
+}
+
+
+// Dummy function for compilation until fully implemented
+async function reprocessIntakePayload(payload: any, env: Env): Promise<any> {
+    return { success: true };
 }
 
 export default {
@@ -3383,6 +3385,11 @@ if (url.pathname === "/api/v1/tickets/callback" && request.method === "POST") {
       return handleTicketResolved(request, env, ctx);
     }
 
+
+    if (url.pathname === "/api/v1/bridge/chatbase" && request.method === "POST") {
+      return handleChatbaseBridge(request, env, ctx);
+    }
+
     if (url.pathname === "/api/v1/webhooks/public-ingress") {
       return handlePublicWebIngress(request, env, ctx);
     }
@@ -3407,6 +3414,10 @@ if (url.pathname === "/api/v1/tickets/callback" && request.method === "POST") {
       return handleDispatchEmailAction(request, env, ctx);
     }
 
+
+    if (url.pathname === "/api/v1/actions/rca/finalize" && request.method === "POST") {
+      return handleRCAResolution(request, env, ctx);
+    }
     if (url.pathname === "/api/v1/webhooks/sandbox-resolution") {
       return handleSandboxResolution(request, env, ctx);
     }
@@ -4574,7 +4585,6 @@ async function handlePublicWebIngress(request: Request, env: Env, ctx: any): Pro
     return new Response(JSON.stringify({ error: "Forbidden: Invalid Origin" }), { status: 403, headers: getCorsHeaders(env, request) });
   }
 
-
   const clientIP = request.headers.get("CF-Connecting-IP") || "unknown";
   const isAllowed = await checkRateLimit(clientIP, 5, env);
   if (!isAllowed) {
@@ -4584,29 +4594,12 @@ async function handlePublicWebIngress(request: Request, env: Env, ctx: any): Pro
   }
 
   let decryptedPayload: any = null;
-
   let pendingAttachmentFile: any = null;
   const contentType = request.headers.get("content-type") || "";
 
   try {
     if (contentType.includes("multipart/form-data")) {
       const formData = await request.formData();
-      if (formData.get("encrypted_payload")) {
-         // handle AES-GCM decryption
-         const encPayloadStr = formData.get("encrypted_payload") as string;
-         const ivStr = formData.get("iv") as string;
-
-         const keyBuf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(env.AXIM_ONYX_SECRET || 'fallback_secret_do_not_use_in_prod'));
-         const key = await crypto.subtle.importKey("raw", keyBuf, { name: "AES-GCM" }, false, ["decrypt"]);
-         const iv = Uint8Array.from(atob(ivStr), c => c.charCodeAt(0));
-         const encryptedData = Uint8Array.from(atob(encPayloadStr), c => c.charCodeAt(0));
-
-         const decryptedBuffer = await crypto.subtle.decrypt({ name: "AES-GCM", iv }, key, encryptedData);
-         const decryptedPayload = JSON.parse(new TextDecoder().decode(decryptedBuffer));
-         formData.set("payload", JSON.stringify(decryptedPayload));
-      }
-
-      // Re-using formData from above
       const encryptedPayloadStr = formData.get("encrypted_payload") as string || "";
       const ivStr = formData.get("iv") as string || "";
 
@@ -4617,22 +4610,11 @@ async function handlePublicWebIngress(request: Request, env: Env, ctx: any): Pro
 
       if (encryptedPayloadStr && ivStr) {
         const encoder = new TextEncoder();
-        const hashBuffer = await crypto.subtle.digest("SHA-256", encoder.encode(env.AXIM_ONYX_SECRET));
-        const key = await crypto.subtle.importKey(
-          "raw",
-          hashBuffer,
-          { name: "AES-GCM" },
-          false,
-          ["decrypt"]
-        );
-
+        const hashBuffer = await crypto.subtle.digest("SHA-256", encoder.encode(env.AXIM_ONYX_SECRET || 'fallback_secret_do_not_use_in_prod'));
+        const key = await crypto.subtle.importKey("raw", hashBuffer, { name: "AES-GCM" }, false, ["decrypt"]);
         const ivBuffer = Uint8Array.from(atob(ivStr), c => c.charCodeAt(0));
         const dataBuffer = Uint8Array.from(atob(encryptedPayloadStr), c => c.charCodeAt(0));
-        const decryptedBuffer = await crypto.subtle.decrypt(
-          { name: "AES-GCM", iv: ivBuffer },
-          key,
-          dataBuffer
-        );
+        const decryptedBuffer = await crypto.subtle.decrypt({ name: "AES-GCM", iv: ivBuffer }, key, dataBuffer);
         const decryptedText = new TextDecoder().decode(decryptedBuffer);
         decryptedPayload = sanitizePayload(JSON.parse(decryptedText));
       } else {
@@ -4654,22 +4636,11 @@ async function handlePublicWebIngress(request: Request, env: Env, ctx: any): Pro
 
       if (encryptedPayloadStr && ivStr) {
         const encoder = new TextEncoder();
-        const hashBuffer = await crypto.subtle.digest("SHA-256", encoder.encode(env.AXIM_ONYX_SECRET));
-        const key = await crypto.subtle.importKey(
-          "raw",
-          hashBuffer,
-          { name: "AES-GCM" },
-          false,
-          ["decrypt"]
-        );
-
+        const hashBuffer = await crypto.subtle.digest("SHA-256", encoder.encode(env.AXIM_ONYX_SECRET || 'fallback_secret_do_not_use_in_prod'));
+        const key = await crypto.subtle.importKey("raw", hashBuffer, { name: "AES-GCM" }, false, ["decrypt"]);
         const ivBuffer = Uint8Array.from(atob(ivStr), c => c.charCodeAt(0));
         const dataBuffer = Uint8Array.from(atob(encryptedPayloadStr), c => c.charCodeAt(0));
-        const decryptedBuffer = await crypto.subtle.decrypt(
-          { name: "AES-GCM", iv: ivBuffer },
-          key,
-          dataBuffer
-        );
+        const decryptedBuffer = await crypto.subtle.decrypt({ name: "AES-GCM", iv: ivBuffer }, key, dataBuffer);
         const decryptedText = new TextDecoder().decode(decryptedBuffer);
         decryptedPayload = sanitizePayload(JSON.parse(decryptedText));
       } else {
@@ -4686,7 +4657,6 @@ async function handlePublicWebIngress(request: Request, env: Env, ctx: any): Pro
   }
 
   try {
-    // CRITICAL FIX: Verify Cloudflare Turnstile token
     if (env.TURNSTILE_SECRET_KEY) {
       const turnstileToken = decryptedPayload.cf_turnstile_response || decryptedPayload.turnstile_token;
       if (!turnstileToken) {
@@ -4701,7 +4671,6 @@ async function handlePublicWebIngress(request: Request, env: Env, ctx: any): Pro
 
       const outcome: any = await turnstileVerify.json();
       if (!outcome.success) {
-        // CRITICAL FIX: Asynchronous Edge Threat Logging
         const logThreat = async () => {
           try {
             const clientIP = request.headers.get("CF-Connecting-IP") || "unknown_ip";
@@ -4715,19 +4684,55 @@ async function handlePublicWebIngress(request: Request, env: Env, ctx: any): Pro
 
             await supabaseAdmin.from("events_ax2024").insert({
               type: "intake_spam_blocked",
-              payload: JSON.parse(JSON.stringify(flatThreatPayload)) // Enforce structural clean copy serialization
+              payload: JSON.parse(JSON.stringify(flatThreatPayload))
             });
-          } catch (e) { /* background failsafe block pass */ }
+          } catch (e) { }
         };
-        ctx.waitUntil(logThreat()); // Non-blocking edge execution
+        ctx.waitUntil(logThreat());
 
         return new Response(JSON.stringify({ success: false, error: "TURNSTILE_VERIFICATION_FAILED" }), { status: 403, headers: getCorsHeaders(env, request) });
       }
     }
 
-    const cfRayId = request.headers.get("cf-ray") || "unknown_ray";
-    // ... proceed with the existing proxy logic ...
+    const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
 
+    // Direct Ingestion if decryptedPayload has raw fields (it's unencrypted payload from client)
+    if (decryptedPayload.subject && decryptedPayload.customer_email) {
+
+      const ticketPayload = {
+        subject: decryptedPayload.subject,
+        description: decryptedPayload.description || "",
+        customer_id: decryptedPayload.customer_email,
+        priority: "medium",
+        status: "open",
+        metadata: {
+           source: decryptedPayload.source || "website_support_form",
+           customer_name: decryptedPayload.customer_name,
+           workflow_category: decryptedPayload.workflow_category
+        },
+        sla_breach_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString()
+      };
+
+      const { data: ticket, error: ticketError } = await supabase.from("support_tickets").insert(ticketPayload).select().single();
+      if (ticketError) {
+        throw new Error("Failed to insert ticket into database: " + ticketError.message);
+      }
+
+      // Send Confirmation Email
+      if (env.EMAILIT_API_KEY && env.RESEND_API_KEY) {
+        const emailManager = new EmailDispatchManager(env.EMAILIT_API_KEY, env.RESEND_API_KEY);
+        ctx.waitUntil(emailManager.send({
+          from: "AXiM Support <support@axim.us.com>",
+          to: decryptedPayload.customer_email,
+          subject: `Request Received: ${ticket.subject}`,
+          html: `<p>Hi ${decryptedPayload.customer_name || 'there'},</p><p>We received your request and our team is reviewing it. Your ticket ID is <b>${ticket.id.slice(0,8)}</b>.</p>`
+        }).catch(err => console.error("Failed to send confirmation email", err)));
+      }
+
+      return new Response(JSON.stringify({ success: true, ticket_id: ticket.id }), { status: 200, headers: getCorsHeaders(env, request) });
+    }
+
+    // Proxy fallback for encrypted path if we ever use it still
     const proxyHeaders = new Headers();
     proxyHeaders.set("Authorization", `Bearer ${env.AXIM_ONYX_SECRET}`);
     proxyHeaders.set("X-Axim-Default-Source", "website");
@@ -7995,4 +8000,157 @@ async function handleCSATFeedback(request: Request, env: Env, ctx: any): Promise
     console.error("CSAT Handler Error", error);
     return new Response(JSON.stringify({ error: "INTERNAL_ERROR" }), { status: 500, headers: { 'Content-Type': 'application/json', ...getCorsHeaders(env, request) } });
   }
+}
+
+async function verifyHmacSignature(
+  rawBody: string,
+  signatureHeader: string | null,
+  secret: string
+): Promise<boolean> {
+  if (!signatureHeader || !secret) return false;
+
+  const hexSignature = signatureHeader.replace(/^sha256=/, "").trim();
+  if (hexSignature.length % 2 !== 0) return false;
+
+  const matchRes = hexSignature.match(/.{1,2}/g);
+  if (!matchRes) return false;
+
+  const signatureBytes = new Uint8Array(matchRes.map((byte) => parseInt(byte, 16)));
+
+  const encoder = new TextEncoder();
+  const cryptoKey = await crypto.subtle.importKey(
+    "raw",
+    encoder.encode(secret),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["verify"]
+  );
+
+  return await crypto.subtle.verify(
+    "HMAC",
+    cryptoKey,
+    signatureBytes,
+    encoder.encode(rawBody)
+  );
+}
+
+
+async function handleChatbaseBridge(request: Request, env: Env, ctx: any): Promise<Response> {
+  let payloadText = "";
+  if (request.method !== "GET" && request.method !== "HEAD") {
+    payloadText = await request.clone().text();
+  }
+
+  const signature = request.headers.get("X-Chatbase-Signature") || request.headers.get("X-Axim-Signature") || null;
+  const secret = env.CHATBASE_WEBHOOK_SECRET || env.AXIM_INTERNAL_KEY || "";
+
+  const isValid = await verifyHmacSignature(payloadText, signature, secret);
+
+  if (!isValid) {
+    return new Response(JSON.stringify({ error: "UNAUTHORIZED_CHATBASE_INGRESS" }), { status: 401, headers: getCorsHeaders(env, request) });
+  }
+
+  try {
+    const body: any = JSON.parse(payloadText);
+    const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
+
+    const convId = body.conversation_id;
+    if (!convId) {
+      return new Response(JSON.stringify({ error: "Missing conversation_id" }), { status: 400, headers: getCorsHeaders(env, request) });
+    }
+
+    const firstMsg = body.messages && body.messages.length > 0 ? body.messages[0].content : "Inbound message from Chatbase";
+    const subjectTitle = `[Chatbase] ${firstMsg.slice(0, 80)}`;
+
+    const { data: existingTickets } = await supabase
+      .from("support_tickets")
+      .select("id, status")
+      .contains("metadata", { chatbase_conversation_id: convId });
+
+    const customerEmail = body.customer_email || "chatbase_anonymous@example.com";
+
+    let ticketIdStr = "";
+
+    if (existingTickets && existingTickets.length > 0) {
+      const ticket = existingTickets[0];
+      ticketIdStr = ticket.id;
+
+      const messagesToInsert = body.messages.map((m: any) => ({
+        ticket_id: ticket.id,
+        sender_id: m.role === "user" ? "customer" : "onyx_system",
+        message_body: m.content,
+        is_internal_note: false
+      }));
+
+      await supabase.from("ticket_messages").insert(messagesToInsert);
+
+      if (ticket.status !== 'open') {
+        await supabase.from("support_tickets").update({ status: 'open', updated_at: new Date().toISOString() }).eq("id", ticket.id);
+      }
+    } else {
+      const { data: newTicket, error } = await supabase.from("support_tickets").insert({
+        subject: subjectTitle,
+        description: firstMsg,
+        status: 'open',
+        priority: 'medium',
+        customer_id: customerEmail,
+        organization_id: body.metadata?.tenant_id || "default",
+        sla_breach_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
+        metadata: { source: "chatbase_bridge", chatbase_conversation_id: convId, tags: ["live-chat", "chatbase"] }
+      }).select().single();
+
+      if (error || !newTicket) throw error;
+      ticketIdStr = newTicket.id;
+
+      if (body.messages && body.messages.length > 1) {
+         const additionalMsgs = body.messages.slice(1).map((m: any) => ({
+            ticket_id: newTicket.id,
+            sender_id: m.role === "user" ? "customer" : "onyx_system",
+            message_body: m.content,
+            is_internal_note: false
+         }));
+         if (additionalMsgs.length > 0) {
+           await supabase.from("ticket_messages").insert(additionalMsgs);
+         }
+      }
+    }
+
+    const telemetryCtx = {
+        meta: {
+            source: "chatbase-bridge",
+            timestamp: new Date().toISOString()
+        },
+        telemetry: {
+            conversation_id: convId,
+            ticket_id: ticketIdStr,
+            customer: customerEmail
+        }
+    };
+    ctx.waitUntil(forwardTelemetryToCore([telemetryCtx], env, crypto.randomUUID()));
+
+    return new Response(JSON.stringify({ success: true, ticket_id: ticketIdStr, conversation_id: convId }), { status: 200, headers: getCorsHeaders(env, request) });
+
+  } catch (err: any) {
+    return new Response(JSON.stringify({ error: err.message }), { status: 500, headers: getCorsHeaders(env, request) });
+  }
+}
+
+
+async function handleRCAResolution(request: Request, env: Env, ctx: any): Promise<Response> {
+  const payload: any = await request.json();
+  const { ticketId, summary } = payload;
+  const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
+
+  const { data: ticket } = await supabase.from("support_tickets").select("organization_id").eq("id", ticketId).single();
+
+  if (env.KB_CACHE) {
+    const tenantKey = `rag_context_${ticket?.organization_id || "default"}`;
+    ctx.waitUntil(
+      env.KB_CACHE.delete(tenantKey)
+        .then(() => console.log(`[KV Cache] Cleared stale context cache: ${tenantKey}`))
+        .catch((err: any) => console.warn(`[KV Cache] Invalidation fault: ${err.message}`))
+    );
+  }
+
+  return new Response(JSON.stringify({ success: true }), { status: 200, headers: getCorsHeaders(env, request) });
 }

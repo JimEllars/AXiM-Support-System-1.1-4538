@@ -1,11 +1,22 @@
+export interface ChatMessage {
+  role: 'system' | 'user' | 'assistant' | 'tool';
+  content: string;
+  reasoning_content?: string;
+  reasoningContent?: string;
+  tool_calls?: any[];
+  tool_call_id?: string;
+  name?: string;
+}
+
 export interface LLMRequestOptions {
-  systemPrompt: string;
-  userPrompt: string;
+  systemPrompt?: string;
+  userPrompt?: string;
+  messages?: ChatMessage[];
   taskType?: 'fast' | 'reasoning' | 'json' | 'tools';
   temperature?: number;
   maxTokens?: number;
   responseFormatJson?: boolean;
-  userId?: string; // Multi-tenant organization_id or contact_id
+  userId?: string;
   tools?: any[];
   thinking?: { type: 'enabled' | 'disabled'; reasoningEffort?: 'low' | 'high' | 'max' };
 }
@@ -47,37 +58,103 @@ export async function callAIWithFailover(
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 10000);
 
+      // Construct message sequence preserving reasoning_content on assistant turns
+      let requestMessages: any[] = [];
+
+      if (options.messages && options.messages.length > 0) {
+        requestMessages = options.messages.map((m) => {
+          const msg: any = { role: m.role, content: m.content ?? "" };
+
+          if (m.role === 'assistant') {
+            const reasoning = m.reasoning_content || m.reasoningContent;
+            if (reasoning) {
+              msg.reasoning_content = reasoning;
+            }
+          }
+
+          if (m.tool_calls) msg.tool_calls = m.tool_calls;
+          if (m.tool_call_id) msg.tool_call_id = m.tool_call_id;
+          if (m.name) msg.name = m.name;
+          return msg;
+        });
+      } else {
+        requestMessages = [
+          { role: 'system', content: options.systemPrompt || '' },
+          { role: 'user', content: options.userPrompt || '' }
+        ];
+      }
+
       const payload: any = {
         model: deepseekModel,
-        messages: [
-          { role: 'system', content: options.systemPrompt },
-          { role: 'user', content: options.userPrompt }
-        ],
+        messages: requestMessages,
         max_tokens: options.maxTokens || 1000,
         temperature: options.temperature ?? 0.5,
         user_id: defaultUserId
       };
 
       if (options.responseFormatJson) {
-        payload.response_format = { type: 'json_object' };
-        if (!options.systemPrompt.toLowerCase().includes("json") && !options.userPrompt.toLowerCase().includes("json")) {
-            payload.messages[0].content += " You must output ONLY valid JSON.";
-        }
+         payload.response_format = { type: 'json_object' };
+         const sysPrompt = options.systemPrompt || '';
+         const usrPrompt = options.userPrompt || '';
+         if (!sysPrompt.toLowerCase().includes("json") && !usrPrompt.toLowerCase().includes("json")) {
+             if(payload.messages[0].role === 'system') {
+               payload.messages[0].content += " You must output ONLY valid JSON.";
+             }
+         }
       }
 
       if (options.tools) {
-        payload.tools = options.tools;
+        payload.tools = options.tools.map(tool => {
+            if (tool.function && tool.function.parameters) {
+                 return {
+                     type: tool.type || "function",
+                     function: {
+                         name: tool.function.name,
+                         description: tool.function.description,
+                         parameters: {
+                             ...tool.function.parameters,
+                             additionalProperties: false
+                         },
+                         strict: true
+                     }
+                 };
+            }
+            return tool;
+        });
       }
 
-      const response = await fetch('https://api.deepseek.com/chat/completions', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${env.DEEPSEEK_API_KEY}`
-        },
-        body: JSON.stringify(payload),
-        signal: controller.signal as any
-      });
+      // Concurrency retry loop
+      let response: Response;
+      let attempt = 0;
+      const maxRetries = 2;
+
+      while (true) {
+          response = await fetch('https://api.deepseek.com/chat/completions', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${env.DEEPSEEK_API_KEY}`
+            },
+            body: JSON.stringify(payload),
+            signal: controller.signal as any
+          });
+
+          if (response.status === 429) {
+              const errBody = await response.text();
+              if (errBody.includes("insufficient_balance")) {
+                  throw new Error("DeepSeek insufficient balance (HTTP 402/429)");
+              }
+              if (attempt >= maxRetries) {
+                  throw new Error(`DeepSeek API error: HTTP 429 (Concurrency limit exceeded after ${maxRetries} retries)`);
+              }
+              attempt++;
+              const delayMs = Math.floor(Math.random() * 200) + 100 * Math.pow(2, attempt);
+              await new Promise(r => setTimeout(r, delayMs));
+          } else {
+              break;
+          }
+      }
+
 
       clearTimeout(timeoutId);
 
@@ -242,7 +319,9 @@ export async function callAIWithFailover(
       };
 
       if (options.responseFormatJson) {
-         if (!options.systemPrompt.toLowerCase().includes("json") && !options.userPrompt.toLowerCase().includes("json")) {
+         const sysPrompt = options.systemPrompt || '';
+         const usrPrompt = options.userPrompt || '';
+         if (!sysPrompt.toLowerCase().includes("json") && !usrPrompt.toLowerCase().includes("json")) {
              payload.messages[0].content += " You must output ONLY valid JSON.";
          }
       }

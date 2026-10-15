@@ -34,9 +34,12 @@ const SLABadge = ({ breachAt, status, metadata }) => {
   if (diffMs <= 0) {
     label = 'BREACHED';
     className = 'bg-rose-500/20 text-rose-500 ring-1 ring-inset ring-rose-500 ring-opacity-20 shadow-[0_0_10px_rgba(244,63,94,0.3)]';
+  } else if (metadata?.sla_warning === true && diffMs <= 3600000) {
+    label = '⚠️ SLA Warning (<60m)';
+    className = 'bg-amber-500/20 text-[#FDD023] ring-1 ring-inset ring-amber-500/50 ring-opacity-50 shadow-[0_0_15px_rgba(245,158,11,0.4)] animate-pulse';
   } else if (metadata?.sla_warning === true) {
-    label = '⚠️ SLA WARNING (< 1h)';
-    className = 'bg-amber-500/20 text-amber-400 ring-1 ring-inset ring-amber-500 ring-opacity-20 shadow-[0_0_15px_rgba(245,158,11,0.4)] animate-pulse';
+    label = '⚠️ SLA WARNING';
+    className = 'bg-amber-500/20 text-[#FDD023] ring-1 ring-inset ring-amber-500/50 ring-opacity-50 shadow-[0_0_15px_rgba(245,158,11,0.4)] animate-pulse';
   } else if (diffMs < 7200000) { // Under 2 hours
     const h = Math.floor(diffMs / 3600000);
     const m = Math.floor((diffMs % 3600000) / 60000);
