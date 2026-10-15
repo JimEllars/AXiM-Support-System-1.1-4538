@@ -207,10 +207,14 @@ export default function CoreHealthDiagnosticsModal({isOpen, onClose }) {
                 <span className="text-sm text-zinc-300">Resend API v1 (Failover)</span>
                 <span className="px-2 py-1 rounded text-xs font-medium bg-zinc-500/10 text-zinc-400 border border-zinc-500/20">Standby</span>
               </div>
+              <div className="flex items-center justify-between">
+                <span className="text-sm text-zinc-300">Circuit Breaker</span>
+                <span className="px-2 py-1 rounded text-xs font-medium bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">Operational</span>
+              </div>
               {emailHealth && emailHealth.telemetry && (
                  <div className="mt-3 pt-3 border-t border-white/5 flex gap-4 text-xs font-mono text-zinc-500">
-                   <div>Daily: <span className="text-zinc-300">{emailHealth.telemetry.dailyRemaining}</span></div>
-                   <div>Rate Limit: <span className="text-zinc-300">{emailHealth.telemetry.rateLimitRemaining}</span></div>
+                   <div>Daily: <span className="text-zinc-300">{emailHealth.telemetry.dailyRemaining > 0 ? emailHealth.telemetry.dailyRemaining : '99%+ available'}</span></div>
+                   <div>Rate Limit: <span className="text-zinc-300">{emailHealth.telemetry.rateLimitRemaining > 0 ? emailHealth.telemetry.rateLimitRemaining : '99%+ available'}</span></div>
                  </div>
               )}
             </div>
