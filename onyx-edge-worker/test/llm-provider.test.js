@@ -25,7 +25,7 @@ describe('callAIWithFailover', () => {
       })
     });
 
-    const res = await callAIWithFailover(options, env);
+    const res = await callAIWithFailover({ systemPrompt: "System", userPrompt: "User", responseFormatJson: false }, env);
     expect(res.provider).toBe('deepseek');
     expect(res.content).toBe('DeepSeek response');
     expect(res.failoverTriggered).toBe(false);
@@ -49,7 +49,7 @@ describe('callAIWithFailover', () => {
       })
     });
 
-    const res = await callAIWithFailover(options, env);
+    const res = await callAIWithFailover({ systemPrompt: "System", userPrompt: "User", responseFormatJson: false }, env);
     expect(res.provider).toBe('anthropic');
     expect(res.content).toBe('Anthropic response');
     expect(res.failoverTriggered).toBe(true);
@@ -70,9 +70,59 @@ describe('callAIWithFailover', () => {
       status: 500
     });
 
-    const res = await callAIWithFailover(options, env);
+    const res = await callAIWithFailover({ systemPrompt: "System", userPrompt: "User", responseFormatJson: false }, env);
     expect(res.provider).toBe('offline-fallback');
     expect(res.failoverTriggered).toBe(true);
     expect(res.content).toContain('offline fallback');
   });
 });
+
+  it('Test 4: DeepSeek returns 429 -> verify retry logic succeeds on second attempt', async () => {
+    const env = { DEEPSEEK_API_KEY: 'deepseek-key' };
+
+    // First attempt returns 429
+    vi.mocked(fetch).mockResolvedValueOnce({
+      ok: false,
+      status: 429,
+      text: async () => 'Rate limit exceeded'
+    });
+
+    // Second attempt returns 200
+    vi.mocked(fetch).mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        choices: [{ message: { content: 'DeepSeek response after retry' } }],
+        usage: { prompt_tokens: 10, completion_tokens: 20, total_tokens: 30 }
+      })
+    });
+
+    const res = await callAIWithFailover({ systemPrompt: "System", userPrompt: "User", responseFormatJson: false }, env);
+    expect(res.provider).toBe('deepseek');
+    expect(res.content).toBe('DeepSeek response after retry');
+    expect(res.failoverTriggered).toBe(false);
+  });
+
+  it('Test 5: DeepSeek returns 429 with insufficient_balance -> verify immediate failover to Anthropic', async () => {
+    const env = { DEEPSEEK_API_KEY: 'deepseek-key', ANTHROPIC_API_KEY: 'anthropic-key' };
+
+    // DeepSeek fails immediately due to insufficient balance
+    vi.mocked(fetch).mockResolvedValueOnce({
+      ok: false,
+      status: 429,
+      text: async () => 'insufficient_balance'
+    });
+
+    // Anthropic succeeds
+    vi.mocked(fetch).mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        content: [{ type: 'text', text: 'Anthropic fallback after balance error' }],
+        usage: { input_tokens: 15, output_tokens: 25 }
+      })
+    });
+
+    const res = await callAIWithFailover({ systemPrompt: "System", userPrompt: "User", responseFormatJson: false }, env);
+    expect(res.provider).toBe('anthropic');
+    expect(res.content).toBe('Anthropic fallback after balance error');
+    expect(res.failoverTriggered).toBe(true);
+  });
