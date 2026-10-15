@@ -128,8 +128,12 @@ export async function callAIWithFailover(
       let attempt = 0;
       const maxRetries = 2;
 
+            const deepseekUrl = options.tools && options.tools.length > 0
+        ? 'https://api.deepseek.com/beta/chat/completions'
+        : 'https://api.deepseek.com/chat/completions';
+
       while (true) {
-          response = await fetch('https://api.deepseek.com/chat/completions', {
+          response = await fetch(deepseekUrl, {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',

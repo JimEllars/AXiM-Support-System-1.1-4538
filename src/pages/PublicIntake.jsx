@@ -75,100 +75,63 @@ export default function PublicIntake() {
   };
 
   const handleSubmit = async (e) => {
-    if (e && e.preventDefault) e.preventDefault();
-    if (!turnstileToken) {
-      setSubmitResult({ error: 'Please complete the security check.' });
-      return;
-    }
+       if (e && e.preventDefault) e.preventDefault();
+       if (!turnstileToken) {
+         setSubmitResult({ error: 'Please complete the security check.' });
+         return;
+       }
 
-    setIsSubmitting(true);
-    setSubmitResult(null);
+       setIsSubmitting(true);
+       setSubmitResult(null);
 
-    try {
-      // 1. Client-Side Sanitization
-            const rawPayload = {
-        subject: formData.subject,
-        description: formData.description,
-        customer_name: formData.customer_name,
-        customer_email: formData.customer_email,
-        workflow_category: formData.workflow_category,
-        customer_id: formData.customer_email, // Map email to ID for simplicity
-        source: 'website_support_form',
-        urgency_flag: 'standard',
-        cf_turnstile_response: turnstileToken // CRITICAL FIX: Pass token to edge
-      };
+       try {
+         const rawPayload = {
+           subject: formData.subject,
+           description: formData.description,
+           customer_name: formData.customer_name,
+           customer_email: formData.customer_email,
+           workflow_category: formData.workflow_category,
+           customer_id: formData.customer_email,
+           source: 'website_support_form',
+           urgency_flag: 'standard',
+           cf_turnstile_response: turnstileToken
+         };
 
-      const sanitizedPayload = sanitizePayload(rawPayload);
+         const sanitizedPayload = sanitizePayload(rawPayload);
+         const workerUrl = getEdgeWorkerUrl();
 
-      // 2. AES-256-GCM Payload Encryption
-      // Note: We need a shared secret. We'll use VITE_TURNSTILE_SITE_KEY or similar if VITE_AXIM_ONYX_SECRET isn't exposed,
-      // but if the backend uses env.AXIM_ONYX_SECRET, we must use a public key encryption or it's a structural limitation.
-      // We will send the sanitized payload to edge worker. If encryption is required, we use Web Crypto API.
+         const response = await fetch(`${workerUrl}/api/v1/webhooks/public-ingress`, {
+           method: 'POST',
+           headers: {
+             'Content-Type': 'application/json',
+             'X-Onyx-Trace-ID': crypto.randomUUID()
+           },
+           body: JSON.stringify(sanitizedPayload)
+         });
 
-      const encoder = new TextEncoder();
-            const hashBuffer = await crypto.subtle.digest("SHA-256", encoder.encode(secret));
-      const key = await crypto.subtle.importKey("raw", hashBuffer, { name: "AES-GCM" }, false, ["encrypt"]);
+         if (!response.ok) {
+           const errData = await response.json().catch(() => ({}));
+           throw new Error(errData.error || `Server responded with HTTP ${response.status}`);
+         }
 
-      const iv = crypto.getRandomValues(new Uint8Array(12));
-      const dataBuffer = encoder.encode(JSON.stringify(sanitizedPayload));
-
-      const encryptedBuffer = await crypto.subtle.encrypt({ name: "AES-GCM", iv: iv }, key, dataBuffer);
-
-      const payload = {
-        encrypted_payload: btoa(String.fromCharCode(...new Uint8Array(encryptedBuffer))),
-        iv: btoa(String.fromCharCode(...iv)),
-        source: 'website_support_form',
-        cf_turnstile_response: turnstileToken
-      };
-
-
-      const workerUrl = getEdgeWorkerUrl();
-
-      let fetchOptions = {
-        method: 'POST',
-        headers: {
-          'Accept': 'application/json'
-        }
-      };
-
-      if (file && file.size > 0) {
-        const formDataPayload = new FormData();
-        Object.entries(payload).forEach(([key, value]) => {
-          formDataPayload.append(key, value);
-        });
-        formDataPayload.append('attachment', file);
-        fetchOptions.body = formDataPayload;
-      } else {
-        fetchOptions.headers['Content-Type'] = 'application/json';
-        fetchOptions.body = JSON.stringify(payload);
-      }
-
-
-      const response = await fetch(`${workerUrl}/api/v1/webhooks/public-ingress`, fetchOptions);
-
-      trackEvent('public_support_form_submitted', { category: formData.workflow_category, has_attachment: !!file });
-
-
-      const result = await response.json();
-
-      if (!response.ok) {
-        throw new Error(result.error || 'Ingress handshake failed.');
-      }
-
-      setSubmitSuccess(true);
-      setTicketIdReceipt(result.reference_code || result.ticket_id || 'N/A');
-    } catch (err) {
-      if (err.message.includes("TURNSTILE_VERIFICATION_FAILED") || err.message.includes("verification failed") || err.message.includes("Token")) {
-        toast.error("Bot verification failed. Please complete the security check and try again.");
-        turnstileRef.current?.reset();
-        setTurnstileToken('');
-      } else {
-        setSubmitResult({ error: err.message || 'An unexpected error occurred during submission.' });
-      }
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
+         const resData = await response.json();
+         setSubmitResult({
+           success: true,
+           ticketId: resData.ticket_id || resData.id,
+           trackingCode: resData.tracking_code || resData.ticket_id?.slice(0, 8)
+         });
+         setStep(4);
+       } catch (err) {
+         console.error('Submission fault:', err);
+         setSubmitResult({ error: err.message || 'Failed to submit support request.' });
+         if (err.message.includes('TURNSTILE') || err.message.includes('verification failed')) {
+           turnstileRef.current?.reset();
+           setTurnstileToken('');
+         }
+       } finally {
+         setIsSubmitting(false);
+       }
+     };
 
   if (submitSuccess) {
     return (

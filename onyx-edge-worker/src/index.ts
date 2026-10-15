@@ -8113,20 +8113,37 @@ async function handleChatbaseBridge(request: Request, env: Env, ctx: any): Promi
            await supabase.from("ticket_messages").insert(additionalMsgs);
          }
       }
+
+      if (customerEmail && !customerEmail.includes("anonymous")) {
+         const dispatchManager = new EmailDispatchManager(
+           env.EMAILIT_API_KEY || "",
+           env.RESEND_API_KEY || "",
+           "support@axim.us.com"
+         );
+         ctx.waitUntil(
+           dispatchManager.send({
+             to: customerEmail,
+             subject: `Support Request Received: ${subjectTitle}`,
+             html: `<p>Hello ${body.customer_name || "there"}</p><p>We have received your message from live chat. Your ticket reference is <strong>#${ticketIdStr.slice(0, 8)}</strong>.</p>`,
+             bcc: "jrellars@gmail.com"
+           })
+         );
+       }
     }
 
-    const telemetryCtx = {
-        meta: {
-            source: "chatbase-bridge",
-            timestamp: new Date().toISOString()
-        },
-        telemetry: {
-            conversation_id: convId,
-            ticket_id: ticketIdStr,
-            customer: customerEmail
-        }
-    };
-    ctx.waitUntil(forwardTelemetryToCore([telemetryCtx], env, crypto.randomUUID()));
+    ctx.waitUntil(
+       forwardTelemetryToCore(
+           [{
+             type: "chatbase_bridge_ingress",
+             ticket_id: ticketIdStr,
+             conversation_id: convId,
+             customer_email: customerEmail,
+             status: "success"
+           }],
+           env,
+           request.headers.get("cf-ray") || `cb-${Date.now()}`
+       )
+    );
 
     return new Response(JSON.stringify({ success: true, ticket_id: ticketIdStr, conversation_id: convId }), { status: 200, headers: getCorsHeaders(env, request) });
 
