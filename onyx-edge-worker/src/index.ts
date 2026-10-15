@@ -7983,12 +7983,41 @@ async function handleCSATFeedback(request: Request, env: Env, ctx: any): Promise
         return new Response(JSON.stringify({ error: "TICKET_NOT_FOUND" }), { status: 404, headers: { 'Content-Type': 'application/json', ...getCorsHeaders(env, request) } });
     }
 
-    const { error } = await supabase.from('ticket_feedback').insert({
+    let sentimentScore = "neutral";
+    if (feedback_text) {
+      try {
+        const sentimentResult = await callAIWithFailover({
+          systemPrompt: "Analyze the sentiment of this customer feedback. Return JSON: {\"sentiment\": \"positive\" | \"neutral\" | \"negative\"}",
+          userPrompt: feedback_text,
+          taskType: "fast",
+          responseFormatJson: true
+        }, env);
+        const parsed = JSON.parse(sentimentResult.content);
+        sentimentScore = parsed.sentiment || "neutral";
+      } catch (e) {
+        sentimentScore = rating >= 4 ? "positive" : rating <= 2 ? "negative" : "neutral";
+      }
+    }
+
+    const { error } = await supabase.from('product_feedback').insert({
       ticket_id: ticketId,
       rating: rating,
-      feedback_text: feedback_text,
-      operator_id: ticket.assigned_to
+      comment: feedback_text || "",
+      sentiment: sentimentScore,
+      customer_email: payload.customer_email || null,
+      created_at: new Date().toISOString()
     });
+
+    if (!error) {
+      ctx.waitUntil(
+        supabase.from("events_ax2024").insert({
+          type: "csat_feedback_received",
+          timestamp: new Date().toISOString(),
+          payload: { ticket_id: ticketId, rating, sentiment: sentimentScore }
+        })
+      );
+    }
+
 
     if (error) {
       console.error("Error inserting CSAT feedback", error);
@@ -8145,7 +8174,44 @@ async function handleChatbaseBridge(request: Request, env: Env, ctx: any): Promi
        )
     );
 
-    return new Response(JSON.stringify({ success: true, ticket_id: ticketIdStr, conversation_id: convId }), { status: 200, headers: getCorsHeaders(env, request) });
+    let botReplyContent = "Thank you for reaching out. An operator has been notified and will follow up shortly.";
+
+    try {
+      const lastUserMessage = body.messages && body.messages.length > 0
+        ? body.messages[body.messages.length - 1].content
+        : firstMsg;
+
+      const aiResponse = await callAIWithFailover({
+        systemPrompt: "You are the AXiM Support AI Assistant. Provide a concise, polite, and helpful initial response to the user's issue. If you cannot resolve it directly, acknowledge that a human support specialist is reviewing the ticket. Do not make up false promises.",
+        userPrompt: `Customer Subject: ${subjectTitle}\nMessage: ${lastUserMessage}`,
+        taskType: "fast",
+        maxTokens: 350,
+        userId: body.metadata?.tenant_id || "default"
+      }, env);
+
+      if (aiResponse && aiResponse.content) {
+        botReplyContent = aiResponse.content;
+      }
+    } catch (aiErr: any) {
+      console.warn("[Chatbase Bridge] AI quick-reply fallback triggered:", aiErr.message);
+    }
+
+    await supabase.from("ticket_messages").insert({
+      ticket_id: ticketIdStr,
+      sender_id: "onyx_bot",
+      message_body: botReplyContent,
+      is_internal_note: false
+    });
+
+    return new Response(JSON.stringify({
+      success: true,
+      ticket_id: ticketIdStr,
+      conversation_id: convId,
+      reply: botReplyContent
+    }), {
+      status: 200,
+      headers: { "Content-Type": "application/json", ...getCorsHeaders(env, request) }
+    });
 
   } catch (err: any) {
     return new Response(JSON.stringify({ error: err.message }), { status: 500, headers: getCorsHeaders(env, request) });

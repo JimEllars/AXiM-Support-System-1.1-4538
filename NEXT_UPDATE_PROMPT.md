@@ -3,3 +3,18 @@
 - **AI Consolidation**: Refactored major callsites in `index.ts` to use `callAIWithFailover` exclusively, persisting token and latency metrics.
 - **EmailIt V2 Unification**: Migrated out of raw fetch calls to a centralized `EmailDispatchManager` class with automatic failover to Resend for `sendEmailItNotification`, `dispatchHITLNotification`, `dispatchHITLProposalAlert` and Intake confirmations.
 - **UI Diagnostics Polish**: Badges added to rendering workflows representing the active fallback network (DeepSeek vs Anthropic) and disk caching performance metrics.
+
+# Phase 150 Completed
+- **Perimeter Security Lockdown**: Removal of frontend secrets, route normalization under `/api/v1/*`, and AXiM Core telemetry bridging.
+
+# Phase 151 Completed
+- **Timing-safe Chatbase Bridge**: \`verifyHmacSignature\` implementation, 1-hour SLA warning radar with executive alert dispatch, and auth session hydration lock.
+
+# Phase 152 Completed
+- **Public Intake Form**: Repaired public intake, DeepSeek beta gateway routing (\`/beta/chat/completions\`), 429 concurrency retry backoff, and unit test suites.
+
+# Phase 153 Completed
+- **Synchronous Chatbase Bot Reply Loop**: Immediate AI response during Chatbase bridge ingress.
+- **Database Performance Indexes**: `chatbase_conversation_id`, `ticket_ai_telemetry` and `events_ax2024`.
+- **CSAT Feedback Route & Sentiment Analysis**: Analyzing customer feedback sentiment via DeepSeek and saving to `product_feedback`.
+- **Live Carrier Telemetry**: Added email carrier telemetry logic inside `CoreHealthDiagnosticsModal.jsx`.
