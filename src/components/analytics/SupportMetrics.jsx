@@ -25,19 +25,53 @@ export default function SupportMetrics() {
       setIsLoading(true);
       setError(null);
       try {
-
         const { data: telemetryData, error: telemetryError } = await supabase
           .from('ticket_ai_telemetry')
-          .select('is_curated, created_at')
+          .select('*')
+          .gte('created_at', new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString())
           .order('created_at', { ascending: false });
 
         if (telemetryError) throw telemetryError;
 
-        // Optionally query team_profiles or similar if needed for overall SLA, but telemetry has what we need
-
         let totalVolume = 0;
+        let cacheHitTokens = 0;
+        let cacheMissTokens = 0;
+
         if (telemetryData) {
            totalVolume = telemetryData.filter(d => d.is_curated !== false).length;
+           telemetryData.forEach(row => {
+             const metrics = row.performance_metrics || {};
+             cacheHitTokens += (metrics.prompt_cache_hit_tokens || 0);
+             cacheMissTokens += (metrics.prompt_cache_miss_tokens || 0);
+           });
+        }
+
+        let cacheHitRatio = 0;
+        const totalCacheTokens = cacheHitTokens + cacheMissTokens;
+        if (totalCacheTokens > 0) {
+          cacheHitRatio = (cacheHitTokens / totalCacheTokens) * 100;
+        }
+
+        const { data: feedbackData, error: feedbackError } = await supabase
+          .from('product_feedback')
+          .select('rating, sentiment');
+
+        if (feedbackError) throw feedbackError;
+
+        let csatAvg = 0;
+        let sentimentDist = { positive: 0, neutral: 0, negative: 0 };
+        let totalFeedback = 0;
+
+        if (feedbackData && feedbackData.length > 0) {
+           totalFeedback = feedbackData.length;
+           const sum = feedbackData.reduce((acc, curr) => acc + (curr.rating || 0), 0);
+           csatAvg = sum / totalFeedback;
+
+           feedbackData.forEach(row => {
+              if (row.sentiment === 'positive') sentimentDist.positive++;
+              else if (row.sentiment === 'negative') sentimentDist.negative++;
+              else sentimentDist.neutral++;
+           });
         }
 
         setMetrics({
@@ -46,7 +80,11 @@ export default function SupportMetrics() {
            volumeChangePercent: 0,
            overallSlaCompliance: 100,
            avgResolutionTimeMinutes: 0,
-           timeSeriesData: []
+           timeSeriesData: [],
+           csatAvg: csatAvg.toFixed(1),
+           totalFeedback,
+           sentimentDist,
+           cacheHitRatio: cacheHitRatio.toFixed(1)
         });
 
       } catch (err) {
