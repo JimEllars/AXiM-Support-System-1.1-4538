@@ -60,6 +60,8 @@ export default function OperatorLeaderboard() {
   };
 
   useEffect(() => {
+    let timeoutId;
+
     const fetchLeaderboard = async () => {
       setIsLoading(true);
       try {
@@ -82,6 +84,20 @@ export default function OperatorLeaderboard() {
     };
 
     fetchLeaderboard();
+
+    const channel = supabase.channel('leaderboard-live-sync')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'support_tickets' }, () => {
+        clearTimeout(timeoutId);
+        timeoutId = setTimeout(() => {
+          fetchLeaderboard();
+        }, 3000);
+      })
+      .subscribe();
+
+    return () => {
+      clearTimeout(timeoutId);
+      supabase.removeChannel(channel);
+    };
   }, []);
 
   return (
