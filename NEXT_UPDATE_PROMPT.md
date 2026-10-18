@@ -18,3 +18,13 @@
 - **Database Performance Indexes**: `chatbase_conversation_id`, `ticket_ai_telemetry` and `events_ax2024`.
 - **CSAT Feedback Route & Sentiment Analysis**: Analyzing customer feedback sentiment via DeepSeek and saving to `product_feedback`.
 - **Live Carrier Telemetry**: Added email carrier telemetry logic inside `CoreHealthDiagnosticsModal.jsx`.
+
+# Phase 154 Completed
+- **Diagnostics Resiliency**: Fixed array destructuring misalignment in `CoreHealthDiagnosticsModal.jsx` and normalized `/api/v1/email/health` ingress.
+- **Operator Subscriptions**: Applied debounced Supabase Realtime listeners to `OperatorLeaderboard.jsx`.
+- **Nightly Digest**: Wired 9:00 PM CST (`0 3 * * *`) nightly cron trigger with active HTML URL routing for executive actions.
+
+# Phase 155 Completed
+- **HITL Email Unification**: Refactored `dispatchHITLNotification` from raw fetches to the `EmailDispatchManager` circuit breaker.
+- **SLA Triage Filter**: Mapped `showSlaWarnings` toggle in `Dashboard.jsx` to filter for `<60m` active warnings.
+- **Inbound Receipts**: Wired automated customer receipt dispatches to `handleWebhookIntake`.
