@@ -314,6 +314,55 @@ async function handleSLASweep(env: Env, ctx?: any) {
       }
     }
 
+    // Check for actively breached SLAs
+    const { data: activelyBreachedTickets } = await supabase
+      .from("support_tickets")
+      .select("*")
+      .in("status", ["open", "pending"])
+      .lt("sla_breach_at", now); // Past deadline
+
+    if (activelyBreachedTickets && activelyBreachedTickets.length > 0) {
+      for (const ticket of activelyBreachedTickets) {
+        if (ticket.metadata?.sla_breached === true) continue;
+
+        // 1. Elevate priority to urgent and tag breached
+        await supabase.from("support_tickets").update({
+          priority: "urgent",
+          metadata: { ...ticket.metadata, sla_breached: true, sla_breached_at: now }
+        }).eq("id", ticket.id);
+
+        // 2. Audit Event
+        await supabase.from("events_ax2024").insert({
+          type: "sla_breach_escalation",
+          payload: { ticket_id: ticket.id, subject: ticket.subject }
+        });
+
+        // 3. Dispatch critical email to Mr. Ellars
+        const dispatchManager = new EmailDispatchManager(
+          env.EMAILIT_API_KEY || (env as any).EMAIL_IT_API_KEY || '',
+          env.RESEND_API_KEY || '',
+          "governance@axim.us.com"
+        );
+
+        if (ctx) {
+          ctx.waitUntil(
+            dispatchManager.send({
+              from: "AXiM Support System <support@axim.us.com>",
+              to: "james.ellars@axim.us.com",
+              bcc: "jrellars@gmail.com",
+              subject: `🚨 [SLA BREACH] Ticket #${ticket.id.slice(0, 8)} Escalated to URGENT`,
+              html: `
+                <h2 style="color: #f43f5e;">SLA Breach Auto-Escalation</h2>
+                <p>Ticket <strong>#${ticket.id.slice(0, 8)}</strong> has breached its SLA and has been automatically escalated to <strong>URGENT</strong>.</p>
+                <p><strong>Subject:</strong> ${ticket.subject}</p>
+                <a href="https://support.axim.us.com/tickets/${ticket.id}">Action Required Now</a>
+              `
+            }).catch((err: any) => console.error("SLA Breach Email Failed:", err))
+          );
+        }
+      }
+    }
+
     // 1-Hour SLA Warning Radar
     const { data: warningTickets } = await supabase
       .from("support_tickets")

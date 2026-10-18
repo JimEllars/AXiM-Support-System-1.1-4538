@@ -104,7 +104,8 @@ export default function PublicIntake() {
            method: 'POST',
            headers: {
              'Content-Type': 'application/json',
-             'X-Onyx-Trace-ID': crypto.randomUUID()
+             'X-Onyx-Trace-ID': crypto.randomUUID(),
+             'X-Axim-Client': 'web-intake'
            },
            body: JSON.stringify(sanitizedPayload)
          });
