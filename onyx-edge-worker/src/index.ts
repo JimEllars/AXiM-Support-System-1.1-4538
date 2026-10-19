@@ -3101,31 +3101,11 @@ if (url.pathname === "/api/v1/tickets/callback" && request.method === "POST") {
         if (url.pathname === '/api/dlq' && request.method === 'POST') {
       try {
         const body = await request.json() as { action: string; payload: any; ticketId: string };
-
-        if (body.action === 'retry') {
-          const reprocessed = await reprocessIntakePayload(body.payload, env);
-
-          return new Response(JSON.stringify({
-            success: true,
-            status: 'reprocessed',
-            ticketId: body.ticketId,
-            details: reprocessed
-          }), {
-            status: 200,
-            headers: { 'Content-Type': 'application/json', ...getCorsHeaders(env, request) }
-          });
+        if (body && body.action === 'retry' && body.ticketId) {
+          return Response.redirect(url.origin + "/api/v1/dlq/retry/" + body.ticketId, 301);
         }
-
-        return new Response(JSON.stringify({ error: 'Unsupported DLQ action' }), {
-          status: 400,
-          headers: { 'Content-Type': 'application/json', ...getCorsHeaders(env, request) }
-        });
-      } catch (error: any) {
-        return new Response(JSON.stringify({ success: false, error: error.message }), {
-          status: 500,
-          headers: { 'Content-Type': 'application/json', ...getCorsHeaders(env, request) }
-        });
-      }
+      } catch(e) {}
+      return Response.redirect(url.origin + "/api/v1/dlq/retry/unknown", 301);
     }
 
     // --- AI AUTO-DRAFT FEEDBACK TELEMETRY ENDPOINT ---
@@ -3350,6 +3330,9 @@ if (url.pathname === "/api/v1/tickets/callback" && request.method === "POST") {
     }
 
 if (url.pathname === "/webhooks/intake") {
+      return Response.redirect(url.origin + "/api/v1/webhooks/intake", 301);
+    }
+    if (url.pathname === "/api/v1/webhooks/intake") {
       return handleWebhookIntake(request, env, ctx);
     }
 
@@ -4075,37 +4058,7 @@ ${notes}`,
     }
 
     if (url.pathname === "/api/dlq/bulk-replay" && request.method === "POST") {
-      const authHeader = request.headers.get("Authorization") || "";
-      const token = authHeader.replace("Bearer ", "").trim();
-      if (!token) return new Response(JSON.stringify({ error: "UNAUTHORIZED_REPLAY" }), { status: 401, headers: getCorsHeaders(env, request) });
-
-      const supabaseAuth = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY, {
-        global: { headers: { Authorization: `Bearer ${token}` } }
-      });
-      const { data: { user }, error: authError } = await supabaseAuth.auth.getUser();
-      if (authError || !user) return new Response(JSON.stringify({ error: "INVALID_SESSION" }), { status: 403, headers: getCorsHeaders(env, request) });
-
-      const body: any = await request.json();
-      const { eventIds, operatorId } = body;
-
-      if (!Array.isArray(eventIds) || eventIds.length === 0) {
-        return new Response(JSON.stringify({ error: "INVALID_EVENT_ARRAY_PROFILES" }), { status: 400, headers: getCorsHeaders(env, request) });
-      }
-
-      const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
-
-      const replayPromises = eventIds.map(async (id) => {
-        return supabase
-          .from("events_ax2024")
-          .update({
-            type: "dlq_replay_executed",
-            error_message: null
-          })
-          .eq("id", id);
-      });
-
-      await Promise.all(replayPromises);
-      return new Response(JSON.stringify({ success: true, processed_count: eventIds.length }), { status: 200, headers: getCorsHeaders(env, request) });
+      return Response.redirect(url.origin + "/api/v1/dlq/bulk-replay", 301);
     }
 
 
