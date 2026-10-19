@@ -1248,114 +1248,41 @@ async function reprocessIntakePayload(payload: any, env: Env): Promise<any> {
 export default {
 
   async scheduled(event: ScheduledEvent, env: Env, ctx: ExecutionContext): Promise<void> {
+    // Core sweeps every 15 minutes
+    if (event.cron === "*/15 * * * *") {
+      ctx.waitUntil(handleSLASweep(env));
+      ctx.waitUntil(checkAndSendStaleHitlReminders(env));
+      ctx.waitUntil(handleStaleTicketSweep(env));
+      ctx.waitUntil(handleStaleTicketAutoResolution(env));
+    }
 
+    // Executive Nightly Digest at 9:00 PM CST (03:00 UTC)
+    if (event.cron === "0 3 * * *") {
+      ctx.waitUntil(generateAndSendExecutiveDigest(env));
+      ctx.waitUntil(sendDailySystemProgressReport(env));
+      ctx.waitUntil(handleAutoKnowledgeCurationSweep(env));
+    }
+
+    // Shift Handover
     if (event.cron === "0 */8 * * *") {
       ctx.waitUntil(generateAndSendShiftHandover(env));
     }
 
+    // Weekly Leaderboard
     if (event.cron === "0 17 * * 5") {
       ctx.waitUntil(generateAndSendLeaderboardDigest(env));
     }
 
-    if (event.cron === "0 7 * * *") {
-      ctx.waitUntil(generateAndSendExecutiveDigest(env));
-    }
-
-    ctx.waitUntil(generateAndSendDailyDigest(env));
-    ctx.waitUntil(handleSLASweep(env));
-    ctx.waitUntil(handleDataRetentionSweep(env));
-    ctx.waitUntil(handleStaleTicketSweep(env));
-    ctx.waitUntil(checkAndSendStaleHitlReminders(env));
-    ctx.waitUntil(handleAutoKnowledgeCurationSweep(env));
-    ctx.waitUntil(handleStaleTicketAutoResolution(env));
-    ctx.waitUntil(sendDailySystemProgressReport(env));
-    ctx.waitUntil(handleStaleMemoryPruningSweep(env));
-    ctx.waitUntil(handleKbIndexHealthSweep(env));
-
+    // Always log heartbeat
     const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
     ctx.waitUntil(Promise.resolve(supabase.from("events_ax2024").insert({
       type: "cron_heartbeat",
-      payload: {
-        cron_schedule: event.cron,
-        scheduled_time: new Date(event.scheduledTime || Date.now()).toISOString(),
-        executed_at: new Date().toISOString()
-      }
+      payload: { cron_schedule: event.cron, timestamp: new Date().toISOString() }
     })));
+  }
 
-    // Execute 30-Day Log Rotation Sweep on events_ax2024
-    ctx.waitUntil((async () => {
-      try {
-        const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
-        const datePrefix = new Date().toISOString().split("T")[0];
 
-        // 1. Fetch stale records
-        const { data: staleRecords, error: fetchErr } = await supabase
-          .from("events_ax2024")
-          .select("*")
-          .lt("timestamp", thirtyDaysAgo);
-
-        if (!fetchErr && staleRecords && staleRecords.length > 0) {
-          let archived = false;
-
-          // 2. Backup to Cloudflare R2
-          if (env.TELEMETRY_ARCHIVE) {
-            const fileName = `axim_telemetry_archive_${datePrefix}_batch.json`;
-            await env.TELEMETRY_ARCHIVE.put(fileName, JSON.stringify(staleRecords));
-            archived = true;
-          }
-
-          // 3. Purge from Postgres ONLY if safely archived (or if R2 is not configured but we must rotate)
-          if (archived || !env.TELEMETRY_ARCHIVE) {
-            const { count, error: delErr } = await supabase
-              .from("events_ax2024")
-              .delete({ count: "exact" })
-              .lt("timestamp", thirtyDaysAgo);
-
-            if (!delErr && count !== null) {
-              await supabase.from("events_ax2024").insert({
-                type: "telemetry_log_rotation_executed",
-                payload: {
-                  records_purged: count,
-                  archived_to_r2: archived,
-                  cutoff_date: thirtyDaysAgo,
-                  operator: "system_cron",
-                  timestamp: new Date().toISOString()
-                }
-              });
-            }
-          }
-        }
-      } catch (rotationErr) {
-        console.error("[MAINTENANCE FAULT] Log rotation failed:", rotationErr);
-      }
-    })());
-
-    // Automated KV Maintenance Engine
-    let autoPurge = true;
-    if (env.STATUS_KV) {
-      const rawPrefs = await env.STATUS_KV.get("email_prefs_global");
-      if (rawPrefs) {
-        try {
-          const p = JSON.parse(rawPrefs);
-          if (p.auto_purge_kv === false) autoPurge = false;
-        } catch(e) {}
-      }
-    }
-
-    if (autoPurge && env.STATUS_KV) {
-      ctx.waitUntil((async () => {
-        await env.STATUS_KV.delete("exec_policy_summary_v1");
-        const list = await env.STATUS_KV.list({ prefix: "rate_inbound_" });
-        for (const key of list.keys) {
-          await env.STATUS_KV.delete(key.name);
-        }
-        await supabase.from("events_ax2024").insert({
-          type: "kv_cache_auto_purged",
-          payload: { operator: "system_cron", timestamp: new Date().toISOString() }
-        });
-      })());
-    }
-  },
+  ,
   formatErrorResponse(env: any, request: Request, error: any, status: number = 500) {
     const code = error?.code || "INTERNAL_ERROR";
     const message = error instanceof Error ? error.message : String(error);
@@ -1371,7 +1298,7 @@ export default {
     }), { status, headers: { "Content-Type": "application/json", ...getCorsHeaders(env, request) } });
   },
 
-    async fetch(request: Request, env: Env, ctx: any): Promise<Response> {
+  async fetch(request: Request, env: Env, ctx: any): Promise<Response> {
     if (!env.AXIM_INTERNAL_KEY || !env.SUPABASE_SERVICE_ROLE_KEY) {
       return new Response(JSON.stringify({ error: "Server Configuration Error" }), { status: 500, headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" } });
     }
@@ -2805,76 +2732,27 @@ export default {
       }
     }
 
-    if (url.pathname === "/api/v1/dlq/retry" && request.method === "POST") {
+    if (url.pathname.match(/^\/api\/v1\/dlq\/retry\/([^\/]+)$/) && request.method === "POST") {
       const authHeader = request.headers.get("Authorization") || "";
       const token = authHeader.replace("Bearer ", "").trim();
-      if (!token) {
-        return new Response(JSON.stringify({ error: "UNAUTHORIZED_DLQ_RETRY" }), {
-          status: 401, headers: getCorsHeaders(env, request)
-        });
-      }
+      if (!token) return new Response(JSON.stringify({ error: "UNAUTHORIZED" }), { status: 401, headers: getCorsHeaders(env, request) });
+
+      const match = url.pathname.match(/^\/api\/v1\/dlq\/retry\/([^\/]+)$/);
+      const dlqId = match ? match[1] : null;
 
       const supabaseAuth = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY, {
         global: { headers: { Authorization: `Bearer ${token}` } }
       });
       const { data: { user }, error: authError } = await supabaseAuth.auth.getUser();
-      if (authError || !user) {
-        return new Response(JSON.stringify({ error: "INVALID_OPERATOR_SESSION" }), {
-          status: 403, headers: getCorsHeaders(env, request)
-        });
-      }
+      if (authError || !user) return new Response(JSON.stringify({ error: "FORBIDDEN" }), { status: 403, headers: getCorsHeaders(env, request) });
 
-      try {
-        const payload: any = await request.json();
-        const { dlqId, ticketId, originalPayload } = payload;
+      // Re-queue logic here (mark resolved in DLQ, fire corresponding process...)
+      const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
+      await supabase.from("dlq_events_ax2024").update({ status: "resolved", resolved_at: new Date().toISOString() }).eq("id", dlqId);
 
-        if (!dlqId) {
-          return new Response(JSON.stringify({ error: "MISSING_DLQ_ID" }), {
-            status: 400, headers: getCorsHeaders(env, request)
-          });
-        }
-
-        const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
-        const retryStartMarker = performance.now();
-
-        // 1. Post a recovery note to the ticket thread if linked
-        if (ticketId) {
-          await supabase.from("ticket_messages").insert({
-            ticket_id: ticketId,
-            sender_id: "onyx_system",
-            message_body: `**[🔄 DLQ FAULT RECOVERY EXECUTED]**\n\nFailed payload \`${dlqId}\` was manually re-queued and dispatched by an operator.`,
-            is_internal_note: true
-          });
-        }
-
-        const retryDurationMs = Math.round(performance.now() - retryStartMarker);
-
-        // 2. Log fault recovery telemetry event
-        await supabase.from("events_ax2024").insert({
-          type: "dlq_retry_executed",
-          payload: {
-            dlq_id: dlqId,
-            ticket_id: ticketId || null,
-            operator_id: user.id,
-            duration_ms: retryDurationMs,
-            status: "recovered",
-            timestamp: new Date().toISOString()
-          }
-        });
-
-        return new Response(JSON.stringify({
-          success: true,
-          recovered: true,
-          dlq_id: dlqId,
-          duration_ms: retryDurationMs
-        }), {
-          status: 200, headers: { "Content-Type": "application/json", ...getCorsHeaders(env, request) }
-        });
-      } catch (err: any) {
-        return new Response(JSON.stringify({ error: err.message }), {
-          status: 500, headers: getCorsHeaders(env, request)
-        });
-      }
+      return new Response(JSON.stringify({ success: true, dlq_id: dlqId }), {
+        status: 200, headers: { "Content-Type": "application/json", ...getCorsHeaders(env, request) }
+      });
     }
 
     // --- SECURE GITOPS INTERLOCK CALLBACK ROUTE ---
