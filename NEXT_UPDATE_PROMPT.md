@@ -28,3 +28,8 @@
 - **HITL Email Unification**: Refactored `dispatchHITLNotification` from raw fetches to the `EmailDispatchManager` circuit breaker.
 - **SLA Triage Filter**: Mapped `showSlaWarnings` toggle in `Dashboard.jsx` to filter for `<60m` active warnings.
 - **Inbound Receipts**: Wired automated customer receipt dispatches to `handleWebhookIntake`.
+
+# Phase 156 Completed
+- **SLA Breach Auto-Escalation**: `handleSLASweep` automatically bumps breached tickets to `urgent` priority and emails the executive team.
+- **Firewall Telemetry**: Added `X-Axim-Client: web-intake` headers to `PublicIntake.jsx`.
+- **Metrics Resiliency**: Added explicit division-by-zero guards to DeepSeek prompt-cache telemetry calculations.
