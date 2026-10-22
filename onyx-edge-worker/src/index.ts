@@ -3098,16 +3098,6 @@ if (url.pathname === "/api/v1/tickets/callback" && request.method === "POST") {
       }
     }
 
-        if (url.pathname === '/api/dlq' && request.method === 'POST') {
-      try {
-        const body = await request.json() as { action: string; payload: any; ticketId: string };
-        if (body && body.action === 'retry' && body.ticketId) {
-          return Response.redirect(url.origin + "/api/v1/dlq/retry/" + body.ticketId, 301);
-        }
-      } catch(e) {}
-      return Response.redirect(url.origin + "/api/v1/dlq/retry/unknown", 301);
-    }
-
     // --- AI AUTO-DRAFT FEEDBACK TELEMETRY ENDPOINT ---
     if (url.pathname === "/api/v1/telemetry/autodraft-feedback" && request.method === "POST") {
       const authHeader = request.headers.get("Authorization") || "";
@@ -4057,9 +4047,6 @@ ${notes}`,
       }
     }
 
-    if (url.pathname === "/api/dlq/bulk-replay" && request.method === "POST") {
-      return Response.redirect(url.origin + "/api/v1/dlq/bulk-replay", 301);
-    }
 
 
 

@@ -150,7 +150,7 @@ export default function DLQPayloadEditorModal({isOpen, onClose, event, onRefresh
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm font-mono">
-      <div className="w-full max-w-3xl bg-zinc-950 border border-zinc-800 rounded-2xl shadow-2xl overflow-hidden flex flex-col">
+      <div className="w-full max-w-3xl bg-[#0B0F19] border border-[#1F2937] rounded-2xl shadow-2xl overflow-hidden flex flex-col text-xs text-zinc-300">
         <div className="flex items-center justify-between p-4 border-b border-zinc-900 bg-zinc-900/50">
           <div className="flex items-center gap-2 text-rose-400">
             <FiAlertCircle />
