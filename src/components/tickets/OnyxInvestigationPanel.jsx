@@ -145,6 +145,19 @@ export default function OnyxInvestigationPanel({ ticketId }) {
           </span>
         </div>
       </div>
+
+      {telemetry?.category === 'Robotics / Hardware Fault' && (
+        <div className="mt-4 p-3 rounded-xl bg-red-900/20 border border-red-500/30">
+          <div className="flex items-center gap-2 mb-2 text-red-400 font-bold text-xs uppercase">
+            <FiAlertTriangle /> Robotics Flight Recorder HUD
+          </div>
+          <div className="text-[10px] text-zinc-300 font-mono space-y-1">
+            <div>Pitch/Roll Attitude: <span className="text-red-400">DIVERGENCE DETECTED</span></div>
+            <div>Servo Thermal: <span className="text-orange-400">ELEVATED</span></div>
+            <div>E-Stop Triggered: <span className="text-zinc-500">YES</span></div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
