@@ -50,7 +50,7 @@ async function validateInternalSignature(request: Request, env: Env): Promise<bo
     const isValid = await crypto.subtle.verify("HMAC", key, sigBytes, encoder.encode(payload));
 
     return isValid;
-  } catch (e) {
+  } catch (e: any) {
     return false;
   }
 }
@@ -118,7 +118,7 @@ async function logToEvents(supabase: any, context: any, type: string, message: s
       type: type,
       payload: { ...context, message, data }
     });
-  } catch (err) {
+  } catch (err: any) {
     console.error("logToEvents failed", err);
   }
 }
@@ -179,7 +179,7 @@ async function logTelemetry(supabase: any, ticketId: string, aiResult: any, env:
     } else if (error) {
        console.error("Failed to log telemetry", error);
     }
-  } catch (e) {
+  } catch (e: any) {
     console.warn("Exception in logTelemetry", e);
   }
 }
@@ -509,7 +509,7 @@ async function dispatchHITLNotification(ticketId: string, toolType: string, payl
       const errorResponseText = await res.text();
       console.error(`Upstream Resend MTA cluster rejected HITL notification: ${errorResponseText}`);
     }
-  } catch (err) {
+  } catch (err: any) {
     console.error("Critical connection failure attempting to transmit governance notification:", err);
   }
 }
@@ -831,7 +831,7 @@ async function verifyEmailItWebhookSignature(rawBody: string, signature: string,
     const sigBuffer = await crypto.subtle.sign("HMAC", cryptoKey, encoder.encode(rawBody));
     const expectedSig = Array.from(new Uint8Array(sigBuffer)).map(b => b.toString(16).padStart(2, "0")).join("");
     return signature === expectedSig;
-  } catch (e) {
+  } catch (e: any) {
     return false;
   }
 }
@@ -925,7 +925,7 @@ async function handleStaleTicketAutoResolution(env: Env): Promise<number> {
         const prefs = JSON.parse(raw);
         if (prefs.autoresolve_days === 0) return 0; // Auto-resolution disabled
         if (typeof prefs.autoresolve_days === "number") daysThreshold = prefs.autoresolve_days;
-      } catch (e) {}
+      } catch (e: any) {}
     }
   }
 
@@ -1204,7 +1204,7 @@ async function handleHealthCheck(env: Env, request: Request, ctx: any): Promise<
     const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
     const { error } = await supabase.from('support_tickets').select('id').limit(1);
     checks.database = !error;
-  } catch (e) {
+  } catch (e: any) {
     checks.database = false;
   }
 
@@ -1212,7 +1212,7 @@ async function handleHealthCheck(env: Env, request: Request, ctx: any): Promise<
     if (env.STATUS_KV) {
       checks.statusKv = true;
     }
-  } catch (e) {
+  } catch (e: any) {
     checks.statusKv = false;
   }
 
@@ -1306,6 +1306,19 @@ export default {
     try {
     const url = new URL(request.url);
 
+
+    // EDGE HARDENING & PHP2SHELL DEFENSE
+    const pathLower = url.pathname.toLowerCase();
+    const searchLower = url.search.toLowerCase();
+    const isSuspiciousCgi = searchLower.includes('?-d') || searchLower.includes('auto_prepend_file') || searchLower.includes('auto_append_file') || searchLower.includes('allow_url_include') || searchLower.includes('disable_functions') || searchLower.includes('safe_mode');
+    if (isSuspiciousCgi) {
+      return new Response(JSON.stringify({ error: "Forbidden: Suspicious CGI argument injection detected" }), { status: 403, headers: { "Content-Type": "application/json", ...getCorsHeaders(env, request) } });
+    }
+    const isPathTraversal = pathLower.includes('..') || pathLower.includes('%2e%2e') || pathLower.includes('.php') || pathLower.includes('/wp-admin') || pathLower.includes('/wp-login') || pathLower.includes('xmlrpc.php');
+    if (isPathTraversal) {
+      return new Response(JSON.stringify({ error: "Forbidden: Suspicious path traversal or probe detected" }), { status: 403, headers: { "Content-Type": "application/json", ...getCorsHeaders(env, request) } });
+    }
+
     // STRICT ENVIRONMENT SECRET SANITY FILTER
     if (!env.AXIM_ONYX_SECRET || env.AXIM_ONYX_SECRET.trim() === "" || !env.TURNSTILE_SECRET_KEY || env.TURNSTILE_SECRET_KEY.trim() === "") {
       const logFault = async () => {
@@ -1318,7 +1331,7 @@ export default {
               timestamp: new Date().toISOString()
             }
           });
-        } catch (e) { /* ignore telemetry log failure if db also down */ }
+        } catch (e: any) { /* ignore telemetry log failure if db also down */ }
       };
       ctx.waitUntil(logFault());
 
@@ -2151,7 +2164,7 @@ export default {
             try {
               const prefs = JSON.parse(raw);
               if (prefs.instant_receipts === false) sendInstant = false;
-            } catch (e) {}
+            } catch (e: any) {}
           }
         }
         if (sendInstant) {
@@ -2290,7 +2303,7 @@ export default {
         }).eq("id", ticket.id);
 
         return new Response(JSON.stringify({ success: true, matched_ticket_id: ticket.id }), { status: 200, headers: { "Content-Type": "application/json", ...getCorsHeaders(env, request) } });
-      } catch (err) {
+      } catch (err: any) {
         console.error("Error processing inbound email webhook:", err);
         return new Response(JSON.stringify({ error: "AI_SERVICE_UNAVAILABLE", fallback: true }), { status: 500, headers: { "Content-Type": "application/json", ...getCorsHeaders(env, request) } });
       }
@@ -3042,7 +3055,7 @@ if (url.pathname === "/api/v1/tickets/callback" && request.method === "POST") {
                }
             });
             return new Response(JSON.stringify({ success: true, batched: true }), { status: 200, headers: getCorsHeaders(env, request) });
-          } catch (e) {
+          } catch (e: any) {
             // Buffer to DLQ logic can be added here or just return buffered status
             return new Response(JSON.stringify({ status: "buffered", trace_id: cfRayId }), { status: 202, headers: getCorsHeaders(env, request) });
           }
@@ -3050,7 +3063,7 @@ if (url.pathname === "/api/v1/tickets/callback" && request.method === "POST") {
 
       try {
         return await handleTelemetryIngress(anomalyPayload, env, ctx, request);
-      } catch (e) {
+      } catch (e: any) {
         return new Response(JSON.stringify({ status: "buffered", trace_id: cfRayId }), { status: 202, headers: getCorsHeaders(env, request) });
       }
     }
@@ -3306,6 +3319,160 @@ if (url.pathname === "/api/v1/tickets/callback" && request.method === "POST") {
 
 
 
+
+
+    if (url.pathname === "/api/v1/tasks/dispatch" && request.method === "POST") {
+      const authHeader = request.headers.get("Authorization") || "";
+      const token = authHeader.replace("Bearer ", "").trim();
+      if (!token) return new Response(JSON.stringify({ error: "Missing token" }), { status: 401, headers: getCorsHeaders(env, request) });
+
+      const supabaseAuth = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
+      const { data: { user }, error: authError } = await supabaseAuth.auth.getUser(token);
+
+      if (authError || !user) {
+        return new Response(JSON.stringify({ error: "Unauthorized SSO" }), { status: 401, headers: getCorsHeaders(env, request) });
+      }
+
+      let payload;
+      try {
+        payload = await request.json();
+      } catch(e) {
+        return new Response(JSON.stringify({ error: "Invalid JSON payload" }), { status: 400, headers: getCorsHeaders(env, request) });
+      }
+
+      const operation = (payload as any).operation;
+      let targetPath = "/api/v1/ingress";
+      if (operation === "DEPLOY_ACTION") targetPath = "/api/v1/deploy-action";
+      else if (operation === "FORCE_UNLOCK") targetPath = "/api/v1/force-unlock";
+
+      const coderWorkerUrl = env.CODER_WORKER_URL || 'https://axim-coding-lab-worker.jrellars.workers.dev';
+      const targetUrl = `${coderWorkerUrl}${targetPath}`;
+
+      // Sign the outgoing payload with HMAC-SHA256 using env.AXIM_INTERNAL_KEY
+      const payloadString = JSON.stringify(payload as any);
+      const encoder = new TextEncoder();
+      const cryptoKey = await crypto.subtle.importKey(
+        "raw",
+        encoder.encode(env.AXIM_INTERNAL_KEY),
+        { name: "HMAC", hash: "SHA-256" },
+        false,
+        ["sign"]
+      );
+      const signatureBuffer = await crypto.subtle.sign("HMAC", cryptoKey, encoder.encode(payloadString));
+      const signatureArray = Array.from(new Uint8Array(signatureBuffer));
+      const signatureHex = signatureArray.map(b => b.toString(16).padStart(2, '0')).join('');
+
+      try {
+        const coderResponse = await fetch(targetUrl, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "X-Axim-Signature": signatureHex
+          },
+          body: payloadString
+        });
+
+        const coderText = await coderResponse.text();
+        return new Response(coderText, { status: coderResponse.status, headers: { "Content-Type": "application/json", ...getCorsHeaders(env, request) } });
+      } catch (err: any) {
+        return new Response(JSON.stringify({ error: "Coder Lab upstream failed", details: err.message }), { status: 502, headers: { "Content-Type": "application/json", ...getCorsHeaders(env, request) } });
+      }
+    }
+
+    const resolveMatch = url.pathname.match(/^\/api\/v1\/tickets\/([^\/]+)\/resolve-from-coder$/);
+    if (resolveMatch && request.method === "POST") {
+      const isValid = await validateInternalSignature(request, env);
+      if (!isValid) {
+        return new Response(JSON.stringify({ error: "Invalid signature" }), { status: 401, headers: { "Content-Type": "application/json", ...getCorsHeaders(env, request) } });
+      }
+
+      const ticketId = resolveMatch[1];
+      let payload;
+      try {
+        payload = await request.json();
+      } catch (e: any) {
+        return new Response(JSON.stringify({ error: "Invalid JSON payload" }), { status: 400, headers: { "Content-Type": "application/json", ...getCorsHeaders(env, request) } });
+      }
+
+      const { status: ticketStatus, resolutionNotes, completedAt } = payload as any;
+      const supabaseAdmin = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
+
+      const { error: updateError } = await supabaseAdmin
+        .from("support_tickets")
+        .update({ status: 'resolved', resolved_at: completedAt })
+        .eq("id", ticketId);
+
+      if (updateError) {
+        return new Response(JSON.stringify({ error: "Failed to update ticket", details: updateError.message }), { status: 500, headers: { "Content-Type": "application/json", ...getCorsHeaders(env, request) } });
+      }
+
+      const { error: insertError } = await supabaseAdmin.from("ticket_messages").insert({
+        ticket_id: ticketId,
+        sender_id: "AXiM Coder Core",
+        message_body: resolutionNotes || "Resolved by automated coder core.",
+        created_at: completedAt || new Date().toISOString()
+      });
+
+      if (insertError) {
+        return new Response(JSON.stringify({ error: "Failed to insert resolution message", details: insertError.message }), { status: 500, headers: { "Content-Type": "application/json", ...getCorsHeaders(env, request) } });
+      }
+
+      return new Response(JSON.stringify({ success: true, message: "Ticket marked resolved from Coder Core" }), { status: 200, headers: { "Content-Type": "application/json", ...getCorsHeaders(env, request) } });
+    }
+
+    if (url.pathname === "/api/v1/robotics/fault-ingest" && request.method === "POST") {
+      const authHeader = request.headers.get("Authorization") || "";
+      const token = authHeader.replace("Bearer ", "").trim();
+      if (!token || token !== env.AXIM_INTERNAL_KEY) {
+        return new Response(JSON.stringify({ error: "Unauthorized" }), { status: 401, headers: { "Content-Type": "application/json", ...getCorsHeaders(env, request) } });
+      }
+
+      let payload;
+      try {
+        payload = await request.json();
+      } catch (e: any) {
+        return new Response(JSON.stringify({ error: "Invalid JSON payload" }), { status: 400, headers: { "Content-Type": "application/json", ...getCorsHeaders(env, request) } });
+      }
+
+      const { node_id, sensor_data, timestamp } = payload as any;
+      if (!node_id || !sensor_data) {
+        return new Response(JSON.stringify({ error: "Missing node_id or sensor_data" }), { status: 400, headers: { "Content-Type": "application/json", ...getCorsHeaders(env, request) } });
+      }
+
+      const supabaseAdmin = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
+
+      const { data: ticket, error: ticketError } = await supabaseAdmin.from("support_tickets").insert({
+        subject: `Robotics Fault Detected on Node ${node_id}`,
+        description: `Automated robotics fault ingestion. Timestamp: ${timestamp || new Date().toISOString()}\n\n` + JSON.stringify(sensor_data, null, 2),
+        priority: "urgent",
+        category: "Robotics / Hardware Fault",
+        status: "open",
+        metadata: { node_id, is_robotics: true, flight_recorder_data: sensor_data }
+      }).select().single();
+
+      if (ticketError || !ticket) {
+        return new Response(JSON.stringify({ error: "Failed to create robotics fault ticket" }), { status: 500, headers: { "Content-Type": "application/json", ...getCorsHeaders(env, request) } });
+      }
+
+      // Perform RCA on the flight recorder data
+      const rcaPrompt = `Analyze the following robotics flight recorder telemetry for node ${node_id}:\n\n${JSON.stringify(sensor_data, null, 2)}\n\nIdentify potential anomalies such as pitch/roll divergence, current spikes, and motor thermal cutoffs. Output an initial RCA summary in markdown.`;
+      try {
+        const aiResult = await callAIWithFailover({ userPrompt: rcaPrompt, systemPrompt: "You are Onyx Mk3, a hardware diagnostics specialist.", maxTokens: 500, operation_context: "robotics_rca" } as any, env);
+
+        if (aiResult && aiResult.content) {
+          await supabaseAdmin.from("ticket_messages").insert({
+            ticket_id: ticket.id,
+            sender_id: "Onyx Diagnostics",
+            message_body: aiResult.content,
+            metadata: { is_rca: true }
+          });
+        }
+      } catch (err: any) {
+        console.error("Robotics RCA generation failed:", err);
+      }
+
+      return new Response(JSON.stringify({ success: true, ticket_id: ticket.id }), { status: 200, headers: { "Content-Type": "application/json", ...getCorsHeaders(env, request) } });
+    }
 
     if (url.pathname === "/api/v1/actions/dispatch-email" && request.method === "POST") {
       return handleDispatchEmailAction(request, env, ctx);
@@ -3930,7 +4097,7 @@ ${notes}`,
           try {
             await dispatchSecureEgressWebhook(destination, updatedPayload, env, supabaseAuth);
             dispatchSuccess = true;
-          } catch (e) {
+          } catch (e: any) {
             dispatchSuccess = false;
           }
         } else {
@@ -4553,7 +4720,7 @@ async function handlePublicWebIngress(request: Request, env: Env, ctx: any): Pro
               type: "intake_spam_blocked",
               payload: JSON.parse(JSON.stringify(flatThreatPayload))
             });
-          } catch (e) { }
+          } catch (e: any) { }
         };
         ctx.waitUntil(logThreat());
 
@@ -4657,7 +4824,7 @@ async function handleWebhookIntake(request: Request, env: Env, ctx: any): Promis
               timestamp: new Date().toISOString()
             }
           });
-        } catch (e) { /* background failsafe thread catch pass */ }
+        } catch (e: any) { /* background failsafe thread catch pass */ }
       };
       ctx.waitUntil(logHmacThreat());
 
@@ -4716,7 +4883,7 @@ async function handleWebhookIntake(request: Request, env: Env, ctx: any): Promis
       if (rawPayloadStr) {
         try {
           rawPayload = JSON.parse(rawPayloadStr as string);
-        } catch (e) {}
+        } catch (e: any) {}
       }
 
       normalizedData = {
@@ -4799,7 +4966,7 @@ async function handleWebhookIntake(request: Request, env: Env, ctx: any): Promis
                 timestamp: new Date().toISOString()
               }
             });
-          } catch (e) { /* silent catch */ }
+          } catch (e: any) { /* silent catch */ }
         };
         ctx.waitUntil(logHmacThreat());
 
@@ -4844,7 +5011,7 @@ async function handleWebhookIntake(request: Request, env: Env, ctx: any): Promis
             tags: decryptedPayload.tags || [],
             workflow_category: decryptedPayload.workflow_category || "General Inquiry",
           };
-        } catch (e) {
+        } catch (e: any) {
           return new Response(JSON.stringify({ error: "Failed to decrypt payload" }), {
             status: 400,
             headers: { "Content-Type": "application/json", ...getCorsHeaders(env, request) }
@@ -4998,7 +5165,7 @@ async function handleWebhookIntake(request: Request, env: Env, ctx: any): Promis
                         timestamp: new Date().toISOString()
                       }
                     });
-                  } catch (e) { /* ignore event insert failure */ }
+                  } catch (e: any) { /* ignore event insert failure */ }
                 })()
               );
             }
@@ -5262,7 +5429,7 @@ async function handleWebhookIntake(request: Request, env: Env, ctx: any): Promis
 
 
 
-        } catch (err) {
+        } catch (err: any) {
             logErr(supabase, logCtx, err, ctx);
         } finally {
             logEnd(supabase, logCtx, startTime, ctx);
@@ -5336,7 +5503,7 @@ async function getCachedRAGContext(queryText: string, env: Env, supabase: any, c
         }
       }
     }
-  } catch (err) {
+  } catch (err: any) {
     console.error("Embedding generation failed, proceeding without context", err);
   }
 
@@ -5362,7 +5529,7 @@ async function runWorkersAiWithRetry(
     try {
       const res = await env.AI.run(model, payload);
       if (res) return res;
-    } catch (err) {
+    } catch (err: any) {
       attempt++;
       if (attempt >= maxRetries) {
         console.warn(`[WORKERS AI RETRY EXHAUSTED] Model ${model} failed after ${maxRetries} attempts:`, err);
@@ -5420,7 +5587,7 @@ Ticket Description: ${description}`;
   let parsedContent;
   try {
     parsedContent = JSON.parse(llmResponse.content);
-  } catch (e) {
+  } catch (e: any) {
     console.error("Failed to parse triage JSON response from LLM:", llmResponse.content);
     parsedContent = {};
   }
@@ -5609,7 +5776,7 @@ async function handleToolCommand(request: Request, env: Env, ctx: any): Promise<
         } else {
           const errText = await response.text(); logErr(supabase, logCtx, new Error("Anthropic API error in handleToolCommand: " + errText), ctx); console.error("Anthropic API error in handleToolCommand:", errText);
         }
-      } catch (err) {
+      } catch (err: any) {
         logErr(supabase, logCtx, err, ctx); console.error("Anthropic API fetch failed in handleToolCommand:", err);
       }
     }
@@ -5931,11 +6098,11 @@ async function handleTicketResolved(request: Request, env: Env, ctx: any): Promi
                 env,
                 supabase
             );
-          } catch (e) {
+          } catch (e: any) {
              console.error(`Failed to dispatch to ${wh.url}`, e);
           }
         }
-      } catch (err) { console.error('Webhook dispatcher error:', err); }
+      } catch (err: any) { console.error('Webhook dispatcher error:', err); }
     };
     ctx.waitUntil(dispatchWebhook());
 
@@ -5981,7 +6148,7 @@ async function handleTicketResolved(request: Request, env: Env, ctx: any): Promi
         if (!result.success) {
            console.error("CSAT Feedback notification failed:", result.error);
         }
-      } catch (e) {
+      } catch (e: any) {
          console.error("CSAT dispatch error:", e);
       }
     };
@@ -6149,7 +6316,7 @@ async function handleGenerateSuggestion(request: Request, env: Env, ctx: any): P
         const embedData: any = await embedRes.json();
         if (embedData.embedding) embedding = embedData.embedding;
       }
-    } catch (err) { console.error("Embedding generation fallback engaged."); }
+    } catch (err: any) { console.error("Embedding generation fallback engaged."); }
 
     let { data: memoryBanks } = await supabase.rpc("match_memory_banks", {
       query_embedding: embedding,
@@ -6183,7 +6350,7 @@ async function handleGenerateSuggestion(request: Request, env: Env, ctx: any): P
           draft = data.choices[0].message.content;
           providerUsed = "Deepseek-V3";
         }
-      } catch (e) { console.error("Deepseek suggestions stream offline."); }
+      } catch (e: any) { console.error("Deepseek suggestions stream offline."); }
     }
 
     if (!draft && env.ANTHROPIC_API_KEY) {
@@ -6206,7 +6373,7 @@ async function handleGenerateSuggestion(request: Request, env: Env, ctx: any): P
           draft = data.content[0].text;
           providerUsed = "Claude-3-Haiku";
         }
-      } catch (err) { clearTimeout(timeoutId); }
+      } catch (err: any) { clearTimeout(timeoutId); }
     }
 
     if (!draft) {
@@ -6296,7 +6463,7 @@ async function handleMessageEgress(request: Request, env: Env, ctx: any): Promis
               is_internal_note: true
            });
         }
-      } catch (err) {
+      } catch (err: any) {
         console.error("Error in email dispatch background task", err);
       }
     };
@@ -6369,7 +6536,7 @@ async function handleFeedbackIngress(request: Request, env: Env, ctx: any): Prom
             tool_type: 'update_memory_bank',
             payload: analysisResult
           });
-        } catch (err) {
+        } catch (err: any) {
           console.error("Failed to generate continuous learning failure analysis:", err);
         }
       })());
@@ -6424,7 +6591,7 @@ async function handleSandboxResolution(request: Request, env: Env, ctx: any): Pr
             }
           }
         }
-      } catch (err) {
+      } catch (err: any) {
         console.error('Sandbox webhook error:', err);
       }
     })());
@@ -6491,7 +6658,7 @@ async function generateAndSendDailyDigest(env: Env) {
             console.log("[EMAILIT] Executive daily briefing disabled via global email preferences.");
             return false;
           }
-        } catch (e) {}
+        } catch (e: any) {}
       }
     }
   const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
@@ -6669,7 +6836,7 @@ async function handleTelemetryIngress(payload: any, env: Env, ctx: any, request:
           try {
             const prefs = JSON.parse(raw);
             if (prefs.urgent_alerts === false) allowUrgent = false;
-          } catch (e) {}
+          } catch (e: any) {}
         }
       }
 
@@ -7440,7 +7607,7 @@ async function generateAndSendShiftHandover(env: Env) {
       }
     });
 
-  } catch (err) {
+  } catch (err: any) {
     console.error("Error generating shift handover:", err);
   }
 }
@@ -7599,14 +7766,14 @@ function handleChatConnect(request: Request, env: Env): Response {
           type: "active_chat_terminated_idle",
           payload: { timestamp: new Date().toISOString() }
         }).then(({ error }) => { if (error) console.error("Telemetry err:", error); });
-      } catch (e) {
+      } catch (e: any) {
         console.error("Error closing socket", e);
       }
     } else if (idleTime > 10 * 60 * 1000 && !warningSent) {
       warningSent = true;
       try {
         server.send(JSON.stringify({ type: "timeout_warning", expiresIn: 60 }));
-      } catch (e) {
+      } catch (e: any) {
         console.error("Error sending warning", e);
       }
     }
@@ -7626,7 +7793,7 @@ function handleChatConnect(request: Request, env: Env): Response {
         // Ephemeral bypass: Echo back to connected peers without database I/O
         try {
           server.send(JSON.stringify(data));
-        } catch (e) {
+        } catch (e: any) {
           console.error("Error broadcasting ephemeral state", e);
         }
       } else if (data && data.type === "internal_whisper") {
@@ -7647,7 +7814,7 @@ function handleChatConnect(request: Request, env: Env): Response {
                      senderRole = "operator";
                   }
                }
-            } catch (e) {
+            } catch (e: any) {
                console.error("Auth check failed in socket", e);
             }
           }
@@ -7666,7 +7833,7 @@ function handleChatConnect(request: Request, env: Env): Response {
              }
              server.send(JSON.stringify(data));
           }
-        } catch (e) {
+        } catch (e: any) {
            console.error("Error broadcasting internal whisper", e);
         }
       } else if (data && data.type === "chat_message") {
@@ -7689,17 +7856,17 @@ function handleChatConnect(request: Request, env: Env): Response {
                    data.translated_text = parsedTranslation.translated_text;
                    data.original_language = parsedTranslation.original_language;
                  }
-               } catch (e) {
+               } catch (e: any) {
                  console.error("Failed to parse translation JSON", e);
                }
              }
-           } catch (e) {
+           } catch (e: any) {
              console.error("AI translation error:", e);
            }
 
            try {
              server.send(JSON.stringify(data));
-           } catch (e) {
+           } catch (e: any) {
              console.error("Error broadcasting chat_message", e);
            }
            try {
@@ -7790,13 +7957,13 @@ function handleChatConnect(request: Request, env: Env): Response {
                    }
                  }
                }
-             } catch (e) {
+             } catch (e: any) {
                console.error("KB suggestion error:", e);
              }
            })();
          }
       }
-    } catch (e) {
+    } catch (e: any) {
       console.error("WebSocket message parse error:", e);
     }
   });
@@ -7861,7 +8028,7 @@ async function handleCSATFeedback(request: Request, env: Env, ctx: any): Promise
         }, env);
         const parsed = JSON.parse(sentimentResult.content);
         sentimentScore = parsed.sentiment || "neutral";
-      } catch (e) {
+      } catch (e: any) {
         sentimentScore = rating >= 4 ? "positive" : rating <= 2 ? "negative" : "neutral";
       }
     }

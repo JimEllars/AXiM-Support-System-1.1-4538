@@ -587,3 +587,44 @@ describe('Onyx Edge Worker - Internal Whisper WS Mock', () => {
     expect(JSON.parse(customerBuffer[0]).message).toContain("403 Forbidden");
   });
 });
+
+describe('Onyx Edge Worker - Action Resolver Validation (Phase 158)', () => {
+  it('should successfully resolve a ticket from coder core with a valid signature', async () => {
+    vi.mocked(fetch).mockResolvedValueOnce({
+      status: 200,
+      json: async () => ({ success: true, message: 'Ticket marked resolved from Coder Core' })
+    });
+
+    const res = await fetch('http://localhost:8787/api/v1/tickets/123/resolve-from-coder', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Axim-Signature': 'mock-signature'
+      },
+      body: JSON.stringify({
+        status: 'resolved',
+        resolutionNotes: 'Fixed via coder core',
+        completedAt: new Date().toISOString()
+      })
+    });
+
+    expect(res.status).toBe(200);
+    const data = await res.json();
+    expect(data.success).toBe(true);
+  });
+
+  it('should block PHP CGI arguments and return 403 Forbidden', async () => {
+    vi.mocked(fetch).mockResolvedValueOnce({
+      status: 403,
+      json: async () => ({ error: 'Forbidden: Suspicious CGI argument injection detected' })
+    });
+
+    const res = await fetch('http://localhost:8787/api/v1/some-endpoint?-d+auto_prepend_file=php://input', {
+      method: 'GET'
+    });
+
+    expect(res.status).toBe(403);
+    const data = await res.json();
+    expect(data.error).toContain('Forbidden');
+  });
+});
