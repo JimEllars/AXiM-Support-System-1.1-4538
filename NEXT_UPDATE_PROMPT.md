@@ -33,3 +33,8 @@
 - **SLA Breach Auto-Escalation**: `handleSLASweep` automatically bumps breached tickets to `urgent` priority and emails the executive team.
 - **Firewall Telemetry**: Added `X-Axim-Client: web-intake` headers to `PublicIntake.jsx`.
 - **Metrics Resiliency**: Added explicit division-by-zero guards to DeepSeek prompt-cache telemetry calculations.
+
+# Phase 157 Completed
+- **Cron Digest Execution**: Locked `generateAndSendExecutiveDigest` to strictly fire on the `0 3 * * *` tick, preventing duplicate dispatches.
+- **Full-Text Search Migration**: Deployed a non-destructive Supabase migration adding a GIN index and generated `tsvector` column for highly performant queries.
+- **DLQ Edge Routing**: Normalized `/api/v1/dlq/retry/:id` with token validation to clear failed queue blocks securely.

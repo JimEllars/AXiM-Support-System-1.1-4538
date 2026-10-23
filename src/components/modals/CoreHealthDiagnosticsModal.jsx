@@ -157,7 +157,7 @@ export default function CoreHealthDiagnosticsModal({isOpen, onClose }) {
 
   return (
     <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 font-mono">
-      <div className="w-full max-w-2xl rounded-3xl bg-zinc-950 border border-zinc-800 shadow-2xl p-6 space-y-4 text-xs">
+      <div className="w-full max-w-2xl rounded-3xl bg-[#0B0F19] border border-[#1F2937] shadow-2xl p-6 space-y-4 text-xs text-zinc-300">
         <div className="flex items-center justify-between border-b border-zinc-900 pb-3">
           <div className="flex items-center gap-2 font-bold text-emerald-400">
             <FiActivity className="text-base animate-pulse"/>
