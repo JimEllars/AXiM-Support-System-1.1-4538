@@ -156,7 +156,7 @@ export default function DLQPayloadEditorModal({isOpen, onClose, event, onRefresh
             <FiAlertCircle />
             <h2 className="text-sm font-bold uppercase tracking-wider">Inspect & Edit Payload (ID: {event.id.slice(0, 8)})</h2>
           </div>
-          <button onClick={onClose} className="p-2 text-zinc-400 hover:text-white rounded-lg hover:bg-zinc-800 transition-colors">
+          <button onClick={onClose} className="p-2 text-zinc-300 hover:text-white rounded-lg hover:bg-zinc-800 transition-colors">
             <FiX />
           </button>
         </div>
@@ -164,7 +164,7 @@ export default function DLQPayloadEditorModal({isOpen, onClose, event, onRefresh
         <div className="p-4 flex-1 overflow-auto min-h-[300px]">
           <p className="text-xs text-zinc-500 mb-2">Edit the JSON payload below before retrying.</p>
           <textarea
-            className="w-full h-full min-h-[300px] bg-black text-emerald-400 font-mono text-xs p-4 rounded border border-zinc-800 focus:border-emerald-500/50 focus:outline-none focus:ring-1 focus:ring-emerald-500/50 transition-all resize-y whitespace-pre"
+            className="w-full h-full min-h-[300px] bg-black text-emerald-400 font-mono text-xs p-4 rounded border border-[#1F2937] focus:border-emerald-500/50 focus:outline-none focus:ring-1 focus:ring-emerald-500/50 transition-all resize-y whitespace-pre"
             value={payloadText}
             onChange={(e) => { setPayloadText(e.target.value); setValidationResult(null); }}
             spellCheck="false"

@@ -174,12 +174,12 @@ export default function CoreHealthDiagnosticsModal({isOpen, onClose }) {
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3 font-sans">
 
-            <div className="p-3.5 rounded-2xl bg-black/50 border border-zinc-800/80 space-y-1">
+            <div className="p-3.5 rounded-2xl bg-black/50 border border-[#1F2937]/80 space-y-1">
               <div className="flex items-center justify-between text-xs font-mono font-bold text-zinc-200">
                 <span className="flex items-center gap-1.5"><FiActivity className="text-emerald-400"/> Edge Pipeline</span>
                 <span className="text-emerald-400 uppercase font-mono text-[10px]">{edgeHealth?.status || 'Active'}</span>
               </div>
-              <p className="text-[10px] text-zinc-400 font-mono mt-1">Service: <code>{edgeHealth?.service || 'onyx-worker'}</code></p>
+              <p className="text-[10px] text-zinc-300 font-mono mt-1">Service: <code>{edgeHealth?.service || 'onyx-worker'}</code></p>
               {telemetryStats && (
                 <div className="flex gap-2 text-[9px] font-mono mt-1">
                   {telemetryStats.EDGE_HEARTBEAT_INTERCEPTS > 0 && (
@@ -196,8 +196,8 @@ export default function CoreHealthDiagnosticsModal({isOpen, onClose }) {
             {/* Email Dispatch Carrier Status */}
             <div className="glass-panel p-4 rounded-xl border border-white/5 space-y-3">
               <div className="flex items-center gap-2 mb-2">
-                 <FiActivity className="text-zinc-400" />
-                 <h3 className="font-mono text-xs text-zinc-400 uppercase tracking-wider">Email Dispatch Status</h3>
+                 <FiActivity className="text-zinc-300" />
+                 <h3 className="font-mono text-xs text-zinc-300 uppercase tracking-wider">Email Dispatch Status</h3>
               </div>
               <div className="flex items-center justify-between">
                 <span className="text-sm text-zinc-300">EmailIt API v2 (Primary)</span>
@@ -205,7 +205,7 @@ export default function CoreHealthDiagnosticsModal({isOpen, onClose }) {
               </div>
               <div className="flex items-center justify-between">
                 <span className="text-sm text-zinc-300">Resend API v1 (Failover)</span>
-                <span className="px-2 py-1 rounded text-xs font-medium bg-zinc-500/10 text-zinc-400 border border-zinc-500/20">Standby</span>
+                <span className="px-2 py-1 rounded text-xs font-medium bg-zinc-500/10 text-zinc-300 border border-zinc-500/20">Standby</span>
               </div>
               <div className="flex items-center justify-between">
                 <span className="text-sm text-zinc-300">Circuit Breaker</span>
@@ -221,40 +221,40 @@ export default function CoreHealthDiagnosticsModal({isOpen, onClose }) {
 
 
             {/* Onyx Core Status */}
-            <div className="p-3.5 rounded-2xl bg-black/50 border border-zinc-800/80 space-y-1">
+            <div className="p-3.5 rounded-2xl bg-black/50 border border-[#1F2937]/80 space-y-1">
               <div className="flex items-center justify-between text-xs font-mono font-bold text-zinc-200">
                 <span className="flex items-center gap-1.5"><FiActivity className="text-purple-400"/> Onyx Core</span>
                 <span className={`uppercase font-mono text-[10px] ${telemetryStats?.EDGE_HEARTBEAT_INTERCEPTS > 0 || telemetryStats?.D1_TIMEOUT_COUNT > 0 ? 'text-amber-400' : 'text-purple-400'}`}>
                   {telemetryStats?.EDGE_HEARTBEAT_INTERCEPTS > 0 || telemetryStats?.D1_TIMEOUT_COUNT > 0 ? 'DEGRADED' : 'HEALTHY'}
                 </span>
               </div>
-              <p className="text-[10px] text-zinc-400 font-mono mt-1 flex gap-2">
+              <p className="text-[10px] text-zinc-300 font-mono mt-1 flex gap-2">
                 <span>Intercepts: <code>{telemetryStats?.EDGE_HEARTBEAT_INTERCEPTS || 0}</code></span>
                 <span>Timeouts: <code>{telemetryStats?.D1_TIMEOUT_COUNT || 0}</code></span>
               </p>
             </div>
 
 
-            <div className="p-3.5 rounded-2xl bg-black/50 border border-zinc-800/80 space-y-1">
+            <div className="p-3.5 rounded-2xl bg-black/50 border border-[#1F2937]/80 space-y-1">
               <div className="flex items-center justify-between text-xs font-mono font-bold text-zinc-200">
                 <span className="flex items-center gap-1.5"><FiClock className="text-sky-400"/> Daily CRON</span>
                 <span className="text-sky-400 uppercase font-mono text-[10px]">{cronHealth?.status || 'Healthy'}</span>
               </div>
-              <p className="text-[10px] text-zinc-400 font-mono mt-1">Last Run: <code>{cronHealth?.last_cron_run ? cronHealth.last_cron_run.split('T')[1].slice(0,5) : 'Pending'}</code></p>
+              <p className="text-[10px] text-zinc-300 font-mono mt-1">Last Run: <code>{cronHealth?.last_cron_run ? cronHealth.last_cron_run.split('T')[1].slice(0,5) : 'Pending'}</code></p>
             </div>
 
-            <div className="p-3.5 rounded-2xl bg-black/50 border border-zinc-800/80 space-y-1 md:col-span-2">
+            <div className="p-3.5 rounded-2xl bg-black/50 border border-[#1F2937]/80 space-y-1 md:col-span-2">
               <div className="flex items-center justify-between text-xs font-mono font-bold text-zinc-200">
                 <span className="flex items-center gap-1.5"><FiHardDrive className="text-fuchsia-400"/> R2 Cold-Storage Archive</span>
                 <span className="text-fuchsia-400 uppercase font-mono text-[10px]">{archiveHealth?.status || 'Active'}</span>
               </div>
               <div className="flex items-center justify-between mt-2 mb-2">
-                <p className="text-[10px] text-zinc-400 font-mono">Telemetry Batch Objects: <code className="text-fuchsia-300">{archiveHealth?.archive_objects || 0}</code></p>
+                <p className="text-[10px] text-zinc-300 font-mono">Telemetry Batch Objects: <code className="text-fuchsia-300">{archiveHealth?.archive_objects || 0}</code></p>
               </div>
 
               {/* R2 Archive File List */}
               {archiveFiles.length > 0 && (
-                <div className="mt-3 space-y-1.5 pt-2 border-t border-zinc-800/50">
+                <div className="mt-3 space-y-1.5 pt-2 border-t border-[#1F2937]/50">
                   {archiveFiles.map((file, idx) => (
                     <div key={idx} className="flex items-center justify-between p-2 rounded-xl bg-black/40 border border-zinc-900">
                       <div className="flex items-center gap-1.5 text-[10px] font-mono text-zinc-300">
@@ -274,12 +274,12 @@ export default function CoreHealthDiagnosticsModal({isOpen, onClose }) {
               )}
             </div>
 
-            <div className="p-3.5 rounded-2xl bg-black/50 border border-zinc-800/80 space-y-2 md:col-span-2">
+            <div className="p-3.5 rounded-2xl bg-black/50 border border-[#1F2937]/80 space-y-2 md:col-span-2">
               <div className="flex items-center justify-between text-xs font-mono font-bold text-zinc-200">
                 <span className="flex items-center gap-1.5"><FiShield className="text-indigo-400"/> Edge Security Shield</span>
                 <span className="text-indigo-400 uppercase font-mono text-[10px]">{secHealth?.status || 'Shield Active'}</span>
               </div>
-              <p className="text-[10px] text-zinc-400 font-mono mt-1">Rate Limiting: <code>{secHealth?.rate_limiting || '30 req/min'}</code> | HMAC: <code>{secHealth?.hmac_verification || 'Enforced'}</code></p>
+              <p className="text-[10px] text-zinc-300 font-mono mt-1">Rate Limiting: <code>{secHealth?.rate_limiting || '30 req/min'}</code> | HMAC: <code>{secHealth?.hmac_verification || 'Enforced'}</code></p>
 
               {lastKvPurge && (
                 <div className="pt-2 mt-2 border-t border-zinc-900/80 flex items-center justify-between text-[10px] font-mono text-amber-300">
@@ -296,7 +296,7 @@ export default function CoreHealthDiagnosticsModal({isOpen, onClose }) {
             <button
               onClick={fetchDiagnostics}
               disabled={isLoading}
-              className="px-3 py-1.5 rounded-xl bg-zinc-900 hover:bg-zinc-800 text-zinc-300 border border-zinc-800 text-[10px] font-mono font-bold uppercase transition-all"
+              className="px-3 py-1.5 rounded-xl bg-zinc-900 hover:bg-zinc-800 text-zinc-300 border border-[#1F2937] text-[10px] font-mono font-bold uppercase transition-all"
             >
               Refresh
             </button>
