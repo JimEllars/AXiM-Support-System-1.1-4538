@@ -45,3 +45,8 @@
 - **AI Consolidation**: Eliminated raw DeepSeek/Anthropic fetch blocks across \`handleTicketResolved\`, \`handleAutoDraft\`, and RCA functions. Fully migrated to \`callAIWithFailover\` ensuring proper cross-provider fallback handling.
 - **Robotics Flight Recorder RCA**: Added \`POST /api/v1/robotics/fault-ingest\` which automatically spins up urgent Robotics Support tickets upon hardware fault ingestion, followed by Onyx AI analysis parsing the sensor payload.
 - **Robotics HUD**: Modified \`OnyxInvestigationPanel.jsx\` to present a Robotics Flight Recorder HUD if the ticket category is 'Robotics / Hardware Fault'.
+
+# Phase 157 Completed
+- **Cron Digest Execution**: Locked `generateAndSendExecutiveDigest` to strictly fire on the `0 3 * * *` tick, preventing duplicate dispatches.
+- **Full-Text Search Migration**: Deployed a non-destructive Supabase migration adding a GIN index and generated `tsvector` column for highly performant queries.
+- **DLQ Edge Routing**: Normalized `/api/v1/dlq/retry/:id` with token validation to clear failed queue blocks securely.
