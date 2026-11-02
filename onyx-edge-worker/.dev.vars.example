@@ -4,3 +4,12 @@ DEEPSEEK_API_KEY=your_deepseek_api_key_here
 ANTHROPIC_API_KEY=your_anthropic_api_key_here
 DEEPSEEK_MODEL=deepseek-chat
 ANTHROPIC_MODEL=claude-3-5-sonnet-20241022
+
+# Internal relay signing (worker -> worker)
+# AXIM_INTERNAL_KEY and AXIM_SERVICE_KEY are set with `wrangler secret put`.
+# Timestamp-less (v1) internal callbacks are accepted only until this date so
+# satellite senders can ship a v2 signer; after it they are rejected outright.
+AXIM_SIG_LEGACY_UNTIL=2026-12-31
+
+# Upstream Coding Lab worker that POST /api/v1/tasks/dispatch proxies to.
+CODER_WORKER_URL=https://axim-coding-lab-worker.jrellars.workers.dev

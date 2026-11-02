@@ -1,3 +1,22 @@
+# Phase 159 Completed (2026-11-02)
+- **Internal Signature Replay Window**: `validateInternalSignature` now verifies `HMAC("<X-Axim-Timestamp>.<raw body>")` with a ±300s window, rejects non-hex signatures, and only tolerates timestamp-less v1 signatures until `AXIM_SIG_LEGACY_UNTIL` (default 2026-12-31) with a warning. Coding Lab dispatch sends `X-Axim-Timestamp` + `X-Axim-Signature-Version: 2`.
+- **Intake Bypass Removed**: `X-Axim-Default-Source: website[_authenticated_internal]` no longer skips HMAC verification on `POST /api/v1/webhooks/intake`; the header was client-controlled and unused by any legitimate caller.
+- **Relay/Relay Callback Hardening**: `tickets/callback`, `handleTicketResolved`, `handleMessageEgress` and `robotics/fault-ingest` use `authorizeInternalRelay()` (signature first, constant-time shared key second) instead of plaintext `!==`.
+- **Open Mail Relay Closed**: `/api/onyx/email/hitl-request` requires a real operator session (or service bearer) before dispatching to a caller-supplied address.
+- **AI Consolidation Completed**: no raw `api.deepseek.com` / `api.anthropic.com` calls remain in `onyx-edge-worker/src/index.ts`; generate-rca, resolution RCA, auto-draft, robotics RCA and the `/api/command` tool router all use `callAIWithFailover`.
+- **Streaming Failover**: new `streamAIWithFailover()` in `src/ai/llmClient.ts` — DeepSeek SSE passthrough, Anthropic SSE translated to OpenAI-shaped deltas, degraded terminal message otherwise.
+- **Email Circuit Breaker Fixed**: `EmailDispatchManager` provider health is module-scoped (it used to reset with every `new EmailDispatchManager(...)`), and `verifyEmailItSignature` now enforces the 300s timestamp window with a constant-time MAC compare.
+- **PHP2Shell Shield Widened**: percent-decoded probe matching, 403 on malformed encoding, and 403 for filesystem path probes.
+- **Build Gates Repaired**: `onyx-edge-worker/package-lock.json` regenerated (`npm ci` was failing), `AppLayout.jsx` rules-of-hooks violation fixed, empty `catch` blocks in `telemetry.js` explained, invalid `lifecycle_retention_days` removed from `wrangler.toml`.
+- **Real Tests Introduced**: `edge-trust-boundary.test.js` (22), `stream-failover.test.js` (3), `email-circuit-breaker.test.js` (6) drive the real modules; the self-fulfilling `signature.test.js` was deleted.
+
+# Phase 159 Next Priorities
+- **Ship v2 signers to every satellite** before `2026-12-31`: Coding Lab, the robotics fleet gateway, and the DB triggers that call `tickets/callback` / `webhooks/ticket-resolved` / `webhooks/egress`. Watch for `[signature] accepted legacy ...` warnings and for 401s on `resolve-from-coder`.
+- **Retire the legacy shared-key path**: once those warnings stop, delete the constant-time fallback in `authorizeInternalRelay` and require signatures only.
+- **Replace the remaining stub tests**: `telemetry.test.js`, `health.test.js`, `command.test.js` and parts of `metrics.test.js` assert on their own mocks and prove nothing.
+- **Split the frontend bundle**: 1.65 MB JS and 2.03 MB CSS ship in one chunk; route-level lazy loading and a Tailwind purge pass are overdue.
+- **Tenancy for `ticket_ai_telemetry` / `ai_interactions`**: conversation history is still keyed by `user_id` only.
+
 # Phase 149 Completed
 - **DeepSeek Integration**: Refactored `llmClient.ts` to utilize DeepSeek (flash/pro) as primary AI, handling caching metrics (`prompt_cache_hit_tokens`, `prompt_cache_miss_tokens`, `cache_hit_ratio`), multi-tenant caching via `user_id`, strict abort timeouts, and a complete 4-tier failover array.
 - **AI Consolidation**: Refactored major callsites in `index.ts` to use `callAIWithFailover` exclusively, persisting token and latency metrics.

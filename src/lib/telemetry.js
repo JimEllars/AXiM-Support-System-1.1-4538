@@ -25,7 +25,11 @@ export function trackEvent(eventName, payload) {
         sessionBuffer = sessionBuffer.slice(sessionBuffer.length - 50);
      }
      sessionStorage.setItem('telemetry_buffer', JSON.stringify(sessionBuffer));
-  } catch(e) {}
+  } catch (e) {
+     // sessionStorage is unavailable in private mode / when quota is exhausted.
+     // Telemetry must never break the caller, so drop the buffer write only.
+     console.debug('Telemetry ring buffer write skipped:', e?.message || e);
+  }
 
   scheduleFlush();
 }
@@ -34,7 +38,12 @@ const flushQueue = async () => {
   let sessionBuffer = [];
   try {
       sessionBuffer = JSON.parse(sessionStorage.getItem('telemetry_buffer') || '[]');
-  } catch (e) {}
+  } catch (e) {
+      // Corrupt or inaccessible buffer: start from an empty queue rather than
+      // dropping the in-memory events that are about to be flushed.
+      console.debug('Telemetry ring buffer unreadable, flushing memory queue only:', e?.message || e);
+      sessionBuffer = [];
+  }
 
   if (EVENT_QUEUE.length === 0 && sessionBuffer.length === 0) return;
 

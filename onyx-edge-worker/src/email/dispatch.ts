@@ -37,6 +37,35 @@ export interface EmailItTelemetry {
   dailyResetSeconds: number;
 }
 
+/**
+ * Provider-health state lives outside the instance.
+ *
+ * Every handler builds its own `new EmailDispatchManager(...)`, so a breaker
+ * held on `this` reset on the next dispatch and never opened once — EmailIt
+ * was re-probed on every single send during an outage. Module scope keeps the
+ * cooldown alive for the lifetime of the isolate, which is what a circuit
+ * breaker is for.
+ */
+interface BreakerState {
+  isOpen: boolean;
+  cooldownUntil: number;
+  telemetry: EmailItTelemetry | null;
+}
+
+const SHARED_BREAKER: BreakerState = { isOpen: false, cooldownUntil: 0, telemetry: null };
+
+/** Inbound EmailIt webhook signatures are only accepted inside this window. */
+export const EMAILIT_SIGNATURE_MAX_SKEW_SECONDS = 300;
+
+function timingSafeEqualHex(a: string, b: string): boolean {
+  if (typeof a !== 'string' || typeof b !== 'string' || a.length !== b.length) return false;
+  let diff = 0;
+  for (let i = 0; i < a.length; i++) {
+    diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  }
+  return diff === 0;
+}
+
 export class EmailDispatchManager {
   private emailitApiKey: string;
   private resendApiKey: string;
@@ -58,9 +87,16 @@ export class EmailDispatchManager {
     const now = Date.now();
     if (!options.from) options.from = this.defaultFromEmail;
 
+    // Adopt any health state accumulated by other dispatch managers.
+    this.isCircuitOpen = SHARED_BREAKER.isOpen;
+    this.circuitCooldownUntil = SHARED_BREAKER.cooldownUntil;
+    this.latestTelemetry = SHARED_BREAKER.telemetry;
+
     if (this.isCircuitOpen) {
       if (now > this.circuitCooldownUntil) {
         this.isCircuitOpen = false;
+        SHARED_BREAKER.isOpen = false;
+        SHARED_BREAKER.cooldownUntil = 0;
       } else {
         return this.sendViaResend(options, 'Circuit breaker active for EmailIt');
       }
@@ -213,6 +249,7 @@ export class EmailDispatchManager {
         dailyRemaining: parseInt(dailyRemaining, 10),
         dailyResetSeconds: dailyReset ? parseInt(dailyReset, 10) : 0
       };
+      SHARED_BREAKER.telemetry = this.latestTelemetry;
     }
   }
 
@@ -237,9 +274,21 @@ export class EmailDispatchManager {
     return resolved;
   }
 
+  /**
+   * Test-only hook: provider health is module-scoped (that is the fix), so
+   * suites that assume a cold breaker need a way to clear it between cases.
+   */
+  public static resetProviderHealthForTests(): void {
+    SHARED_BREAKER.isOpen = false;
+    SHARED_BREAKER.cooldownUntil = 0;
+    SHARED_BREAKER.telemetry = null;
+  }
+
   private tripCircuitBreaker(durationMs: number): void {
     this.isCircuitOpen = true;
     this.circuitCooldownUntil = Date.now() + durationMs;
+    SHARED_BREAKER.isOpen = true;
+    SHARED_BREAKER.cooldownUntil = this.circuitCooldownUntil;
   }
 
   public getTelemetry(): EmailItTelemetry | null {
@@ -248,13 +297,22 @@ export class EmailDispatchManager {
 
   public static async verifyEmailItSignature(rawBody: string, signatureHeader: string, secret: string): Promise<boolean> {
     try {
+      if (!signatureHeader || !secret) return false;
+
       const parts = signatureHeader.split(',');
       let t = '', v1 = '';
       for (const part of parts) {
-        if (part.startsWith('t=')) t = part.substring(2);
-        if (part.startsWith('v1=')) v1 = part.substring(3);
+        const trimmed = part.trim();
+        if (trimmed.startsWith('t=')) t = trimmed.substring(2);
+        if (trimmed.startsWith('v1=')) v1 = trimmed.substring(3).toLowerCase();
       }
       if (!t || !v1) return false;
+
+      // Reject replays: a captured webhook signature used to verify forever
+      // because `t` was parsed and then ignored.
+      const signedAtMs = Number(t) > 1e12 ? Number(t) : Number(t) * 1000;
+      if (!Number.isFinite(signedAtMs)) return false;
+      if (Math.abs(Date.now() - signedAtMs) > EMAILIT_SIGNATURE_MAX_SKEW_SECONDS * 1000) return false;
 
       const encoder = new TextEncoder();
       const cryptoKey = await crypto.subtle.importKey(
@@ -271,7 +329,8 @@ export class EmailDispatchManager {
       const signatureArray = Array.from(new Uint8Array(signatureBuffer));
       const signatureHex = signatureArray.map(b => b.toString(16).padStart(2, '0')).join('');
 
-      return signatureHex === v1;
+      // Constant-time: `===` on a MAC leaks a prefix match through timing.
+      return timingSafeEqualHex(signatureHex, v1);
     } catch (e) {
       return false;
     }

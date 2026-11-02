@@ -35,3 +35,6 @@ memory.txt
 commit_message.txt
 fix_*.cjs
 update_*.cjs
+
+# Local worker secrets (copy .dev.vars.example); never commit real keys
+onyx-edge-worker/.dev.vars

@@ -44,9 +44,13 @@ id = "fake-status-kv-id-for-now"
 binding = "TELEMETRY_ARCHIVE"
 bucket_name = "axim-telemetry-archive"
 
-# R2 Lifecycle Retention Policy
-# Retain backup objects for 365 days
-lifecycle_retention_days = 365
+# R2 Lifecycle Retention Policy: retain backup objects for 365 days.
+# `lifecycle_retention_days` is NOT a valid field on an r2_buckets binding —
+# wrangler warned "Unexpected fields found in r2_buckets[0]" and silently
+# ignored it, so the 365-day retention never actually applied. Retention is
+# bucket-level configuration:
+#   npx wrangler r2 bucket lifecycle add axim-telemetry-archive \
+#     --expire-days 365 --name telemetry-archive-365d
 
 [[kv_namespaces]]
 binding = "HITL_KV"

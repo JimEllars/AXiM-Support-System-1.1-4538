@@ -20,39 +20,185 @@ async function generateHitlActionToken(hitlId: string, secret: string): Promise<
 
 import { createClient } from "@supabase/supabase-js";
 import { EmailDispatchManager } from "./email/dispatch";
-import { callAIWithFailover } from "./ai/llmClient";
+import { callAIWithFailover, streamAIWithFailover } from "./ai/llmClient";
 
 
 
 
 
+// ---------------------------------------------------------------------------
+// Internal trust boundary primitives
+// ---------------------------------------------------------------------------
+
+/** Maximum accepted clock skew, in seconds, for `X-Axim-Timestamp`. */
+export const INTERNAL_SIGNATURE_MAX_SKEW_SECONDS = 300;
+
+/**
+ * Date (UTC) after which timestamp-less (v1) internal signatures are rejected
+ * outright. Override with `AXIM_SIG_LEGACY_UNTIL` during a coordinated rollout.
+ */
+export const INTERNAL_SIGNATURE_DEFAULT_SUNSET = "2026-12-31";
+
+/** Lowercase hex, exactly 32 bytes of HMAC-SHA256. */
+const HMAC_SHA256_HEX_RE = /^[0-9a-f]{64}$/;
+
+/**
+ * Length-independent constant-time comparison of two strings.
+ *
+ * `crypto.subtle.verify` is already constant time for signatures; this covers
+ * the shared-secret header comparisons (`X-Axim-Network-Key`, bearer service
+ * keys) which would otherwise leak a byte-by-byte prefix match via response
+ * timing.
+ */
+export function constantTimeEqualSecret(a: string | null | undefined, b: string | null | undefined): boolean {
+  if (typeof a !== "string" || typeof b !== "string") return false;
+  const left = new TextEncoder().encode(a);
+  const right = new TextEncoder().encode(b);
+  // Compare length in a branch-free way and never short-circuit on content.
+  let diff = left.length ^ right.length;
+  const max = Math.max(left.length, right.length);
+  for (let i = 0; i < max; i++) {
+    diff |= (left[i] ?? 0) ^ (right[i] ?? 0);
+  }
+  return diff === 0 && left.length === right.length;
+}
+
+function hexToBytes(hex: string): Uint8Array | null {
+  if (!HMAC_SHA256_HEX_RE.test(hex)) return null;
+  const out = new Uint8Array(hex.length / 2);
+  for (let i = 0; i < out.length; i++) {
+    const byte = parseInt(hex.substr(i * 2, 2), 16);
+    if (Number.isNaN(byte)) return null;
+    out[i] = byte;
+  }
+  return out;
+}
+
+export function bytesToHex(buffer: ArrayBuffer): string {
+  return Array.from(new Uint8Array(buffer))
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
+}
+
+async function importHmacKey(secret: string): Promise<CryptoKey> {
+  return crypto.subtle.importKey(
+    "raw",
+    new TextEncoder().encode(secret),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign", "verify"]
+  );
+}
+
+/**
+ * Signs `body` as `<timestamp>.<body>` (v2) and returns the headers an internal
+ * satellite must send so the receiver can enforce the replay window.
+ */
+async function signInternalRequest(secret: string, body: string, nowSeconds?: number): Promise<Record<string, string>> {
+  const timestamp = String(nowSeconds ?? Math.floor(Date.now() / 1000));
+  const key = await importHmacKey(secret);
+  const signature = await crypto.subtle.sign(
+    "HMAC",
+    key,
+    new TextEncoder().encode(`${timestamp}.${body}`)
+  );
+  return {
+    "X-Axim-Signature": bytesToHex(signature),
+    "X-Axim-Signature-Version": "2",
+    "X-Axim-Timestamp": timestamp,
+  };
+}
+
+function internalSignatureLegacySunset(env: Env): number {
+  const configured = (env as any).AXIM_SIG_LEGACY_UNTIL;
+  const raw = typeof configured === "string" && configured.trim() ? configured.trim() : INTERNAL_SIGNATURE_DEFAULT_SUNSET;
+  const parsed = Date.parse(raw.length === 10 ? `${raw}T00:00:00Z` : raw);
+  return Number.isNaN(parsed) ? Date.parse(`${INTERNAL_SIGNATURE_DEFAULT_SUNSET}T00:00:00Z`) : parsed;
+}
+
+/**
+ * Verifies an inbound internal callback.
+ *
+ * Accepted forms:
+ *  - v2 (preferred): `X-Axim-Timestamp: <unix seconds>` +
+ *    `X-Axim-Signature: HMAC_SHA256("<timestamp>.<raw body>")`. The timestamp
+ *    must be within {@link INTERNAL_SIGNATURE_MAX_SKEW_SECONDS} of now, which
+ *    is what closes the replay hole: a captured body-only signature could be
+ *    replayed forever.
+ *  - v1 (deprecated): `X-Axim-Signature: HMAC_SHA256(raw body)` with no
+ *    timestamp. Honoured only until `AXIM_SIG_LEGACY_UNTIL` (default
+ *    {@link INTERNAL_SIGNATURE_DEFAULT_SUNSET}) so satellite senders can ship
+ *    the v2 signer first, and logged on every use.
+ */
 async function validateInternalSignature(request: Request, env: Env): Promise<boolean> {
-  if (!env.AXIM_INTERNAL_KEY || !env.SUPABASE_SERVICE_ROLE_KEY) {
-    return false;
-  }
-  const signatureHex = request.headers.get("X-Axim-Signature");
-  if (!signatureHex) {
-    return false;
-  }
+  if (!env.AXIM_INTERNAL_KEY) return false;
+
+  const signatureHex = (request.headers.get("X-Axim-Signature") || "").replace(/^sha256=/, "").trim().toLowerCase();
+  if (!signatureHex) return false;
+
+  const sigBytes = hexToBytes(signatureHex);
+  if (!sigBytes) return false;
+
+  const timestampHeader = (request.headers.get("X-Axim-Timestamp") || "").trim();
 
   try {
     const payload = await request.clone().text();
+    const key = await importHmacKey(env.AXIM_INTERNAL_KEY);
     const encoder = new TextEncoder();
-    const key = await crypto.subtle.importKey(
-      "raw",
-      encoder.encode(env.AXIM_INTERNAL_KEY),
-      { name: "HMAC", hash: "SHA-256" },
-      false,
-      ["sign", "verify"]
-    );
 
-    const sigBytes = new Uint8Array(signatureHex.match(/.{1,2}/g)?.map(byte => parseInt(byte, 16)) || []);
-    const isValid = await crypto.subtle.verify("HMAC", key, sigBytes, encoder.encode(payload));
+    if (timestampHeader) {
+      const timestamp = Number(timestampHeader);
+      if (!Number.isFinite(timestamp) || !Number.isInteger(timestamp)) return false;
 
-    return isValid;
+      const skew = Math.abs(Math.floor(Date.now() / 1000) - timestamp);
+      if (skew > INTERNAL_SIGNATURE_MAX_SKEW_SECONDS) {
+        console.warn("[signature] rejected internal callback outside replay window", { skewSeconds: skew });
+        return false;
+      }
+
+      return await crypto.subtle.verify("HMAC", key, sigBytes, encoder.encode(`${timestamp}.${payload}`));
+    }
+
+    // Legacy timestamp-less signature (v1).
+    const sunset = internalSignatureLegacySunset(env);
+    if (Date.now() > sunset) {
+      console.warn("[signature] rejected timestamp-less internal signature past sunset", {
+        sunset: new Date(sunset).toISOString(),
+      });
+      return false;
+    }
+
+    const legacyValid = await crypto.subtle.verify("HMAC", key, sigBytes, encoder.encode(payload));
+    if (legacyValid) {
+      console.warn("[signature] accepted legacy timestamp-less internal signature; sender must migrate to v2 before sunset", {
+        sunset: new Date(sunset).toISOString(),
+      });
+    }
+    return legacyValid;
   } catch (e: any) {
     return false;
   }
+}
+
+/**
+ * Gate for internal relay endpoints: a valid HMAC signature is preferred, and a
+ * static shared key is still accepted (constant-time) until it is retired so a
+ * satellite mid-migration is not cut off.
+ */
+async function authorizeInternalRelay(request: Request, env: Env, header: string = "X-Axim-Network-Key"): Promise<boolean> {
+  if (await validateInternalSignature(request, env)) return true;
+
+  const presented = request.headers.get(header) || "";
+  if (!presented) return false;
+
+  const options = [env.AXIM_SERVICE_KEY, env.AXIM_INTERNAL_KEY].filter((k: any) => typeof k === "string" && k.length > 0);
+  for (const candidate of options) {
+    if (constantTimeEqualSecret(presented, candidate as string)) {
+      console.warn("[signature] accepted legacy shared-key relay; migrate caller to X-Axim-Signature v2", { header });
+      return true;
+    }
+  }
+  return false;
 }
 
 
@@ -1308,15 +1454,41 @@ export default {
 
 
     // EDGE HARDENING & PHP2SHELL DEFENSE
+    // Inspect the percent-decoded path/query as well as the raw form: a probe
+    // sent as `%2e%2e%2f` or `%3f-d` previously matched neither list.
     const pathLower = url.pathname.toLowerCase();
     const searchLower = url.search.toLowerCase();
-    const isSuspiciousCgi = searchLower.includes('?-d') || searchLower.includes('auto_prepend_file') || searchLower.includes('auto_append_file') || searchLower.includes('allow_url_include') || searchLower.includes('disable_functions') || searchLower.includes('safe_mode');
+    let decodedPathLower = pathLower;
+    let decodedSearchLower = searchLower;
+    try {
+      decodedPathLower = decodeURIComponent(url.pathname).toLowerCase();
+      decodedSearchLower = decodeURIComponent(url.search).toLowerCase();
+    } catch (e: any) {
+      // Malformed percent-encoding is itself a probe signature.
+      return new Response(JSON.stringify({ error: "Forbidden: Malformed URL encoding" }), { status: 403, headers: { "Content-Type": "application/json", ...getCorsHeaders(env, request) } });
+    }
+    const cgiProbeSources = [searchLower, decodedSearchLower];
+    const isSuspiciousCgi = cgiProbeSources.some((s) =>
+      s.includes('?-d') || s.includes('%3f-d') || s.includes('auto_prepend_file') || s.includes('auto_append_file') || s.includes('allow_url_include') || s.includes('disable_functions') || s.includes('safe_mode')
+    );
     if (isSuspiciousCgi) {
       return new Response(JSON.stringify({ error: "Forbidden: Suspicious CGI argument injection detected" }), { status: 403, headers: { "Content-Type": "application/json", ...getCorsHeaders(env, request) } });
     }
-    const isPathTraversal = pathLower.includes('..') || pathLower.includes('%2e%2e') || pathLower.includes('.php') || pathLower.includes('/wp-admin') || pathLower.includes('/wp-login') || pathLower.includes('xmlrpc.php');
+    const traversalProbeSources = [pathLower, decodedPathLower, searchLower, decodedSearchLower];
+    const isPathTraversal = traversalProbeSources.some((p) =>
+      p.includes('..') || p.includes('%2e%2e') || p.includes('.php') || p.includes('/wp-admin') || p.includes('/wp-login') || p.includes('xmlrpc.php')
+    );
     if (isPathTraversal) {
       return new Response(JSON.stringify({ error: "Forbidden: Suspicious path traversal or probe detected" }), { status: 403, headers: { "Content-Type": "application/json", ...getCorsHeaders(env, request) } });
+    }
+    // The URL parser collapses `%2e%2e/` into `..` and then resolves it, so a
+    // probe like /api/v1/%2e%2e/%2e%2e/etc/passwd arrives as a clean
+    // /etc/passwd. This worker never serves filesystem paths, so anything in a
+    // system directory is a probe regardless of how it was encoded.
+    const systemPathPrefixes = ['/etc/', '/proc/', '/sys/', '/root/', '/var/', '/usr/', '/bin/', '/sbin/', '/boot/', '/.env', '/.git', '/server-status', '/actuator'];
+    const isSystemPathProbe = systemPathPrefixes.some((prefix) => decodedPathLower.startsWith(prefix) || pathLower.startsWith(prefix));
+    if (isSystemPathProbe) {
+      return new Response(JSON.stringify({ error: "Forbidden: Filesystem path probe detected" }), { status: 403, headers: { "Content-Type": "application/json", ...getCorsHeaders(env, request) } });
     }
 
     // STRICT ENVIRONMENT SECRET SANITY FILTER
@@ -1351,7 +1523,7 @@ export default {
         headers: {
           ...getCorsHeaders(env, request),
           "Access-Control-Allow-Methods": "GET, POST, OPTIONS, PUT, DELETE, PATCH",
-          "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Idempotency-Key, X-Axim-Network-Key, cf-turnstile-response, X-Axim-Signature, Idempotency-Key",
+          "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Idempotency-Key, X-Axim-Network-Key, cf-turnstile-response, X-Axim-Signature, X-Axim-Signature-Version, X-Axim-Timestamp, Idempotency-Key",
           "Access-Control-Max-Age": "86400"
         },
       });
@@ -2427,9 +2599,23 @@ export default {
     }
 
     if (url.pathname === "/api/onyx/email/hitl-request" && request.method === "POST") {
+      // This route dispatches mail from the platform domain to a caller-supplied
+      // address, so a bare `Authorization` header is not sufficient proof: any
+      // non-empty bearer was previously accepted, making it an open relay.
       const authHeader = request.headers.get("Authorization") || "";
       const token = authHeader.replace("Bearer ", "").trim();
-      if (!token && authHeader !== `Bearer ${env.AXIM_ONYX_SECRET}`) {
+      const isServiceBearer = constantTimeEqualSecret(authHeader.trim(), `Bearer ${env.AXIM_ONYX_SECRET || ""}`);
+      let operatorSessionValid = false;
+      if (!isServiceBearer && token) {
+        try {
+          const supabaseAuth = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
+          const { data: { user }, error: authError } = await supabaseAuth.auth.getUser(token);
+          operatorSessionValid = !authError && !!user;
+        } catch (e: any) {
+          operatorSessionValid = false;
+        }
+      }
+      if (!isServiceBearer && !operatorSessionValid) {
          return new Response(JSON.stringify({ error: "UNAUTHORIZED" }), { status: 401, headers: getCorsHeaders(env, request) });
       }
 
@@ -2465,7 +2651,7 @@ export default {
 
     if (url.pathname === "/api/onyx/email/executive-summary" && request.method === "POST") {
       const authHeader = request.headers.get("Authorization") || "";
-      if (authHeader !== `Bearer ${env.AXIM_ONYX_SECRET}`) {
+      if (!constantTimeEqualSecret(authHeader.trim(), `Bearer ${env.AXIM_ONYX_SECRET || ""}`)) {
          return new Response(JSON.stringify({ error: "UNAUTHORIZED" }), { status: 401, headers: getCorsHeaders(env, request) });
       }
 
@@ -2778,6 +2964,14 @@ export default {
       const token = authHeader.replace("Bearer ", "").trim();
       if (!token) return new Response(JSON.stringify({ error: "Unauthorized" }), { status: 401, headers: getCorsHeaders(env, request) });
 
+      // Presence of a bearer token is not authentication: this route spends AI
+      // budget and writes rca_documents, so the session has to be real.
+      const supabaseAdmin = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
+      const { data: { user: sessionUser }, error: sessionError } = await supabaseAdmin.auth.getUser(token);
+      if (sessionError || !sessionUser) {
+        return new Response(JSON.stringify({ error: "INVALID_OPERATOR_SESSION" }), { status: 403, headers: getCorsHeaders(env, request) });
+      }
+
       try {
         const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
 
@@ -2788,25 +2982,24 @@ export default {
         const threadText = messages?.map((m: any) => `[${m.sender_id}]: ${m.message_body}`).join("\n") || "";
 
         let rcaMarkdown = "";
-        if (env.DEEPSEEK_API_KEY) {
+        {
           const prompt = `Generate a formal 5-point Engineering RCA Post-Mortem in markdown: 1. Incident Overview, 2. Root Cause, 3. Business Impact, 4. Immediate Remediation, 5. Preventive Action Items.
 Subject: ${ticket.subject}
 Thread:
 ${threadText}`;
 
-          const deepseekRes = await fetch("https://api.deepseek.com/v1/chat/completions", {
-            method: "POST",
-            headers: { "Content-Type": "application/json", "Authorization": `Bearer ${env.DEEPSEEK_API_KEY}` },
-            body: JSON.stringify({
-              model: "deepseek-chat",
-              messages: [{ role: "system", content: "You are Onyx Mk3." }, { role: "user", content: prompt }],
-              temperature: 0.1
-            })
-          });
-
-          if (deepseekRes.ok) {
-            const data: any = await deepseekRes.json();
-            rcaMarkdown = data.choices?.[0]?.message?.content || "";
+          try {
+            const aiResult = await callAIWithFailover({
+              systemPrompt: "You are Onyx Mk3.",
+              userPrompt: prompt,
+              taskType: "reasoning",
+              temperature: 0.1,
+              maxTokens: 1200,
+              userId: sessionUser.id
+            }, env);
+            rcaMarkdown = aiResult?.content || "";
+          } catch (aiErr: any) {
+            console.error("RCA generation failed across providers:", aiErr?.message || aiErr);
           }
         }
 
@@ -2942,8 +3135,7 @@ ${threadText}`;
       }
     }
 if (url.pathname === "/api/v1/tickets/callback" && request.method === "POST") {
-      const networkToken = request.headers.get("X-Axim-Network-Key") || "";
-      if (networkToken !== env.AXIM_SERVICE_KEY) {
+      if (!(await authorizeInternalRelay(request, env))) {
         return new Response(JSON.stringify({ error: "UNAUTHORIZED_INTERLOCK_CALLBACK" }), {
           status: 401, headers: getCorsHeaders(env, request)
         });
@@ -3202,35 +3394,28 @@ if (url.pathname === "/api/v1/tickets/callback" && request.method === "POST") {
         const systemPrompt = "You are Onyx Live Triage, an enterprise internal AI. Perform a rapid investigation of this ticket. Stream your thought sequence step-by-step using clear monospaced bullet points.";
         const userPrompt = `Ticket Subject: ${body.subject}\nDescription: ${body.description}`;
 
-        if (env.DEEPSEEK_API_KEY) {
-          const deepseekRes = await fetch("https://api.deepseek.com/v1/chat/completions", {
-            method: "POST",
-            headers: { "Content-Type": "application/json", "Authorization": `Bearer ${env.DEEPSEEK_API_KEY}` },
-            body: JSON.stringify({
-              model: "deepseek-chat",
-              max_tokens: 500,
-              messages: [
-                { role: "system", content: systemPrompt },
-                { role: "user", content: userPrompt }
-              ],
-              stream: true
-            }),
-          });
+        // Routed through the consolidated gateway so the stream inherits the
+        // DeepSeek → Anthropic → degraded fallback chain instead of dying when
+        // the primary provider rejects the request.
+        const stream = await streamAIWithFailover(
+          {
+            systemPrompt,
+            userPrompt,
+            maxTokens: 500,
+            userId: user.id,
+          },
+          env
+        );
 
-          if (!deepseekRes.ok) throw new Error("Upstream stream completion request rejected by provider instance.");
-
-          return new Response(deepseekRes.body, {
-            status: 200,
-            headers: {
-              "Content-Type": "text/event-stream",
-              "Cache-Control": "no-cache",
-              "Connection": "keep-alive",
-              ...getCorsHeaders(env, request)
-            }
-          });
-        } else {
-          throw new Error("Ecosystem AI Core missing deployment variable allocation references.");
-        }
+        return new Response(stream, {
+          status: 200,
+          headers: {
+            "Content-Type": "text/event-stream",
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            ...getCorsHeaders(env, request)
+          }
+        });
       } catch (err: any) {
         return new Response(JSON.stringify({ error: err.message }), {
           status: 500, headers: getCorsHeaders(env, request)
@@ -3257,8 +3442,7 @@ if (url.pathname === "/api/v1/tickets/callback" && request.method === "POST") {
 
 
     if (url.pathname === "/api/v1/tickets/callback" && request.method === "POST") {
-      const networkSignature = request.headers.get("X-Axim-Network-Key") || "";
-      if (networkSignature !== env.AXIM_SERVICE_KEY) {
+      if (!(await authorizeInternalRelay(request, env))) {
         return new Response(JSON.stringify({ error: "UNAUTHORIZED_INTERLOCK_CALLBACK" }), {
           status: 401, headers: getCorsHeaders(env, request)
         });
@@ -3348,26 +3532,19 @@ if (url.pathname === "/api/v1/tickets/callback" && request.method === "POST") {
       const coderWorkerUrl = env.CODER_WORKER_URL || 'https://axim-coding-lab-worker.jrellars.workers.dev';
       const targetUrl = `${coderWorkerUrl}${targetPath}`;
 
-      // Sign the outgoing payload with HMAC-SHA256 using env.AXIM_INTERNAL_KEY
+      // Sign the outgoing payload with HMAC-SHA256 using env.AXIM_INTERNAL_KEY.
+      // v2: the signature covers `<timestamp>.<body>` so the Coding Lab can
+      // reject replays outside a 5-minute window instead of accepting a
+      // captured body forever.
       const payloadString = JSON.stringify(payload as any);
-      const encoder = new TextEncoder();
-      const cryptoKey = await crypto.subtle.importKey(
-        "raw",
-        encoder.encode(env.AXIM_INTERNAL_KEY),
-        { name: "HMAC", hash: "SHA-256" },
-        false,
-        ["sign"]
-      );
-      const signatureBuffer = await crypto.subtle.sign("HMAC", cryptoKey, encoder.encode(payloadString));
-      const signatureArray = Array.from(new Uint8Array(signatureBuffer));
-      const signatureHex = signatureArray.map(b => b.toString(16).padStart(2, '0')).join('');
+      const signatureHeaders = await signInternalRequest(env.AXIM_INTERNAL_KEY, payloadString);
 
       try {
         const coderResponse = await fetch(targetUrl, {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            "X-Axim-Signature": signatureHex
+            ...signatureHeaders
           },
           body: payloadString
         });
@@ -3421,10 +3598,17 @@ if (url.pathname === "/api/v1/tickets/callback" && request.method === "POST") {
     }
 
     if (url.pathname === "/api/v1/robotics/fault-ingest" && request.method === "POST") {
-      const authHeader = request.headers.get("Authorization") || "";
-      const token = authHeader.replace("Bearer ", "").trim();
-      if (!token || token !== env.AXIM_INTERNAL_KEY) {
+      // Accepts a v2 HMAC signature (preferred) or the legacy `AXIM_INTERNAL_KEY`
+      // bearer while the fleet gateway migrates. The legacy key is compared in
+      // constant time: a plaintext `!==` leaked a prefix match through timing.
+      const bearerToken = (request.headers.get("Authorization") || "").replace("Bearer ", "").trim();
+      const signed = await validateInternalSignature(request, env);
+      const legacyBearerOk = !!bearerToken && constantTimeEqualSecret(bearerToken, env.AXIM_INTERNAL_KEY || "");
+      if (!signed && !legacyBearerOk) {
         return new Response(JSON.stringify({ error: "Unauthorized" }), { status: 401, headers: { "Content-Type": "application/json", ...getCorsHeaders(env, request) } });
+      }
+      if (!signed && legacyBearerOk) {
+        console.warn("[robotics/fault-ingest] accepted legacy bearer key; migrate fleet gateway to X-Axim-Signature v2");
       }
 
       let payload;
@@ -3457,7 +3641,12 @@ if (url.pathname === "/api/v1/tickets/callback" && request.method === "POST") {
       // Perform RCA on the flight recorder data
       const rcaPrompt = `Analyze the following robotics flight recorder telemetry for node ${node_id}:\n\n${JSON.stringify(sensor_data, null, 2)}\n\nIdentify potential anomalies such as pitch/roll divergence, current spikes, and motor thermal cutoffs. Output an initial RCA summary in markdown.`;
       try {
-        const aiResult = await callAIWithFailover({ userPrompt: rcaPrompt, systemPrompt: "You are Onyx Mk3, a hardware diagnostics specialist.", maxTokens: 500, operation_context: "robotics_rca" } as any, env);
+      const aiResult = await callAIWithFailover({
+        userPrompt: rcaPrompt,
+        systemPrompt: "You are Onyx Mk3, a hardware diagnostics specialist.",
+        taskType: "reasoning",
+        maxTokens: 500
+      }, env);
 
         if (aiResult && aiResult.content) {
           await supabaseAdmin.from("ticket_messages").insert({
@@ -4803,9 +4992,10 @@ async function handleWebhookIntake(request: Request, env: Env, ctx: any): Promis
   }
 
   // CRITICAL FIX: Eliminate spoofable header bypass vulnerability.
-  // Mandate cryptographic signatures unless the request explicitly includes our internal ecosystem service role token key.
-  const proxyNetworkToken = request.headers.get("X-Axim-Network-Key");
-  const isInternalProxy = proxyNetworkToken === env.AXIM_SERVICE_KEY || request.headers.get("X-Axim-Default-Source") === "website_authenticated_internal";
+  // Trust is a valid X-Axim-Signature v2 or the internal network key — never a
+  // client-supplied source label. `X-Axim-Default-Source` used to short-circuit
+  // the HMAC gate and nothing legitimate ever sent that value.
+  const isInternalProxy = await authorizeInternalRelay(request, env);
 
   if (!isInternalProxy) {
     const isVerified = await verifyWebhookSignature(request, env, payloadText);
@@ -4949,8 +5139,11 @@ async function handleWebhookIntake(request: Request, env: Env, ctx: any): Promis
       // Handle standard JSON payload
       const rawText = await request.clone().text();
 
-      // If it's NOT coming from our internal public ingress proxy, enforce the HMAC signature
-      const isInternalProxy = request.headers.get("X-Axim-Default-Source") === "website";
+      // The internal proxy re-dispatches through /api/v1/webhooks/intake carrying
+      // the network key; a client-supplied source header alone is not proof.
+      const isInternalProxy = request.headers.get("X-Axim-Network-Key")
+        ? constantTimeEqualSecret(request.headers.get("X-Axim-Network-Key"), env.AXIM_SERVICE_KEY || "")
+        : false;
       if (!isInternalProxy && !(await verifyWebhookSignature(request, env, rawText))) {
         // CRITICAL FIX: Asynchronously log malicious internal ecosystem pings
         const logHmacThreat = async () => {
@@ -5730,7 +5923,7 @@ async function handleToolCommand(request: Request, env: Env, ctx: any): Promise<
   }).catch(() => {}));
 
   const authHeader = request.headers.get("Authorization");
-  if (authHeader !== `Bearer ${env.AXIM_ONYX_SECRET}`) {
+  if (!constantTimeEqualSecret(authHeader ? authHeader.trim() : null, `Bearer ${env.AXIM_ONYX_SECRET || ""}`)) {
     return new Response("Unauthorized", { status: 401 });
   }
 
@@ -5745,40 +5938,28 @@ async function handleToolCommand(request: Request, env: Env, ctx: any): Promise<
 
     let toolUsePayload = null;
 
-    if (env.ANTHROPIC_API_KEY) {
-      try {
-        const response = await fetch('https://api.anthropic.com/v1/messages', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'x-api-key': env.ANTHROPIC_API_KEY,
-            'anthropic-version': '2023-06-01'
-          },
-          body: JSON.stringify({
-            model: 'claude-3-haiku-20240307',
-            max_tokens: 500,
-            system: "You are an AI support agent. Your job is to select the most appropriate tool to run based on the user's command. If no tool is appropriate, just reply.",
-            messages: [{ role: 'user', content: command }],
-            tools: ONYX_TOOLS
-          })
-        });
+    try {
+      const aiResult = await callAIWithFailover({
+        systemPrompt: "You are an AI support agent. Your job is to select the most appropriate tool to run based on the user's command. If no tool is appropriate, just reply.",
+        userPrompt: String(command ?? ""),
+        taskType: "tools",
+        tools: ONYX_TOOLS,
+        maxTokens: 500
+      }, env);
 
-        if (response.ok) {
-          const data: any = await response.json();
-          // Find the tool_use block
-          const toolUseBlock = data.content.find((c: any) => c.type === 'tool_use');
-          if (toolUseBlock) {
-            toolUsePayload = {
-              name: toolUseBlock.name,
-              input: toolUseBlock.input
-            };
-          }
-        } else {
-          const errText = await response.text(); logErr(supabase, logCtx, new Error("Anthropic API error in handleToolCommand: " + errText), ctx); console.error("Anthropic API error in handleToolCommand:", errText);
+      const firstToolCall = aiResult?.toolCalls?.[0];
+      if (firstToolCall?.function?.name) {
+        let parsedInput: any = {};
+        try {
+          parsedInput = JSON.parse(firstToolCall.function.arguments || "{}");
+        } catch (parseErr: any) {
+          logErr(supabase, logCtx, new Error("Tool arguments were not valid JSON"), ctx);
         }
-      } catch (err: any) {
-        logErr(supabase, logCtx, err, ctx); console.error("Anthropic API fetch failed in handleToolCommand:", err);
+        toolUsePayload = { name: firstToolCall.function.name, input: parsedInput };
       }
+    } catch (err: any) {
+      logErr(supabase, logCtx, err, ctx);
+      console.error("handleToolCommand: tool selection failed across providers:", err?.message || err);
     }
 
     if (!toolUsePayload) {
@@ -6064,8 +6245,7 @@ async function handleTicketResolved(request: Request, env: Env, ctx: any): Promi
   ctx.waitUntil(logToEvents(supabase, logCtx, "performance_metric", "Webhook Request start", { headers: request.headers }).catch(() => {}));
 
   // CRITICAL FIX: Eliminate URL query param leaks. Authenticate database triggers via secure request headers.
-  const networkWebhookToken = request.headers.get("X-Axim-Network-Key");
-  if (networkWebhookToken !== env.AXIM_SERVICE_KEY) {
+  if (!(await authorizeInternalRelay(request, env))) {
     return new Response(JSON.stringify({ error: "UNAUTHORIZED_DATABASE_TRIGGER" }), { status: 401, headers: { 'Content-Type': 'application/json' } });
   }
 
@@ -6163,35 +6343,22 @@ async function handleTicketResolved(request: Request, env: Env, ctx: any): Promi
 
           let rcaMarkdown = "";
 
-          if (env.DEEPSEEK_API_KEY) {
+          {
             const prompt = `You are Onyx Mk3. Generate a Root Cause Analysis for this resolved ticket.\nSubject: ${record.subject}\nThread:\n${threadText}\nOutput strictly in Markdown with ## Problem, ## Root Cause, and ## Resolution. DO NOT include conversational filler.`;
-            const deepseekRes = await fetch("https://api.deepseek.com/v1/chat/completions", {
-              method: "POST",
-              headers: { "Content-Type": "application/json", "Authorization": `Bearer ${env.DEEPSEEK_API_KEY}` },
-              body: JSON.stringify({
-                model: "deepseek-chat",
-                max_tokens: 500,
-                messages: [{ role: "user", content: prompt }]
-              }),
-            });
-            if (deepseekRes.ok) {
-              const data = await deepseekRes.json() as any;
-              rcaMarkdown = data.choices[0].message.content;
-            } else { throw new Error("Deepseek API failed"); }
+            try {
+              const aiResult = await callAIWithFailover({
+                userPrompt: prompt,
+                taskType: "reasoning",
+                maxTokens: 500
+              }, env);
+              rcaMarkdown = aiResult?.content || "";
+            } catch (e: any) {
+              console.error("Resolved-ticket RCA failed across providers:", e?.message || e);
+            }
+          }
 
-          } else if (env.ANTHROPIC_API_KEY) {
-            const prompt = `You are Onyx Mk3. Generate a Root Cause Analysis for this resolved ticket.\nSubject: ${record.subject}\nThread:\n${threadText}\nOutput strictly in Markdown with ## Problem, ## Root Cause, and ## Resolution.`;
-            const anthropicRes = await fetch("https://api.anthropic.com/v1/messages", {
-              method: "POST",
-              headers: { "Content-Type": "application/json", "x-api-key": env.ANTHROPIC_API_KEY, "anthropic-version": "2023-06-01" },
-              body: JSON.stringify({ model: "claude-3-haiku-20240307", max_tokens: 500, messages: [{ role: "user", content: prompt }] }),
-            });
-            if (anthropicRes.ok) {
-              const data = await anthropicRes.json() as any;
-              rcaMarkdown = data.content[0].text;
-            } else { throw new Error("Anthropic API failed"); }
-          } else {
-            rcaMarkdown = `## Problem\n${record.subject}\n## Root Cause\nLocal dev mode. No AI keys provided. No RCA generated.\n## Resolution\nN/A`;
+          if (!rcaMarkdown) {
+            rcaMarkdown = `## Problem\n${record.subject}\n## Root Cause\nAI providers unavailable at resolution time. No RCA generated.\n## Resolution\nN/A`;
           }
 
           let embeddingForMemory = null;
@@ -6334,46 +6501,19 @@ async function handleGenerateSuggestion(request: Request, env: Env, ctx: any): P
     let draft = "";
     let providerUsed = "unknown";
 
-    if (env.DEEPSEEK_API_KEY) {
-      try {
-        const deepseekRes = await fetch("https://api.deepseek.com/v1/chat/completions", {
-          method: "POST",
-          headers: { "Content-Type": "application/json", "Authorization": `Bearer ${env.DEEPSEEK_API_KEY}` },
-          body: JSON.stringify({
-            model: "deepseek-chat",
-            max_tokens: 500,
-            messages: [{ role: "user", content: prompt }]
-          })
-        });
-        if (deepseekRes.ok) {
-          const data: any = await deepseekRes.json();
-          draft = data.choices[0].message.content;
-          providerUsed = "Deepseek-V3";
-        }
-      } catch (e: any) { console.error("Deepseek suggestions stream offline."); }
-    }
-
-    if (!draft && env.ANTHROPIC_API_KEY) {
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 8000);
-      try {
-        const anthropicRes = await fetch("https://api.anthropic.com/v1/messages", {
-          method: "POST",
-          headers: { "Content-Type": "application/json", "x-api-key": env.ANTHROPIC_API_KEY, "anthropic-version": "2023-06-01" },
-          body: JSON.stringify({
-            model: "claude-3-haiku-20240307",
-            max_tokens: 500,
-            messages: [{ role: "user", content: prompt }],
-          }),
-          signal: controller.signal,
-        });
-        clearTimeout(timeoutId);
-        if (anthropicRes.ok) {
-          const data: any = await anthropicRes.json();
-          draft = data.content[0].text;
-          providerUsed = "Claude-3-Haiku";
-        }
-      } catch (err: any) { clearTimeout(timeoutId); }
+    try {
+      const aiResult = await callAIWithFailover({
+        userPrompt: prompt,
+        taskType: "fast",
+        maxTokens: 500
+      }, env);
+      draft = aiResult?.content || "";
+      providerUsed = aiResult?.provider ? `${aiResult.provider}:${aiResult.model}` : "unknown";
+      if (aiResult?.failoverTriggered) {
+        console.warn("[auto-draft] provider failover engaged", { reason: aiResult.failoverReason, provider: aiResult.provider });
+      }
+    } catch (e: any) {
+      console.error("Auto-draft generation failed across providers:", e?.message || e);
     }
 
     if (!draft) {
@@ -6392,8 +6532,7 @@ async function handleGenerateSuggestion(request: Request, env: Env, ctx: any): P
 }
 async function handleMessageEgress(request: Request, env: Env, ctx: any): Promise<Response> {
   // CRITICAL FIX: Eliminate URL query param leaks. Authenticate database triggers via secure request headers.
-  const networkWebhookToken = request.headers.get("X-Axim-Network-Key");
-  if (networkWebhookToken !== env.AXIM_SERVICE_KEY) {
+  if (!(await authorizeInternalRelay(request, env))) {
     return new Response(JSON.stringify({ error: "UNAUTHORIZED_EGRESS_TRIGGER" }), { status: 401, headers: { 'Content-Type': 'application/json' } });
   }
 
