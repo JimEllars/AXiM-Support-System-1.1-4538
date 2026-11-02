@@ -8,6 +8,8 @@ describe('EmailDispatchManager', () => {
   const defaultFrom = 'AXiM Support <support@updates.axim.io>';
 
   beforeEach(() => {
+    // Provider health is shared across managers by design; start each case cold.
+    EmailDispatchManager.resetProviderHealthForTests();
     dispatchManager = new EmailDispatchManager(mockEmailitKey, mockResendKey, defaultFrom);
     global.fetch = vi.fn();
   });

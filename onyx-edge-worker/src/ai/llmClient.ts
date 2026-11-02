@@ -387,3 +387,176 @@ export async function callAIWithFailover(
     failoverReason: 'All providers failed: ' + failoverReason
   };
 }
+
+// ---------------------------------------------------------------------------
+// Streaming failover
+// ---------------------------------------------------------------------------
+
+export interface StreamRequestOptions {
+  systemPrompt?: string;
+  userPrompt?: string;
+  messages?: ChatMessage[];
+  maxTokens?: number;
+  temperature?: number;
+  userId?: string;
+}
+
+function sseChunk(content: string, model: string): string {
+  return `data: ${JSON.stringify({
+    choices: [{ index: 0, delta: { content }, finish_reason: null }],
+    model,
+  })}\n\n`;
+}
+
+const SSE_DONE = "data: [DONE]\n\n";
+
+/**
+ * Converts an Anthropic SSE body into OpenAI-shaped SSE deltas so the browser
+ * only ever parses one wire format regardless of which provider served it.
+ */
+function anthropicSseToOpenAiSse(body: ReadableStream<Uint8Array>, model: string): ReadableStream<Uint8Array> {
+  const decoder = new TextDecoder();
+  const encoder = new TextEncoder();
+  let buffer = "";
+
+  return new ReadableStream<Uint8Array>({
+    async start(controller) {
+      const reader = body.getReader();
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+
+          const events = buffer.split("\n\n");
+          buffer = events.pop() ?? "";
+
+          for (const event of events) {
+            const dataLine = event
+              .split("\n")
+              .find((line) => line.startsWith("data:"));
+            if (!dataLine) continue;
+
+            const raw = dataLine.slice(5).trim();
+            if (!raw || raw === "[DONE]") continue;
+
+            try {
+              const parsed: any = JSON.parse(raw);
+              if (parsed.type === "content_block_delta" && parsed.delta?.text) {
+                controller.enqueue(encoder.encode(sseChunk(parsed.delta.text, model)));
+              }
+            } catch {
+              // Ignore non-JSON keepalives from the upstream provider.
+            }
+          }
+        }
+        controller.enqueue(encoder.encode(SSE_DONE));
+      } catch (err: any) {
+        controller.enqueue(
+          encoder.encode(
+            `data: ${JSON.stringify({ error: err?.message || "stream_interrupted" })}\n\n`
+          )
+        );
+      } finally {
+        controller.close();
+        reader.releaseLock?.();
+      }
+    },
+  });
+}
+
+/**
+ * Streams a chat completion through the consolidated AI gateway.
+ *
+ * Every conversational surface must go through this module rather than calling
+ * a provider directly: it centralises key handling, timeouts and the
+ * DeepSeek → Anthropic → Workers AI fallback chain, and normalises the SSE
+ * wire format so the frontend never needs provider-specific parsing.
+ */
+export async function streamAIWithFailover(
+  options: StreamRequestOptions,
+  env: any
+): Promise<ReadableStream<Uint8Array>> {
+  const deepseekModel = env.DEEPSEEK_MODEL || "deepseek-flash";
+  const anthropicModel = env.ANTHROPIC_MODEL || "claude-3-5-sonnet-20241022";
+  const userId = options.userId || "axim-system-default";
+
+  const requestMessages =
+    options.messages && options.messages.length > 0
+      ? options.messages.map((m) => ({ role: m.role, content: m.content ?? "" }))
+      : [
+          { role: "system", content: options.systemPrompt || "" },
+          { role: "user", content: options.userPrompt || "" },
+        ];
+
+  if (env.DEEPSEEK_API_KEY) {
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 20000);
+
+      const response = await fetch("https://api.deepseek.com/chat/completions", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${env.DEEPSEEK_API_KEY}`,
+        },
+        body: JSON.stringify({
+          model: deepseekModel,
+          messages: requestMessages,
+          max_tokens: options.maxTokens || 500,
+          temperature: options.temperature ?? 0.5,
+          user_id: userId,
+          stream: true,
+        }),
+        signal: controller.signal as any,
+      });
+      clearTimeout(timeoutId);
+
+      if (response.ok && response.body) {
+        return response.body;
+      }
+      console.warn(`[stream] DeepSeek rejected stream (HTTP ${response.status}); falling back to Anthropic.`);
+    } catch (err: any) {
+      console.warn(`[stream] DeepSeek stream failed: ${err?.message || err}; falling back to Anthropic.`);
+    }
+  }
+
+  if (env.ANTHROPIC_API_KEY) {
+    try {
+      const response = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-api-key": env.ANTHROPIC_API_KEY,
+          "anthropic-version": "2023-06-01",
+        },
+        body: JSON.stringify({
+          model: anthropicModel,
+          system: options.systemPrompt || "",
+          messages: requestMessages.filter((m) => m.role !== "system"),
+          max_tokens: options.maxTokens || 500,
+          temperature: options.temperature ?? 0.5,
+          stream: true,
+        }),
+      });
+
+      if (response.ok && response.body) {
+        return anthropicSseToOpenAiSse(response.body, anthropicModel);
+      }
+      console.warn(`[stream] Anthropic rejected stream (HTTP ${response.status}); using degraded fallback.`);
+    } catch (err: any) {
+      console.warn(`[stream] Anthropic stream failed: ${err?.message || err}; using degraded fallback.`);
+    }
+  }
+
+  const degraded =
+    "Onyx live triage is temporarily degraded: no AI provider is reachable. " +
+    "A human operator will continue this investigation.";
+  return new ReadableStream<Uint8Array>({
+    start(controller) {
+      controller.enqueue(new TextEncoder().encode(sseChunk(degraded, "offline-fallback")));
+      controller.enqueue(new TextEncoder().encode(SSE_DONE));
+      controller.close();
+    },
+  });
+}

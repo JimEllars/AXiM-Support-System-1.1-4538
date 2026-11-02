@@ -38,16 +38,6 @@ export default function AppLayout({ children }) {
     return () => unsubscribe();
   }, [subscribeToDLQChanges]);
 
-  if (!isInitialized) {
-    return (
-      <div className="min-h-screen bg-[#0B0F19] flex items-center justify-center">
-        <div className="w-64 h-64 border border-[#1F2937] rounded-xl flex items-center justify-center">
-          <div className="w-8 h-8 border-2 border-[#1F2937] border-t-cyan-500 rounded-full animate-spin"></div>
-        </div>
-      </div>
-    );
-  }
-
   useEffect(() => {
     const urgentChannel = supabase.channel('global:urgent_alerts')
       .on('system', { event: '*' }, (payload) => {
@@ -102,6 +92,20 @@ export default function AppLayout({ children }) {
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, []);
+
+  // Loading gate lives below every hook: returning before the effects above
+  // changed the hook count between renders the moment isInitialized flipped,
+  // which is a rules-of-hooks violation and left the realtime subscription
+  // unregistered on the first paint.
+  if (!isInitialized) {
+    return (
+      <div className="min-h-screen bg-[#0B0F19] flex items-center justify-center">
+        <div className="w-64 h-64 border border-[#1F2937] rounded-xl flex items-center justify-center">
+          <div className="w-8 h-8 border-2 border-[#1F2937] border-t-cyan-500 rounded-full animate-spin"></div>
+        </div>
+      </div>
+    );
+  }
 
 
 
