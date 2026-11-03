@@ -274,13 +274,119 @@ function logErr(supabase: any, context: any, error: any, ctx: any) {
 }
 
 function logEnd(supabase: any, context: any, data: any, ctx: any) {
+  // Phase 160: this was an empty body called from twelve request paths, so
+  // nothing was ever recorded on completion. Persist a completion trace through
+  // the same `events_ax2024` sink `logToEvents` uses, via waitUntil so it never
+  // delays the response.
+  try {
+    const run = supabase.from("events_ax2024").insert({
+      type: "request_completed",
+      payload: { ...context, data }
+    });
+    if (ctx && typeof ctx.waitUntil === "function") {
+      ctx.waitUntil(Promise.resolve(run).catch(() => {}));
+    }
+  } catch (err: any) {
+    console.error("logEnd failed", err);
+  }
 }
+
+// Attachment policy for the intake form. Mirrors the limits enforced by
+// /api/v1/chat/upload-auth so the two upload paths cannot drift apart.
+const ATTACHMENT_MAX_BYTES = 5 * 1024 * 1024;
+const ATTACHMENT_ALLOWED_MIME = ["image/png", "image/jpeg", "application/pdf"];
 
 function validateAttachment(file: any) {
-   return { valid: true, error: "" };
+  // Phase 160: this used to `return { valid: true, error: "" }` unconditionally,
+  // so the reject branch at the intake call site was unreachable and any file
+  // type or size was accepted and base64-inlined into the request.
+  if (!file || typeof file !== "object") {
+    return { valid: false, error: "Attachment is missing or malformed" };
+  }
+  const size = typeof file.size === "number" ? file.size : NaN;
+  if (!Number.isFinite(size) || size <= 0) {
+    return { valid: false, error: "Attachment has no readable size" };
+  }
+  if (size > ATTACHMENT_MAX_BYTES) {
+    return { valid: false, error: `Attachment exceeds ${ATTACHMENT_MAX_BYTES} bytes` };
+  }
+  const mime = typeof file.type === "string" ? file.type.toLowerCase() : "";
+  if (!ATTACHMENT_ALLOWED_MIME.includes(mime)) {
+    return { valid: false, error: `Unsupported attachment type: ${mime || "unknown"}` };
+  }
+  return { valid: true, error: "" };
 }
 
-async function handleStaleTicketSweep(env: Env) {
+/**
+ * Encode bytes to base64 without spreading the whole buffer into
+ * `String.fromCharCode(...)`. The spread form throws RangeError
+ * ("Maximum call stack size exceeded") on inputs past a few hundred KB, which
+ * turned a large-but-legal intake attachment into a 500.
+ */
+function bytesToBase64(bytes: Uint8Array): string {
+  const CHUNK = 0x8000;
+  let binary = "";
+  for (let i = 0; i < bytes.length; i += CHUNK) {
+    binary += String.fromCharCode.apply(null, Array.from(bytes.subarray(i, i + CHUNK)) as any);
+  }
+  return btoa(binary);
+}
+
+/**
+ * POST-cron stale ticket sweep (runs every 15 minutes).
+ *
+ * Phase 160: this was an empty `async function` registered on the 15-minute
+ * cron, so four `ctx.waitUntil()` jobs fired 96 times a day and did nothing.
+ * It now flags open tickets that have gone past their first-response SLA and
+ * have no operator activity, writing one audit event per ticket.
+ */
+async function handleStaleTicketSweep(env: Env): Promise<number> {
+  const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
+
+  let thresholdMinutes = 60;
+  if (env.STATUS_KV) {
+    const raw = await env.STATUS_KV.get("email_prefs_global");
+    if (raw) {
+      try {
+        const prefs = JSON.parse(raw);
+        if (typeof prefs.stale_sweep_minutes === "number" && prefs.stale_sweep_minutes > 0) {
+          thresholdMinutes = prefs.stale_sweep_minutes;
+        }
+      } catch (e: any) { /* malformed prefs fall back to the default */ }
+    }
+  }
+
+  const cutoff = new Date(Date.now() - thresholdMinutes * 60 * 1000).toISOString();
+
+  const { data: staleTickets, error } = await supabase
+    .from("support_tickets")
+    .select("id, subject, priority, updated_at")
+    .eq("status", "open")
+    .lt("updated_at", cutoff);
+
+  if (error) {
+    console.error("[handleStaleTicketSweep] query failed", error.message);
+    return 0;
+  }
+  if (!staleTickets || staleTickets.length === 0) return 0;
+
+  let flagged = 0;
+  for (const ticket of staleTickets) {
+    const { error: eventError } = await supabase.from("events_ax2024").insert({
+      type: "ticket_stale_sweep",
+      payload: {
+        ticket_id: ticket.id,
+        subject: ticket.subject,
+        priority: ticket.priority,
+        last_activity: ticket.updated_at,
+        threshold_minutes: thresholdMinutes,
+        timestamp: new Date().toISOString()
+      }
+    });
+    if (!eventError) flagged++;
+  }
+
+  return flagged;
 }
 
 
@@ -1391,6 +1497,11 @@ async function reprocessIntakePayload(payload: any, env: Env): Promise<any> {
     return { success: true };
 }
 
+// Exported for unit tests: these two guards are the only thing standing between
+// an intake POST and an unbounded base64 inline, so they get direct coverage
+// rather than being exercised only through the multipart intake route.
+export { validateAttachment, bytesToBase64, handleStaleTicketSweep };
+
 export default {
 
   async scheduled(event: ScheduledEvent, env: Env, ctx: ExecutionContext): Promise<void> {
@@ -2414,23 +2525,31 @@ export default {
     if (url.pathname === "/api/v1/email/inbound" && request.method === "POST") {
       try {
         const rawBody = await request.clone().text();
-        const signature = request.headers.get("X-Emailit-Signature") || request.headers.get("X-EmailIt-Signature");
+        const signature = request.headers.get("X-Emailit-Signature") || request.headers.get("X-EmailIt-Signature") || "";
 
-        if (signature && env.EMAILIT_WEBHOOK_SECRET) {
-          // The signature format is expected to be `t=${timestamp},v1=${hash}`
-          let isValid = false;
-          const [tPart, v1Part] = signature.split(",");
-          const timestamp = tPart?.split("=")[1];
-          const hash = v1Part?.split("=")[1];
+        // Phase 160: this guard used to be `if (signature && env.EMAILIT_WEBHOOK_SECRET)`,
+        // which meant "calling with no signature header" bypassed verification
+        // entirely, and an unbound secret silently disabled it for everyone.
+        // Inbound mail creates tickets and messages, so it now fails closed.
+        const relayOk = await authorizeInternalRelay(request, env);
+        if (!relayOk) {
+          if (!env.EMAILIT_WEBHOOK_SECRET) {
+            return new Response(JSON.stringify({ error: "EMAIL_INBOUND_SECRET_UNCONFIGURED" }), {
+              status: 503, headers: getCorsHeaders(env, request)
+            });
+          }
+          if (!signature) {
+            return new Response(JSON.stringify({ error: "Missing webhook signature" }), {
+              status: 401, headers: getCorsHeaders(env, request)
+            });
+          }
 
-          isValid = await EmailDispatchManager.verifyEmailItSignature(rawBody, signature, env.EMAILIT_WEBHOOK_SECRET);
-          if (!isValid) {
-            const fallbackValid = await verifyEmailItWebhookSignature(rawBody, signature, env.EMAILIT_WEBHOOK_SECRET);
-            if (!fallbackValid) {
-               return new Response(JSON.stringify({ error: "Invalid webhook signature" }), {
-                 status: 401, headers: getCorsHeaders(env, request)
-               });
-            }
+          const primaryValid = await EmailDispatchManager.verifyEmailItSignature(rawBody, signature, env.EMAILIT_WEBHOOK_SECRET);
+          const fallbackValid = primaryValid ? true : await verifyEmailItWebhookSignature(rawBody, signature, env.EMAILIT_WEBHOOK_SECRET);
+          if (!fallbackValid) {
+            return new Response(JSON.stringify({ error: "Invalid webhook signature" }), {
+              status: 401, headers: getCorsHeaders(env, request)
+            });
           }
         }
 
@@ -2482,8 +2601,32 @@ export default {
     }
 
     if (url.pathname === "/api/v1/email/webhook" && request.method === "POST") {
+      // Phase 160: this was the unauthenticated twin of /api/onyx/email/webhook.
+      // It mutated `ticket_messages.metadata.delivery_status` on any POST, so a
+      // bounce/delivery event for any message id could be forged by anyone.
+      // Same credential set as its sibling: a provider MAC over the raw body, or
+      // the internal relay signature for first-party callers.
       try {
-        const payload: any = await request.json();
+        // Read through a clone: `authorizeInternalRelay` → `validateInternalSignature`
+        // clones the request to hash its bytes, and a Request whose body has already
+        // been consumed cannot be cloned (`TypeError: Body has already been read`).
+        const rawBody = await request.clone().text();
+        const signature = request.headers.get("X-Emailit-Signature") || request.headers.get("X-EmailIt-Signature") || "";
+
+        const relayOk = await authorizeInternalRelay(request, env);
+        let providerOk = false;
+        if (!relayOk) {
+          if (!env.EMAILIT_WEBHOOK_SECRET) {
+            // Refusing is the correct state when the secret is unbound.
+            return new Response(JSON.stringify({ error: "EMAIL_WEBHOOK_SECRET_UNCONFIGURED" }), { status: 503, headers: getCorsHeaders(env, request) });
+          }
+          providerOk = await EmailDispatchManager.verifyEmailItSignature(rawBody, signature, env.EMAILIT_WEBHOOK_SECRET);
+        }
+        if (!relayOk && !providerOk) {
+          return new Response(JSON.stringify({ error: "INVALID_SIGNATURE" }), { status: 401, headers: getCorsHeaders(env, request) });
+        }
+
+        const payload: any = JSON.parse(rawBody || "{}");
         const { message_id, event } = payload;
 
         if (!message_id || !event) {
@@ -2517,6 +2660,11 @@ export default {
 
 
     if (url.pathname === "/email/daily-summary" && request.method === "POST") {
+        // Phase 160: unauthenticated — anyone could trigger a full executive
+        // digest mail blast from @axim.io. Internal relay (or HMAC) only.
+        if (!(await authorizeInternalRelay(request, env))) {
+          return new Response(JSON.stringify({ error: "UNAUTHORIZED_DIGEST_TRIGGER" }), { status: 401, headers: getCorsHeaders(env, request) });
+        }
         const success = await generateAndSendExecutiveDigest(env);
         return new Response(JSON.stringify({ success }), { status: success ? 200 : 500, headers: getCorsHeaders(env, request) });
     }
@@ -3441,36 +3589,6 @@ if (url.pathname === "/api/v1/tickets/callback" && request.method === "POST") {
     }
 
 
-    if (url.pathname === "/api/v1/tickets/callback" && request.method === "POST") {
-      if (!(await authorizeInternalRelay(request, env))) {
-        return new Response(JSON.stringify({ error: "UNAUTHORIZED_INTERLOCK_CALLBACK" }), {
-          status: 401, headers: getCorsHeaders(env, request)
-        });
-      }
-
-      try {
-        const payload: any = await request.json();
-        const { ticketId, patchDetails, commitSha } = payload;
-
-        const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
-
-        // Inject incoming code patches natively into the JSONB metadata column range
-        await supabase.from("ticket_messages").insert({
-          ticket_id: ticketId,
-          sender_id: "the_coding_lab_agent",
-          message_body: `**[🛠️ CODE-LEVEL PATCH RECORD ATTACHED BY EXTERNAL APPS]**\n\nAutonomous workspace branch created for commit: \`${commitSha}\`. Review patch workspace proposals immediately.`,
-          metadata: { patch_delta: patchDetails, source_interlock: "the_coding_lab" }
-        });
-
-        return new Response(JSON.stringify({ success: true, processed: true }), {
-          status: 200, headers: { "Content-Type": "application/json", ...getCorsHeaders(env, request) }
-        });
-      } catch (err: any) {
-        return new Response(JSON.stringify({ error: err.message }), {
-          status: 500, headers: getCorsHeaders(env, request)
-        });
-      }
-    }
     if (url.pathname === "/batch-triage") {
       return handleBatchTriage(request, env, ctx);
     }
@@ -3988,58 +4106,6 @@ ${messages.map((m: any) => `[${m.sender_id}]:${m.message_body}`).join("\n")}`;
       }
     }
 
-    if (url.pathname === "/api/v1/actions/rca/finalize" && request.method === "POST") {
-      const authHeader = request.headers.get("Authorization") || "";
-      const token = authHeader.replace("Bearer ", "").trim();
-      if (!token) {
-        return new Response(JSON.stringify({ error: "Unauthorized" }), { status: 401, headers: getCorsHeaders(env, request) });
-      }
-
-      try {
-        const payload: any = await request.json();
-        const { rcaLogId, notes } = payload;
-
-        if (!rcaLogId) {
-          return new Response(JSON.stringify({ error: "Missing rcaLogId" }), { status: 400, headers: getCorsHeaders(env, request) });
-        }
-
-        const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
-
-        const { data: log, error: fetchErr } = await supabase.from("hitl_audit_logs").select("*").eq("id", rcaLogId).single();
-        if (fetchErr || !log) throw new Error("RCA log not found");
-
-        const updatedPayload = { ...(log.payload || {}), notes: notes || "", finalized_at: new Date().toISOString() };
-
-        const { error: updateErr } = await supabase.from("hitl_audit_logs").update({
-          status: 'finalized',
-          payload: updatedPayload
-        }).eq("id", rcaLogId);
-
-        if (updateErr) throw updateErr;
-
-        if (log.support_ticket_id) {
-           await supabase.from("ticket_messages").insert({
-             ticket_id: log.support_ticket_id,
-             sender_id: "onyx_system",
-             message_body: `**[RCA FINALIZED]**
-
-The Root Cause Analysis has been finalized by an operator.
-
-**Notes:**
-${notes}`,
-             is_internal_note: true
-           });
-        }
-
-        return new Response(JSON.stringify({ success: true, finalized: true }), {
-          status: 200, headers: { "Content-Type": "application/json", ...getCorsHeaders(env, request) }
-        });
-      } catch (err: any) {
-        return new Response(JSON.stringify({ error: err.message }), {
-          status: 500, headers: { "Content-Type": "application/json", ...getCorsHeaders(env, request) }
-        });
-      }
-    }
 
     if (url.pathname === "/api/v1/hitl/action" && request.method === "GET") {
       const token = url.searchParams.get("token");
@@ -5124,7 +5190,7 @@ async function handleWebhookIntake(request: Request, env: Env, ctx: any): Promis
         }
 
         const buffer = await file.arrayBuffer();
-        attachmentBase64 = btoa(String.fromCharCode(...new Uint8Array(buffer)));
+        attachmentBase64 = bytesToBase64(new Uint8Array(buffer));
         attachmentMime = file.type;
 
         // Store file details to upload after ticket creation
@@ -8392,21 +8458,99 @@ async function handleChatbaseBridge(request: Request, env: Env, ctx: any): Promi
 }
 
 
+/**
+ * POST /api/v1/actions/rca/finalize
+ *
+ * Phase 160: this route used to be wired to a handler that (a) never checked
+ * authentication and (b) read `ticketId`/`summary` while the only caller
+ * (`RCADocumentBlock.jsx`) sends `rcaLogId`/`notes`. The result was a silent
+ * no-op that still answered `{ success: true }`, so operators saw
+ * "RCA document successfully finalized and locked" for an RCA that was never
+ * finalized. The hardened sibling handler that read the right fields had been
+ * registered ~300 lines further down and was therefore unreachable.
+ *
+ * Contract: operator session required; body `{ rcaLogId, notes }`.
+ * A missing signing/webhook secret is not a reason to open the route — there is
+ * no shared secret here, so a real Supabase session is the only credential.
+ */
 async function handleRCAResolution(request: Request, env: Env, ctx: any): Promise<Response> {
-  const payload: any = await request.json();
-  const { ticketId, summary } = payload;
-  const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
-
-  const { data: ticket } = await supabase.from("support_tickets").select("organization_id").eq("id", ticketId).single();
-
-  if (env.KB_CACHE) {
-    const tenantKey = `rag_context_${ticket?.organization_id || "default"}`;
-    ctx.waitUntil(
-      env.KB_CACHE.delete(tenantKey)
-        .then(() => console.log(`[KV Cache] Cleared stale context cache: ${tenantKey}`))
-        .catch((err: any) => console.warn(`[KV Cache] Invalidation fault: ${err.message}`))
-    );
+  const token = (request.headers.get("Authorization") || "").replace("Bearer ", "").trim();
+  if (!token) {
+    return new Response(JSON.stringify({ error: "Missing operator session" }), { status: 401, headers: getCorsHeaders(env, request) });
   }
 
-  return new Response(JSON.stringify({ success: true }), { status: 200, headers: getCorsHeaders(env, request) });
+  const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
+  const { data: { user }, error: authError } = await supabase.auth.getUser(token);
+  if (authError || !user) {
+    return new Response(JSON.stringify({ error: "INVALID_SESSION" }), { status: 403, headers: getCorsHeaders(env, request) });
+  }
+
+  let payload: any;
+  try {
+    payload = await request.json();
+  } catch (e: any) {
+    return new Response(JSON.stringify({ error: "Invalid JSON payload" }), { status: 400, headers: getCorsHeaders(env, request) });
+  }
+
+  const { rcaLogId, notes } = payload || {};
+  if (!rcaLogId) {
+    return new Response(JSON.stringify({ error: "Missing rcaLogId" }), { status: 400, headers: getCorsHeaders(env, request) });
+  }
+  if (typeof notes !== "string" || notes.trim() === "") {
+    return new Response(JSON.stringify({ error: "Investigation notes are required before finalizing an RCA" }), { status: 400, headers: getCorsHeaders(env, request) });
+  }
+
+  const { data: log, error: fetchErr } = await supabase
+    .from("hitl_audit_logs")
+    .select("*")
+    .eq("id", rcaLogId)
+    .single();
+  if (fetchErr || !log) {
+    return new Response(JSON.stringify({ error: "RCA log not found" }), { status: 404, headers: getCorsHeaders(env, request) });
+  }
+
+  const finalizedAt = new Date().toISOString();
+  const updatedPayload = {
+    ...(log.payload || {}),
+    notes,
+    finalized_at: finalizedAt,
+    finalized_by: user.id,
+  };
+
+  const { error: updateErr } = await supabase
+    .from("hitl_audit_logs")
+    .update({ status: "finalized", payload: updatedPayload })
+    .eq("id", rcaLogId);
+  if (updateErr) {
+    return new Response(JSON.stringify({ error: "Failed to finalize RCA", details: updateErr.message }), { status: 500, headers: getCorsHeaders(env, request) });
+  }
+
+  if (log.support_ticket_id) {
+    await supabase.from("ticket_messages").insert({
+      ticket_id: log.support_ticket_id,
+      sender_id: "onyx_system",
+      message_body: `**[RCA FINALIZED]**\n\nThe Root Cause Analysis has been finalized by an operator.\n\n**Notes:**\n${notes}`,
+      is_internal_note: true,
+    });
+
+    const { data: ticket } = await supabase
+      .from("support_tickets")
+      .select("organization_id")
+      .eq("id", log.support_ticket_id)
+      .single();
+
+    if (env.KB_CACHE) {
+      const tenantKey = `rag_context_${ticket?.organization_id || "default"}`;
+      ctx.waitUntil(
+        env.KB_CACHE.delete(tenantKey)
+          .then(() => console.log(`[KV Cache] Cleared stale context cache: ${tenantKey}`))
+          .catch((err: any) => console.warn(`[KV Cache] Invalidation fault: ${err.message}`))
+      );
+    }
+  }
+
+  return new Response(JSON.stringify({ success: true, finalized: true, rcaLogId, finalized_at: finalizedAt }), {
+    status: 200,
+    headers: { "Content-Type": "application/json", ...getCorsHeaders(env, request) },
+  });
 }
