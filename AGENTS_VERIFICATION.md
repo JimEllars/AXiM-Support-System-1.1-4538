@@ -11,6 +11,15 @@ output. The standard this file holds itself to is the one in
 
 ---
 
+## Appendix index
+
+Each change set now gets its own file so parallel branches stop conflicting on this one
+(the working agreement records three rebase conflicts caused by appending here):
+
+| Date | Phase | File |
+|---|---|---|
+| 2026-11-03 | 160 — unauthenticated mutation surface closed | [`AGENTS_VERIFICATION.d/2026-11-03-phase-160.md`](AGENTS_VERIFICATION.d/2026-11-03-phase-160.md) |
+
 ## 2026-11-02 — Phase 159: internal trust boundary + AI consolidation completion
 
 **Branch:** `fix/support-phase-159-trust-boundary-and-ai-consolidation`

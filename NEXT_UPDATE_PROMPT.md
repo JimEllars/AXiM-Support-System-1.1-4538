@@ -1,3 +1,25 @@
+# Phase 160 Completed (2026-11-03)
+- **Unauthenticated Mutation Surface Closed**: `POST /api/v1/actions/rca/finalize`, `POST /api/v1/email/webhook`, `POST /api/v1/email/inbound` and `POST /email/daily-summary` no longer accept anonymous callers. Details and line ranges in `AGENTS_VERIFICATION.d/2026-11-03-phase-160.md`.
+- **RCA Finalize Contract Repaired**: the reachable handler read `{ ticketId, summary }` while `RCADocumentBlock.jsx` sends `{ rcaLogId, notes }`, so it returned `{ success: true }` without finalizing anything. It now requires a real operator session and updates `hitl_audit_logs`. The hardened duplicate handler that read the right fields was ~300 lines below and unreachable; it has been deleted.
+- **Fail-Open Inbound Webhook Fixed**: `if (signature && env.EMAILIT_WEBHOOK_SECRET)` meant "no header" == "authorized". Now fails closed with `401`/`503`.
+- **Dead Duplicate Routes Removed**: the second `POST /api/v1/tickets/callback` (no `ticketId` guard, no telemetry) and the second `/api/v1/actions/rca/finalize`.
+- **`validateAttachment` Implemented**: was `return { valid: true }` unconditionally, so the intake reject branch was unreachable. Now 5 MB cap + png/jpeg/pdf allow-list.
+- **Chunked Base64 Encoder**: `btoa(String.fromCharCode(...new Uint8Array(buffer)))` threw `RangeError` at 1 MB, turning a legal attachment into a 500.
+- **`handleStaleTicketSweep` Implemented**: was an empty function on the 15-minute cron (96 no-op runs/day).
+- **Migration Version Collisions Resolved**: `20260901000000_team_profiles.sql` → `…000001`, `20261001000000_egress_webhook_tables.sql` → `…000001`. Supabase keys `schema_migrations` on the version, so the second file in each pair was never applied.
+- **`wrangler.toml` Placeholder Bindings Replaced**: `fake-status-kv-id-for-now` / `fake-hitl-kv-id-for-now` passed `--dry-run` (shape-only check) but would fail a real deploy. Now explicit `REPLACE_WITH_…` markers, guarded by `test/wrangler-config.test.js`.
+- **Frontend Test Suite Un-bluffed**: `npm test` was running the edge worker's 16 test files (120 tests) because `vite.config.js` had no `test.include`. Now scoped to `src/**`; frontend is 4 files / 20 tests of real frontend code (`SLABadge`, `sanitize`, `edgeWorkerUrl`).
+
+# Phase 160 Next Priorities
+- **Deploy blockers, in order.** (1) Create the real `STATUS_KV` and `HITL_KV` namespaces and substitute the `REPLACE_WITH_…` ids — `handleStaleTicketSweep` and the HITL token store both depend on them. (2) Bind `EMAILIT_WEBHOOK_SECRET` and point the EmailIt webhook at it *before* deploying, because `/api/v1/email/inbound` and `/api/v1/email/webhook` now 401 unsigned callers.
+- **`robot_fault_logs` does not exist.** No migration creates `public.robot_fault_logs` and no code references it. `/api/v1/robotics/fault-ingest` writes the flight recorder into `support_tickets.metadata.flight_recorder_data`, and `OnyxInvestigationPanel.jsx` only renders robotics when `ticket_ai_telemetry.category === 'Robotics / Hardware Fault'` — it never reads the metadata. Storage without display: pick the table or the metadata key and make the panel read it.
+- **Attachment bucket name mismatch.** `/api/v1/chat/upload-auth` signs uploads into `support-attachments`; the only bucket migration creates `ticket_attachments`. One is wrong and uploads will 404. Needs a product decision.
+- **Rate limit the unauthenticated read surfaces.** `GET /metrics` (queue depth, error counts) and `POST /api/v1/kb/search` (embeds the query, calls the AI failover chain) are open. `/api/v1/dlq/validate` is open too — validation-only, so DoS rather than data.
+- **Wire the stale sweep into escalation.** `handleStaleTicketSweep` now writes `ticket_stale_sweep` events, but nothing consums them. It should feed `handleSLASweep`'s escalation path, otherwise it is only visible in `events_ax2024`.
+- **`logErr` still only console.errors** — it never persists, so failed requests leave no durable trace even though `logEnd` now does.
+- **Replace the remaining stub tests**: `telemetry.test.js`, `health.test.js`, `command.test.js`, parts of `metrics.test.js`.
+- **Frontend coverage is 20 tests for 45 components.** `TicketDetail.jsx`, `MessageThread.jsx`, `LiveChatPanel.jsx` and `OnyxCommandHub.jsx` still have none.
+
 # Phase 159 Completed (2026-11-02)
 - **Internal Signature Replay Window**: `validateInternalSignature` now verifies `HMAC("<X-Axim-Timestamp>.<raw body>")` with a ±300s window, rejects non-hex signatures, and only tolerates timestamp-less v1 signatures until `AXIM_SIG_LEGACY_UNTIL` (default 2026-12-31) with a warning. Coding Lab dispatch sends `X-Axim-Timestamp` + `X-Axim-Signature-Version: 2`.
 - **Intake Bypass Removed**: `X-Axim-Default-Source: website[_authenticated_internal]` no longer skips HMAC verification on `POST /api/v1/webhooks/intake`; the header was client-controlled and unused by any legitimate caller.

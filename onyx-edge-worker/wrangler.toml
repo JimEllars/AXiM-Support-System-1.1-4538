@@ -21,9 +21,10 @@ SUPABASE_URL = "https://your-supabase-project.supabase.co"
 # - AXIM_SERVICE_KEY
 
 
-# 10:00 AM UTC executes at 4:00 AM CST / 5:00 AM CDT (Guarantees delivery before 5 AM CST)
+# 03:00 UTC is 21:00 CST / 22:00 CDT — the executive digest fires the previous
+# evening in Central time, not "10:00 AM UTC" as this comment previously claimed.
 [triggers]
-crons = ["0 3 * * *", "*/15 * * * *", "0 17 * * 5", "0 */8 * * *"] # Daily digest, 15-minute SLA sweeps, 10:00 AM UTC, 17:00 Friday, 8-hour shift handover
+crons = ["0 3 * * *", "*/15 * * * *", "0 17 * * 5", "0 */8 * * *"] # nightly digest 03:00 UTC, 15-minute SLA sweeps, Friday 17:00 UTC leaderboard, 8-hour shift handover
 
 # --- KV NAMESPACE BINDINGS ---
 
@@ -37,7 +38,12 @@ id = "ee8e5d5f13be45c9a91042cbd5e042df"
 
 [[kv_namespaces]]
 binding = "STATUS_KV"
-id = "fake-status-kv-id-for-now"
+# Phase 160: this was `fake-status-kv-id-for-now`. `wrangler deploy --dry-run`
+# only checks the shape of an id, so CI stayed green while a real deploy would
+# fail and every STATUS_KV read (email prefs, diagnostics cache, rate-limit
+# counters) would throw at runtime. Replace with the namespace from
+# `npx wrangler kv namespace list` / `npx wrangler kv namespace create STATUS_KV`.
+id = "REPLACE_WITH_STATUS_KV_NAMESPACE_ID"
 
 # --- R2 BUCKET BINDINGS ---
 [[r2_buckets]]
@@ -54,4 +60,7 @@ bucket_name = "axim-telemetry-archive"
 
 [[kv_namespaces]]
 binding = "HITL_KV"
-id = "fake-hitl-kv-id-for-now"
+# Phase 160: was `fake-hitl-kv-id-for-now`. Backs the 24h HITL approve/deny
+# tokens at `hitl_token:<token>`; with a placeholder id those tokens cannot be
+# written, so emailed HITL links 404 on click.
+id = "REPLACE_WITH_HITL_KV_NAMESPACE_ID"
