@@ -1,3 +1,24 @@
+# Phase 161 Completed (2026-11-04)
+- **Tailwind Was Not Running in Production Builds**: `vite.config.js` carried `css: { postcss: { plugins: [] } }`, which replaces Vite's `postcss.config.js` lookup and therefore skipped `tailwindcss` and `autoprefixer`. Every build emitted the `@tailwind`/`@apply` directives verbatim — 0.78 kB of CSS, app unstyled. Override removed; the build now emits 82.70 kB of utilities. Evidence in `AGENTS_VERIFICATION.d/2026-11-04-phase-161.md`.
+- **2.03 MB Dead Stylesheet Removed**: `src/App.jsx` imported `@questlabs/react-sdk/dist/style.css` while nothing renders a Quest component (1.56 MB of it is one base64 PNG). CSS went 2,032.41 kB → 82.70 kB (gzip 12.83).
+- **Frontend Test Gate Green Again**: the suite was red on a 2 vCPU box — vitest's hard-coded 60s fork-start timeout was being blown by four concurrent worker boots. Fixed by shrinking each fork's module graph (`react-icons` namespace imports) and pinning `maxWorkers: 2` in `vite.config.js`. 5 files / 24 tests.
+- **`react-icons` Tree-Shaking Restored**: `SafeIcon` read the barrel through a computed key, so the whole Feather set shipped. Six-entry explicit registry plus named imports across seven components.
+- **Three `${workerUrl}` Literal Bugs Fixed**: `TicketList.jsx`, `Customer360.jsx`, `RCADocumentBlock.jsx` returned the literal string `"${workerUrl}"` when `VITE_EDGE_WORKER_URL` was unset, so their requests could not resolve. All three use `src/lib/edgeWorkerUrl.js` now.
+- **Rate-Limit Buckets Namespaced**: `checkRateLimit` keyed on `ratelimit:${ip}` for every caller, so routes with different budgets shared one counter and one window. Keys are `ratelimit:${bucket}:${ip}`.
+- **Three Open Read Surfaces Budgeted**: `GET /metrics` (60/min), `POST /api/v1/kb/search` (20/min — it embeds the caller's query through Workers AI) and `POST /api/v1/dlq/validate` (20/min) now return `429` with `Retry-After`.
+- **Robotics Flight Recorder HUD No Longer Fabricates**: the panel printed "DIVERGENCE DETECTED"/"ELEVATED"/"E-STOP: YES" for every robotics ticket without reading `support_tickets.metadata.flight_recorder_data`. It now renders the ingested readings (escaped) and says so when there are none.
+
+# Phase 161 Next Priorities
+- **Deploy blockers, in order.** (1) Create the real `STATUS_KV` and `HITL_KV` namespaces and substitute the `REPLACE_WITH_…` ids — `handleStaleTicketSweep` and the HITL token store both depend on them. (2) Bind `EMAILIT_WEBHOOK_SECRET` and point the EmailIt webhook at it *before* deploying, because `/api/v1/email/inbound` and `/api/v1/email/webhook` now 401 unsigned callers.
+- **Drop `@questlabs/react-sdk` entirely.** The stylesheet is gone but the package is still a dependency; nothing imports it. Remove it in the next lockfile touch rather than bundling a dependency sweep into a code PR.
+- **Split the JS bundle.** 1,185 kB in one chunk (gzip 342 kB). Route-level `lazy()` on `MemoryHub`, `TicketDetail` and the modal set is the cheapest win; `framer-motion` and `recharts` are the two heaviest leaves and both are route-local.
+- **`robot_fault_logs` still does not exist.** The flight recorder lives in `support_tickets.metadata.flight_recorder_data` and the panel now reads it. Decide whether to promote it to a table before anything else writes a second shape.
+- **Attachment bucket name mismatch.** `/api/v1/chat/upload-auth` signs uploads into `support-attachments`; the only bucket migration creates `ticket_attachments`. One is wrong and uploads will 404. Needs a product decision.
+- **`logErr` still only console.errors** — it never persists, so failed requests leave no durable trace even though `logEnd` now does.
+- **Wire the stale sweep into escalation.** `handleStaleTicketSweep` writes `ticket_stale_sweep` events that nothing consumes; it should feed `handleSLASweep`'s escalation path.
+- **Replace the remaining stub tests**: `telemetry.test.js`, `health.test.js`, `command.test.js`, parts of `metrics.test.js`.
+- **Frontend coverage is 24 tests for 45 components.** `TicketDetail.jsx`, `MessageThread.jsx`, `LiveChatPanel.jsx` and `OnyxCommandHub.jsx` still have none.
+
 # Phase 160 Completed (2026-11-03)
 - **Unauthenticated Mutation Surface Closed**: `POST /api/v1/actions/rca/finalize`, `POST /api/v1/email/webhook`, `POST /api/v1/email/inbound` and `POST /email/daily-summary` no longer accept anonymous callers. Details and line ranges in `AGENTS_VERIFICATION.d/2026-11-03-phase-160.md`.
 - **RCA Finalize Contract Repaired**: the reachable handler read `{ ticketId, summary }` while `RCADocumentBlock.jsx` sends `{ rcaLogId, notes }`, so it returned `{ success: true }` without finalizing anything. It now requires a real operator session and updates `hitl_audit_logs`. The hardened duplicate handler that read the right fields was ~300 lines below and unreachable; it has been deleted.

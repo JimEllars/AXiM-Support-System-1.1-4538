@@ -469,15 +469,25 @@ const ToolCommandSchema = z.object({
 // Rate limiting map
 
 
+/**
+ * Fixed-window counter backed by Cloudflare KV.
+ *
+ * Phase 161: the KV key used to be `ratelimit:${ip}` for every caller, so two
+ * routes with different budgets shared one counter. A client that hit the
+ * 10/min chat path twice and the 5/min intake path four times was throttled on
+ * intake for traffic that had nothing to do with it, and whichever route wrote
+ * last decided when the window expired. The bucket is now part of the key.
+ */
 async function checkRateLimit(
   ip: string,
   maxRequests: number,
   env: Env,
   windowMs = 60000,
+  bucket = 'default',
 ): Promise<boolean> {
   if (!env.IDEMPOTENCY_KV) return true; // Failsafe pass if KV is unbound
 
-  const key = `ratelimit:${ip}`;
+  const key = `ratelimit:${bucket}:${ip}`;
   const currentCountStr = await env.IDEMPOTENCY_KV.get(key);
   const currentCount = currentCountStr ? parseInt(currentCountStr) : 0;
 
@@ -490,6 +500,43 @@ async function checkRateLimit(
   await env.IDEMPOTENCY_KV.put(key, (currentCount + 1).toString(), { expirationTtl: ttlSeconds });
 
   return true;
+}
+
+/**
+ * Phase 161: budgets for the read surfaces that used to be open to anyone with
+ * the worker URL.
+ */
+const READ_SURFACE_LIMITS = {
+  metrics: 60,
+  kbSearch: 20,
+  dlqValidate: 20,
+} as const;
+
+/**
+ * Applies a per-IP budget to an unauthenticated read route.
+ * Returns a 429 `Response` when the caller is over budget, otherwise `null` so
+ * the caller can continue.
+ */
+async function enforceReadRateLimit(
+  request: Request,
+  env: Env,
+  bucket: keyof typeof READ_SURFACE_LIMITS,
+): Promise<Response | null> {
+  const clientIP = request.headers.get("CF-Connecting-IP") || "unknown";
+  const allowed = await checkRateLimit(clientIP, READ_SURFACE_LIMITS[bucket], env, 60000, bucket);
+  if (allowed) return null;
+
+  return new Response(
+    JSON.stringify({ error: "Rate limit exceeded. Request throttled by Cloudflare KV.", bucket }),
+    {
+      status: 429,
+      headers: {
+        "Content-Type": "application/json",
+        "Retry-After": "60",
+        ...getCorsHeaders(env, request),
+      },
+    },
+  );
 }
 
 
@@ -2087,6 +2134,12 @@ export default {
 
     // --- PIPELINE VALIDATION TEST BRIEFING ENDPOINT ---
     if (url.pathname === "/metrics" || url.pathname === "/api/v1/metrics") {
+      // Phase 161: open read surface. Queue depth and error counts are useful
+      // reconnaissance and the R2 list() behind dlq_pending_count costs a
+      // subrequest per call, so it is budgeted per IP like every other route.
+      const metricsBudget = await enforceReadRateLimit(request, env, "metrics");
+      if (metricsBudget) return metricsBudget;
+
       try {
         const pingStart = performance.now();
         const latency = Math.round(performance.now() - pingStart);
@@ -2863,6 +2916,12 @@ export default {
 
     // --- EDGE VECTOR EMBEDDING KB SEARCH ROUTE ---
     if (url.pathname === "/api/v1/kb/search" && request.method === "POST") {
+      // Phase 161: this route embeds the caller's query (Workers AI) and then
+      // falls back to an ilike scan over knowledge_articles. Unauthenticated and
+      // unbudgeted, it was a free AI-billing and database amplifier.
+      const kbBudget = await enforceReadRateLimit(request, env, "kbSearch");
+      if (kbBudget) return kbBudget;
+
       try {
         const payload: any = await request.json();
         const { query } = payload;
@@ -3411,6 +3470,10 @@ if (url.pathname === "/api/v1/tickets/callback" && request.method === "POST") {
 
     // --- DLQ DRY RUN VALIDATOR ---
     if (url.pathname === "/api/v1/dlq/validate" && request.method === "POST") {
+      // Phase 161: validation-only, so the exposure is CPU/jsons work per call.
+      const dlqBudget = await enforceReadRateLimit(request, env, "dlqValidate");
+      if (dlqBudget) return dlqBudget;
+
       try {
         const payload = await request.json();
 
@@ -4875,7 +4938,7 @@ async function handlePublicWebIngress(request: Request, env: Env, ctx: any): Pro
   }
 
   const clientIP = request.headers.get("CF-Connecting-IP") || "unknown";
-  const isAllowed = await checkRateLimit(clientIP, 5, env);
+  const isAllowed = await checkRateLimit(clientIP, 5, env, 60000, 'ingress');
   if (!isAllowed) {
     return new Response(JSON.stringify({ error: "Rate limit exceeded. Request throttled by Cloudflare KV." }), {
       status: 429, headers: { "Content-Type": "application/json", ...getCorsHeaders(env, request) }
@@ -5107,7 +5170,7 @@ async function handleWebhookIntake(request: Request, env: Env, ctx: any): Promis
   const startTime = Date.now();
 
   const clientIP = request.headers.get("CF-Connecting-IP") || "unknown";
-  const isAllowed = await checkRateLimit(clientIP, 10, env);
+  const isAllowed = await checkRateLimit(clientIP, 10, env, 60000, 'ingress');
   if (!isAllowed) {
     return new Response(
       JSON.stringify({ error: "Rate limit exceeded. Request throttled by Cloudflare KV." }),
@@ -6147,7 +6210,7 @@ async function handleExecuteAction(request: Request, env: Env, ctx: any): Promis
   const startTime = Date.now();
 
   const clientIP = request.headers.get("CF-Connecting-IP") || "unknown";
-  const isAllowed = await checkRateLimit(clientIP, 5, env);
+  const isAllowed = await checkRateLimit(clientIP, 5, env, 60000, 'ingress');
   if (!isAllowed) {
     return new Response(JSON.stringify({ error: "Rate limit exceeded. Request throttled by Cloudflare KV." }), {
       status: 429, headers: { "Content-Type": "application/json", ...getCorsHeaders(env, request) }

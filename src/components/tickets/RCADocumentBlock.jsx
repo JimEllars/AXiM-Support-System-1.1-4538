@@ -3,10 +3,7 @@ import { FiFileText, FiLock, FiCheck, FiRefreshCw } from 'react-icons/fi';
 import toast from 'react-hot-toast';
 import { sanitizePayload } from "../../lib/sanitize";
 import { supabase } from '../../lib/supabaseClient';
-
-const getEdgeWorkerUrl = () => {
-    return import.meta.env.VITE_EDGE_WORKER_URL || "${workerUrl}";
-};
+import { getEdgeWorkerUrl } from '../../lib/edgeWorkerUrl';
 
 export default function RCADocumentBlock({ rcaRecord, onFinalized, ticketId, severity }) {
   const [notes, setNotes] = useState(rcaRecord?.content || rcaRecord?.payload?.notes || '');

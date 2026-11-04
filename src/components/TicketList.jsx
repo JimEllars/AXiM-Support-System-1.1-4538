@@ -5,19 +5,13 @@ import React, { useEffect, useState, useRef } from 'react';
 import { supabase } from '../lib/supabaseClient';
 
 import SafeIcon from '../common/SafeIcon';
-import * as FiIcons from 'react-icons/fi';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useTicketStore } from '../store/useTicketStore';
 import { useAuthStore } from '../store/useAuthStore';
 import SLABadge from './tickets/SLABadge';
 
-import { FiCopy, FiLayers } from 'react-icons/fi';
-const getEdgeWorkerUrl = () => {
-    return import.meta.env.VITE_EDGE_WORKER_URL || "${workerUrl}";
-};
-
-
-const { FiCircle, FiCheckCircle, FiClock, FiAlertCircle, FiSearch, FiCheckSquare, FiSquare, FiRefreshCw, FiGlobe, FiMail, FiMessageSquare } = FiIcons;
+import { FiCopy, FiLayers, FiCheckCircle, FiCircle, FiClock, FiAlertCircle, FiSearch, FiCheckSquare, FiSquare, FiRefreshCw, FiGlobe, FiMail, FiMessageSquare } from 'react-icons/fi';
+import { getEdgeWorkerUrl } from '../lib/edgeWorkerUrl';
 
 const statusStyles = {
   open: { icon: FiCircle, color: 'text-cyan-400', border: 'border-cyan-500/20 shadow-[0_0_10px_rgba(34,211,238,0.2)]', bg: 'bg-cyan-500/10' },
@@ -245,7 +239,7 @@ export default function TicketList({ onSelectTicket, activeQueue, statusFilter =
             <div className="py-24 text-center">
               <div className="flex flex-col items-center justify-center space-y-4 animate-in fade-in zoom-in duration-500">
                 <div className="w-16 h-16 rounded-full bg-zinc-900/50 border border-zinc-800 flex items-center justify-center text-zinc-600 shadow-inner">
-                  <SafeIcon icon={FiIcons.FiCheckCircle} className="text-2xl" />
+                  <SafeIcon icon={FiCheckCircle} className="text-2xl" />
                 </div>
                 <div className="space-y-1">
                   <h3 className="text-zinc-300 font-bold tracking-wide">{t('ticket_list.empty_title', 'Inbox Zero')}</h3>

@@ -1,5 +1,64 @@
 # Changelog
 
+## 2026-11-04 — Phase 161: build integrity, read-surface budgets, honest robotics HUD
+
+Full evidence, line ranges and before/after logs: `AGENTS_VERIFICATION.d/2026-11-04-phase-161.md`.
+
+### Build integrity
+
+- **Tailwind never ran in production builds.** `vite.config.js` set
+  `css: { postcss: { plugins: [] } }`, which replaces Vite's `postcss.config.js` lookup and
+  therefore skipped `tailwindcss` and `autoprefixer` entirely. Every build emitted
+  `@tailwind base; @tailwind components; @tailwind utilities;` verbatim — 0.78 kB of CSS with
+  `@apply` unexpanded, so the deployed app was unstyled. The vendor stylesheet in defect 2
+  made the CSS byte count look plausible and hid it. Now 82.70 kB of real utilities.
+- **A 2.03 MB unused stylesheet was in every visitor's critical path.**
+  `src/App.jsx` imported `@questlabs/react-sdk/dist/style.css` while nothing in `src/` renders
+  a Quest/HelpHub component. 1.56 MB of it is one base64 PNG for `.question-input-cont`.
+  Removed: CSS 2,032.41 kB → 82.70 kB (gzip 1,366.08 → 12.83 kB).
+- **Frontend test gate was red on a 2 vCPU runner.** vitest hard-codes a 60s worker-start
+  timeout; four forks booting `react-dom` + `happy-dom` at once exceeded it
+  (`Timeout waiting for worker to respond`). Fixed by shrinking each fork's module graph
+  (defect 4) and pinning `maxWorkers: 2`.
+- **`import * as FiIcons from 'react-icons/fi'` defeated tree-shaking in seven components.**
+  `SafeIcon` resolved icons through a computed key, so the whole Feather set shipped.
+  It now uses an explicit six-entry registry and every consumer imports icons by name.
+- **Three components built worker URLs from a literal `${workerUrl}` string**
+  (`TicketList.jsx`, `Customer360.jsx`, `RCADocumentBlock.jsx`). With
+  `VITE_EDGE_WORKER_URL` unset they requested `${workerUrl}/api/v1/...`. All three now use the
+  shared `getEdgeWorkerUrl()` helper.
+
+### Security
+
+- **Rate-limit counters were shared across routes.** `checkRateLimit` keyed on
+  `ratelimit:${ip}` only, so a 5/min route and a 10/min route shared one counter and one
+  window — whichever wrote last reset the other's expiry. Keys are now
+  `ratelimit:${bucket}:${ip}`.
+- **Three unauthenticated read surfaces were unbudgeted.** `GET /metrics` (queue depth, error
+  counts, an R2 `list()` per call), `POST /api/v1/kb/search` (Workers AI embedding + database
+  fallback — anonymous AI spend) and `POST /api/v1/dlq/validate` now carry per-IP budgets of
+  60/20/20 per minute and return `429` with `Retry-After`.
+
+### Correctness
+
+- **The Robotics flight recorder HUD rendered hard-coded fiction.** Any ticket whose
+  telemetry category was `Robotics / Hardware Fault` displayed "DIVERGENCE DETECTED",
+  "ELEVATED" and "E-Stop Triggered: YES" regardless of what the machine reported, while
+  `support_tickets.metadata.flight_recorder_data` — the payload `/api/v1/robotics/fault-ingest`
+  actually writes — was never read. The panel now loads the ticket metadata, renders the
+  scalar readings it received (escaped through `sanitizePayload`), shows the node id, and says
+  so when no recorder payload was ingested.
+
+### Tests
+
+- `src/components/tickets/OnyxInvestigationPanel.test.jsx` (4 cases) drives the real component
+  against a mocked Supabase client and pins the honest-HUD behaviour, including that no
+  fabricated strings survive.
+- `onyx-edge-worker/test/read-surface-rate-limit.test.js` (6 cases) drives `worker.fetch()` with
+  a real KV stub and fails if the bucket is dropped from the counter key again.
+- Frontend 4 files / 20 tests → 5 files / 24 tests. Worker 18 files / 143 tests → 19 / 149.
+
+---
 ## 2026-11-03 — Phase 160: unauthenticated mutation surface closed
 
 Full evidence, line ranges and red→green logs: `AGENTS_VERIFICATION.d/2026-11-03-phase-160.md`.

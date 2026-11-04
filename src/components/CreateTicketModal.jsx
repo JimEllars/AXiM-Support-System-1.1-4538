@@ -3,12 +3,10 @@ import { useTranslation } from "react-i18next";
 import { useTicketStore } from '../store/useTicketStore';
 import { motion, AnimatePresence } from 'framer-motion';
 import SafeIcon from '../common/SafeIcon';
-import * as FiIcons from 'react-icons/fi';
 import { onyxService } from '../services/onyxService';
 import toast from 'react-hot-toast';
 import { getEdgeWorkerUrl } from '../lib/edgeWorkerUrl';
-
-const { FiX, FiSend, FiLoader, FiCpu, FiTerminal, FiPlus } = FiIcons;
+import { FiX, FiSend, FiLoader, FiCpu, FiTerminal, FiPlus } from 'react-icons/fi';
 
 export default function CreateTicketModal({ isOpen, onClose, onSuccess }) {
   const { t } = useTranslation();

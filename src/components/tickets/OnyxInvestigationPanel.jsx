@@ -6,6 +6,9 @@ import { supabase } from '../../lib/supabaseClient';
 
 export default function OnyxInvestigationPanel({ ticketId }) {
   const [telemetry, setTelemetry] = useState(null);
+  const [flightRecorder, setFlightRecorder] = useState(null);
+  const [nodeId, setNodeId] = useState(null);
+  const [isRoboticsTicket, setIsRoboticsTicket] = useState(false);
   const [lastBriefedAt, setLastBriefedAt] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
   const [isDegraded, setIsDegraded] = useState(false);
@@ -27,6 +30,22 @@ export default function OnyxInvestigationPanel({ ticketId }) {
       } else {
           setIsDegraded(false);
       }
+
+      // Phase 161: `/api/v1/robotics/fault-ingest` stores the flight recorder on
+      // the ticket itself (`support_tickets.metadata.flight_recorder_data`), and
+      // this panel used to render hard-coded "DIVERGENCE DETECTED" strings while
+      // never reading the payload. Operators were reading fiction on urgent
+      // hardware tickets. The real payload is loaded here.
+      const { data: ticketRow } = await supabase
+        .from('support_tickets')
+        .select('metadata')
+        .eq('id', ticketId)
+        .maybeSingle();
+
+      const metadata = ticketRow?.metadata || null;
+      setFlightRecorder(metadata?.flight_recorder_data || null);
+      setNodeId(metadata?.node_id || null);
+      setIsRoboticsTicket(metadata?.is_robotics === true);
 
       const { data: briefingEvent } = await supabase
         .from('events_ax2024')
@@ -83,6 +102,18 @@ export default function OnyxInvestigationPanel({ ticketId }) {
   const edgeHeartbeats = telemetry?.EDGE_HEARTBEAT_INTERCEPTS || 0;
   const d1Timeouts = telemetry?.D1_TIMEOUT_COUNT || 0;
   const showDegradedSecondary = edgeHeartbeats > 0 || d1Timeouts > 0;
+
+  const isRobotics =
+    telemetry?.category === 'Robotics / Hardware Fault' || isRoboticsTicket || !!flightRecorder;
+
+  // The fleet gateway decides the flight-recorder schema, so the HUD lists the
+  // scalar readings it actually received instead of guessing field names.
+  const flightRecorderReadings =
+    flightRecorder && typeof flightRecorder === 'object' && !Array.isArray(flightRecorder)
+      ? Object.entries(flightRecorder).filter(([, value]) =>
+          ['string', 'number', 'boolean'].includes(typeof value)
+        )
+      : [];
 
   return (
     <div className="p-5 rounded-3xl bg-zinc-950/60 border border-slate-800/60 backdrop-blur-md space-y-4 font-mono">
@@ -146,16 +177,38 @@ export default function OnyxInvestigationPanel({ ticketId }) {
         </div>
       </div>
 
-      {telemetry?.category === 'Robotics / Hardware Fault' && (
+      {isRobotics && (
         <div className="mt-4 p-3 rounded-xl bg-red-900/20 border border-red-500/30">
-          <div className="flex items-center gap-2 mb-2 text-red-400 font-bold text-xs uppercase">
-            <FiAlertTriangle /> Robotics Flight Recorder HUD
+          <div className="flex items-center justify-between gap-2 mb-2">
+            <div className="flex items-center gap-2 text-red-400 font-bold text-xs uppercase">
+              <FiAlertTriangle /> Robotics Flight Recorder HUD
+            </div>
+            {nodeId && (
+              <span className="text-[10px] text-zinc-400">
+                node: <span className="text-zinc-200 font-bold">{sanitizePayload({ text: String(nodeId) }).text}</span>
+              </span>
+            )}
           </div>
-          <div className="text-[10px] text-zinc-300 font-mono space-y-1">
-            <div>Pitch/Roll Attitude: <span className="text-red-400">DIVERGENCE DETECTED</span></div>
-            <div>Servo Thermal: <span className="text-orange-400">ELEVATED</span></div>
-            <div>E-Stop Triggered: <span className="text-zinc-500">YES</span></div>
-          </div>
+
+          {flightRecorderReadings.length === 0 ? (
+            <div className="text-[10px] text-amber-400/90 font-mono leading-relaxed">
+              No flight recorder payload ingested for this ticket.
+              <span className="block text-zinc-500">
+                Waiting on `POST /api/v1/robotics/fault-ingest` or the fleet gateway relay.
+              </span>
+            </div>
+          ) : (
+            <dl className="grid grid-cols-2 md:grid-cols-3 gap-x-3 gap-y-1 text-[10px] font-mono">
+              {flightRecorderReadings.map(([key, value]) => (
+                <div key={key} className="flex items-baseline justify-between gap-2 border-b border-red-500/10 py-0.5">
+                  <dt className="text-zinc-500 uppercase truncate">{sanitizePayload({ text: String(key) }).text}</dt>
+                  <dd className="text-zinc-200 font-bold text-right">
+                    {sanitizePayload({ text: String(value) }).text}
+                  </dd>
+                </div>
+              ))}
+            </dl>
+          )}
         </div>
       )}
     </div>

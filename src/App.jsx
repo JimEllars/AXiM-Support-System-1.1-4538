@@ -1,7 +1,10 @@
 import React, { useEffect } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, useNavigate } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import '@questlabs/react-sdk/dist/style.css';
+// Phase 161: `@questlabs/react-sdk/dist/style.css` used to be imported here.
+// Nothing in `src/` renders a Quest/HelpHub component, so the only thing that
+// import did was push a 2.03 MB stylesheet (1.56 MB of it a single inline
+// base64 PNG for `.question-input-cont`) into every visitor's critical path.
 import Dashboard from './pages/Dashboard';
 import TicketDetail from './pages/TicketDetail';
 import Login from './pages/Login';

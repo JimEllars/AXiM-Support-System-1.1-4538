@@ -26,6 +26,18 @@ export default defineConfig({
       '*.{test,spec}.{js,jsx,ts,tsx}',
     ],
     exclude: ['node_modules/**', 'dist/**', 'onyx-edge-worker/**'],
+    // Phase 161: vitest hard-codes a 60s wait for a forked worker to report
+    // "started" (START_TIMEOUT in vitest/dist/chunks/cli-api). Each fork boots
+    // its own module graph — react-dom, @testing-library/react and happy-dom
+    // for the component suites — which costs ~35s per fork on a 2 vCPU runner.
+    // The default fork count is derived from the CPU count, so four files could
+    // land in four forks at once and the last one missed its deadline:
+    //   "[vitest-pool]: Failed to start forks worker ... Timeout waiting for
+    //    worker to respond"
+    // The suite was red on a 2 vCPU box while passing serially. Two workers
+    // keeps a ceiling on that contention without giving up parallelism.
+    maxWorkers: 2,
+    minWorkers: 1,
   },
   resolve: {
     alias: {
@@ -35,7 +47,15 @@ export default defineConfig({
   server: {
     historyApiFallback: true,
   },
-   build: {
+   // Phase 161: this block used to be `css: { postcss: { plugins: [] } }`.
+  // Supplying an explicit `plugins` array replaces Vite's postcss.config.js
+  // lookup, so `tailwindcss` and `autoprefixer` never ran: every production
+  // build emitted `@tailwind base; @tailwind components; @tailwind utilities;`
+  // verbatim (0.78 kB of CSS) and the app shipped completely unstyled. It hid
+  // for so long because the only stylesheet in the bundle was a 2.03 MB vendor
+  // import that made the output look plausible. Removing the override lets
+  // postcss.config.js do its job.
+  build: {
     outDir: 'dist',
     sourcemap: true,
     chunkSizeWarningLimit: 3000,
@@ -48,9 +68,7 @@ export default defineConfig({
       }
     }
   },
-  css: {
-    postcss: {
-      plugins: []
-    }
-  }
+  // No `css.postcss` override: an explicit `plugins` array (even an empty one)
+  // bypasses Vite's postcss.config.js lookup, and postcss.config.js is what
+  // wires up tailwindcss + autoprefixer.
 });
