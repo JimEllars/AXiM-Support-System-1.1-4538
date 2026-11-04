@@ -1,8 +1,6 @@
 import React, { useState, useEffect, memo } from 'react';
 import SafeIcon from '../../common/SafeIcon';
-import * as FiIcons from 'react-icons/fi';
-
-const { FiClock } = FiIcons;
+import { FiClock, FiGitPullRequest } from 'react-icons/fi';
 
 const SLABadge = ({ breachAt, status, metadata }) => {
   const [now, setNow] = useState(new Date());
@@ -20,7 +18,7 @@ const SLABadge = ({ breachAt, status, metadata }) => {
   if (status === 'Review-Patch-Pending') {
     return (
       <div aria-live="polite" role="status" className="px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest flex items-center gap-1.5 bg-cyan-500/20 text-cyan-400 ring-1 ring-inset ring-cyan-500/50 ring-opacity-20 shadow-[0_0_10px_rgba(6,182,212,0.2)] animate-pulse">
-        <SafeIcon icon={FiIcons.FiGitPullRequest || FiClock} className="text-xs" />
+        <SafeIcon icon={FiGitPullRequest || FiClock} className="text-xs" />
         PATCH REVIEW PENDING
       </div>
     );

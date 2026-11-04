@@ -1,14 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import SafeIcon from '../../common/SafeIcon';
-import * as FiIcons from 'react-icons/fi';
 import { useTicketStore } from '../../store/useTicketStore';
 import { useAuthStore } from '../../store/useAuthStore';
 import { onyxService } from '../../services/onyxService';
 import toast from 'react-hot-toast';
 import { trackEvent } from '../../lib/telemetry';
-
-const { FiCpu, FiX, FiCheck, FiAlertTriangle, FiLoader } = FiIcons;
+import { FiCpu, FiX, FiCheck, FiAlertTriangle, FiLoader } from 'react-icons/fi';
 
 export default function BatchTriageModal({isOpen, onClose }) {
   useEffect(() => {

@@ -5,10 +5,7 @@ import { useNavigate } from 'react-router-dom';
 
 import { FiPhoneCall } from 'react-icons/fi';
 import toast from 'react-hot-toast';
-
-const getEdgeWorkerUrl = () => {
-    return import.meta.env.VITE_EDGE_WORKER_URL || "${workerUrl}";
-};
+import { getEdgeWorkerUrl } from '../../lib/edgeWorkerUrl';
 
 
 export default function Customer360({ ticketId }) {
