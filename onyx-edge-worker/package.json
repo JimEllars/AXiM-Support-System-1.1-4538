@@ -18,6 +18,6 @@
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
     "build": "esbuild src/index.ts --bundle --outfile=dist/index.js --format=esm --target=es2022",
-    "test": "vitest"
+    "test": "vitest run"
   }
 }

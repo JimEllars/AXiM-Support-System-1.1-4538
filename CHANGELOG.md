@@ -1,5 +1,85 @@
 # Changelog
 
+## 2026-11-05 — Phase 162: worker schema drift, honest cron sweeps, route-level bundle split
+
+Full evidence, line ranges and before/after logs: `AGENTS_VERIFICATION.d/2026-11-05-phase-162.md`.
+
+### Frontend test gate
+
+- **The gate was red on worker boot, not on tests.** `npx vitest run` failed two files with
+  `Timeout waiting for worker to respond` while both pass when they start. `import('happy-dom')`
+  is 14 MB across 609 ESM files and measured 21s here; vitest's `START_TIMEOUT` is a hard-coded
+  60s. `fileParallelism: false` replaces Phase 161's `maxWorkers: 2`, which only capped the
+  contention. 24/24 green in 86s.
+
+### Worker schema drift (the reason several features "worked" but did nothing)
+
+- **Four columns the Worker writes were created by no migration**: `support_tickets.metadata`,
+  `support_tickets.resolved_at`, `support_tickets.category`, `hitl_audit_logs.metadata`. Each
+  miss failed a statement whose error the caller dropped. Consequences: the SLA breach guard
+  never persisted (breach email + internal note repeated every 15 minutes per ticket);
+  `resolve-from-coder` 500'd, which is the Coding Lab DLQ fault; robotics fault ingest never
+  created a ticket; the executive email bridge never executed a directive; CSAT returned 500.
+  New migration `20261601000000_worker_written_columns.sql`.
+- **Thirteen `events_ax2024` queries filtered on `timestamp`; the column is `created_at`.**
+  The nightly executive digest reported 0 autonomous escalations/recurrences, `/api/v1/health/*`
+  said `pending_initial_run` forever, the DLQ panel was always empty and the leaderboard's
+  renewals were always 0. All thirteen now use `created_at`.
+- **`Review-Patch-Pending` was never added to the `ticket_status` enum** even though the Coding
+  Lab callback writes it and `SLABadge.jsx` renders a badge for it, so the interlock failed at
+  its first step. Enum value added.
+- **Two intake paths inserted non-UUIDs into UUID columns** — the caller's email into
+  `customer_id` and the literal `"default"` into `organization_id`. The Chatbase bridge 500'd on
+  the first message of every new conversation. Resolved through `resolveCustomerId()` /
+  `uuidOrNull()`.
+- **CSAT was 404 on read and 500 on write**: it selected `assigned_to` (column is `assignee_id`),
+  then inserted `comment` (column is `comments`) plus two columns that did not exist. The
+  leaderboard queried `ticket_feedback`, which no migration creates, so every operator scored
+  `avg_csat: 0`.
+- **`escalate_breached_slas()` raised on every pg_cron run** — `priority != 'escalated'` (not an
+  enum member) and `assigned_to` (column is `assignee_id`). Rewritten with valid SQL and a
+  `priority <> 'urgent'` guard so it cannot double-note against the Worker sweep.
+
+### Autonomy honesty
+
+- **`handleSLASweep` escalated every breached ticket twice per run, then repeated it 96 times a
+  day.** Its first pass had no idempotency guard; the second pass's `metadata.sla_breached` guard
+  depended on the missing column. Merged into one pass that persists the flag first and skips the
+  note when that write fails.
+- **Department leads were looked up and then only logged.** The event claimed `notified_leads`
+  for people who were never emailed. The breach email now goes to those leads, operator as
+  fallback, and the event records the same list.
+- **The 1-hour SLA warning required both EmailIt and Resend keys** (`&&`), inverting the failover
+  chain — one configured provider sent nothing. Now `||`.
+- **`handleStaleTicketSweep` wrote an event nothing consumed.** It now escalates inline
+  (priority ≥ `high`, one internal note, one event) guarded by `metadata.stale_escalated_at`.
+- **`logErr` only `console.error`'d**, so failed requests left no durable trace while `logEnd`
+  did. It now persists a `request_error` event through `waitUntil`.
+- **`EmailDispatchManager` probed unconfigured providers** with `Bearer undefined`, which 401s,
+  trips the module-scoped breaker for five minutes and misreports an outage. It now routes
+  around a provider it has no key for.
+- **CGI probe patterns only matched the query string**, so `/?`-free path payloads passed. The
+  path and decoded path are now probe sources.
+- **Security health advertised a fail-closed gate as `"optional"`**; it now says
+  `"misconfigured"`.
+
+### Bundle
+
+- **Dead dependencies removed**: `echarts`, `echarts-for-react` (never imported; the analytics
+  panel uses `recharts`) and `@questlabs/react-sdk`. `package-lock.json` −1,421 lines.
+- **Route-level `React.lazy()` + one `Suspense` boundary.** Entry chunk **1,185.52 kB →
+  700.09 kB** (gzip 341.73 → 207.12); `Dashboard` (395.58 kB), `TicketDetail` (53.22 kB),
+  `PublicIntake` (19.61 kB), `MemoryHub` (11.69 kB) and `Login` (3.90 kB) are their own chunks.
+  The public `/submit` form no longer downloads the operator HUD, recharts or the chat panel.
+
+### Tests
+
+- `onyx-edge-worker/test/sla-autonomy.test.js` (new, 6 cases): stateful fake Supabase client
+  drives both crons twice and proves single escalation, lead routing, single-provider email
+  dispatch and the failed-guard path. Worker suite 149 → 160 tests across 19 → 20 files.
+- `edge-trust-boundary.test.js` 8 → 27 cases: CGI-in-path probes and `resolve-from-coder`
+  honouring `closed` with a `resolved` fallback.
+
 ## 2026-11-04 — Phase 161: build integrity, read-surface budgets, honest robotics HUD
 
 Full evidence, line ranges and before/after logs: `AGENTS_VERIFICATION.d/2026-11-04-phase-161.md`.

@@ -87,6 +87,15 @@ export class EmailDispatchManager {
     const now = Date.now();
     if (!options.from) options.from = this.defaultFromEmail;
 
+    // Phase 162: an unconfigured provider used to be *probed* with
+    // `Authorization: Bearer undefined`. That request always 401s, which tripped
+    // the shared breaker for five minutes and sent every subsequent message to
+    // Resend, and made the failure look like an EmailIt outage instead of a
+    // missing binding. Route around a provider we know we cannot use.
+    if (!this.emailitApiKey) {
+      return this.sendViaResend(options, 'EmailIt API key not configured');
+    }
+
     // Adopt any health state accumulated by other dispatch managers.
     this.isCircuitOpen = SHARED_BREAKER.isOpen;
     this.circuitCooldownUntil = SHARED_BREAKER.cooldownUntil;
@@ -185,6 +194,14 @@ export class EmailDispatchManager {
   }
 
   private async sendViaResend(options: EmailOptions, reason: string): Promise<DispatchResult> {
+    if (!this.resendApiKey) {
+      return {
+        success: false,
+        provider: 'resend',
+        error: `No email provider is configured (EmailIt skipped: ${reason})`
+      };
+    }
+
     const endpoint = `${this.secondaryBaseUrl}/emails`;
     const headers: Record<string, string> = {
       'Authorization': `Bearer ${this.resendApiKey}`,

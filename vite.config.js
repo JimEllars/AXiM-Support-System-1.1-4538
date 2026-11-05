@@ -26,18 +26,19 @@ export default defineConfig({
       '*.{test,spec}.{js,jsx,ts,tsx}',
     ],
     exclude: ['node_modules/**', 'dist/**', 'onyx-edge-worker/**'],
-    // Phase 161: vitest hard-codes a 60s wait for a forked worker to report
-    // "started" (START_TIMEOUT in vitest/dist/chunks/cli-api). Each fork boots
-    // its own module graph — react-dom, @testing-library/react and happy-dom
-    // for the component suites — which costs ~35s per fork on a 2 vCPU runner.
-    // The default fork count is derived from the CPU count, so four files could
-    // land in four forks at once and the last one missed its deadline:
+    // Phase 162: vitest hard-codes a 60s wait for a forked worker to report
+    // "started" (START_TIMEOUT = 6e4 in vitest/dist/chunks/cli-api). A fork
+    // reports "started" only after its test environment module is imported, and
+    // for the component suites that import is `happy-dom` — 14 MB across 609
+    // ESM files, measured at 21s cold on a 2 vCPU box. Phase 161 capped that at
+    // two concurrent forks, which was still enough contention to blow the
+    // deadline and report:
     //   "[vitest-pool]: Failed to start forks worker ... Timeout waiting for
     //    worker to respond"
-    // The suite was red on a 2 vCPU box while passing serially. Two workers
-    // keeps a ceiling on that contention without giving up parallelism.
-    maxWorkers: 2,
-    minWorkers: 1,
+    // while the tests themselves pass. There are five files and 24 tests here;
+    // cross-file parallelism buys seconds of test time and costs a 60s startup
+    // race. Serialise the files so the gate is deterministic on any runner.
+    fileParallelism: false,
   },
   resolve: {
     alias: {

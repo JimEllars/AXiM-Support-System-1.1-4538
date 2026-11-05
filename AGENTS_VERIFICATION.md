@@ -18,6 +18,7 @@ Each change set now gets its own file so parallel branches stop conflicting on t
 
 | Date | Phase | File |
 |---|---|---|
+| 2026-11-05 | 162 — worker schema drift, honest cron sweeps, route-level bundle split | [`AGENTS_VERIFICATION.d/2026-11-05-phase-162.md`](AGENTS_VERIFICATION.d/2026-11-05-phase-162.md) |
 | 2026-11-04 | 161 — build integrity, read-surface budgets, honest robotics HUD | [`AGENTS_VERIFICATION.d/2026-11-04-phase-161.md`](AGENTS_VERIFICATION.d/2026-11-04-phase-161.md) |
 | 2026-11-03 | 160 — unauthenticated mutation surface closed | [`AGENTS_VERIFICATION.d/2026-11-03-phase-160.md`](AGENTS_VERIFICATION.d/2026-11-03-phase-160.md) |
 
