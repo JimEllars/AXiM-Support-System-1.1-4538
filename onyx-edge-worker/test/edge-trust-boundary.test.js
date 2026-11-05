@@ -192,6 +192,49 @@ describe('internal signature trust boundary', () => {
     );
     expect(afterSunset.status).toBe(401);
   });
+
+  it('honours the terminal status the Coding Lab reports instead of forcing resolved', async () => {
+    // Phase 162: `status` was destructured from the callback and then ignored,
+    // so a Coding Lab run that closed the ticket left it in the open queue.
+    hoisted.calls.length = 0;
+    const body = JSON.stringify({ status: 'closed', resolutionNotes: 'merged upstream', completedAt: '2026-11-05T10:00:00Z' });
+    const ts = String(now());
+    const signature = await hmacHex(INTERNAL_KEY, `${ts}.${body}`);
+
+    const res = await worker.fetch(
+      await post('/api/v1/tickets/ticket-1/resolve-from-coder', body, {
+        'X-Axim-Signature': signature,
+        'X-Axim-Timestamp': ts,
+      }),
+      makeEnv(),
+      ctx()
+    );
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ success: true, status: 'closed' });
+    const ticketUpdate = hoisted.calls.find((c) => c.op === 'update' && c.args[0]?.resolved_at);
+    expect(ticketUpdate.args[0].status).toBe('closed');
+  });
+
+  it('falls back to resolved when the callback reports a status the enum cannot store', async () => {
+    hoisted.calls.length = 0;
+    const body = JSON.stringify({ status: 'shipped-to-prod', resolutionNotes: 'free text' });
+    const ts = String(now());
+    const signature = await hmacHex(INTERNAL_KEY, `${ts}.${body}`);
+
+    const res = await worker.fetch(
+      await post('/api/v1/tickets/ticket-1/resolve-from-coder', body, {
+        'X-Axim-Signature': signature,
+        'X-Axim-Timestamp': ts,
+      }),
+      makeEnv(),
+      ctx()
+    );
+
+    expect(await res.json()).toMatchObject({ success: true, status: 'resolved' });
+    const ticketUpdate = hoisted.calls.find((c) => c.op === 'update' && c.args[0]?.resolved_at);
+    expect(ticketUpdate.args[0].status).toBe('resolved');
+  });
 });
 
 describe('public intake cannot be unlocked by a spoofed source header', () => {
@@ -236,6 +279,11 @@ describe('PHP2Shell and traversal shielding', () => {
     '/api/v1/tickets?x=auto_prepend_file=/etc/passwd',
     '/api/v1/tickets?x=auto_append_file=/tmp/x.php',
     '/api/v1/tickets?%3f-d%20allow_url_include=1',
+    // Phase 162: the CGI patterns were only matched against the query string,
+    // so the same payloads placed in the path went through untouched.
+    '/api/v1/auto_prepend_file=/etc/passwd',
+    '/api/v1/tickets/disable_functions=exec',
+    '/api/v1/-d%20allow_url_include=1',
     '/api/v1/../../etc/passwd',
     '/api/v1/%2e%2e/%2e%2e/etc/passwd',
     '/wp-admin/setup-config.php',

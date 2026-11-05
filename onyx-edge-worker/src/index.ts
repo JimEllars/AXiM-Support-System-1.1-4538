@@ -270,7 +270,24 @@ async function logToEvents(supabase: any, context: any, type: string, message: s
 }
 
 function logErr(supabase: any, context: any, error: any, ctx: any) {
+  // Phase 162: this used to be `console.error` only, so a failed request left no
+  // durable trace — the Worker log is not queryable after the fact, which meant
+  // every 500 in this file was invisible unless someone happened to be tailing
+  // `wrangler tail`. Persist through the same `events_ax2024` sink as `logEnd`.
   console.error("logErr:", error);
+  try {
+    const message = error instanceof Error ? error.message : String(error);
+    const stack = error instanceof Error ? error.stack : undefined;
+    const run = supabase.from("events_ax2024").insert({
+      type: "request_error",
+      payload: { ...context, message, stack: stack || null }
+    });
+    if (ctx && typeof ctx.waitUntil === "function") {
+      ctx.waitUntil(Promise.resolve(run).catch(() => {}));
+    }
+  } catch (err: any) {
+    console.error("logErr persist failed", err);
+  }
 }
 
 function logEnd(supabase: any, context: any, data: any, ctx: any) {
@@ -295,6 +312,40 @@ function logEnd(supabase: any, context: any, data: any, ctx: any) {
 // /api/v1/chat/upload-auth so the two upload paths cannot drift apart.
 const ATTACHMENT_MAX_BYTES = 5 * 1024 * 1024;
 const ATTACHMENT_ALLOWED_MIME = ["image/png", "image/jpeg", "application/pdf"];
+
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * `support_tickets.organization_id` is `UUID REFERENCES organizations(id)`.
+ * Inbound payloads carry a tenant label ("default", "axim", a slug), and
+ * passing one of those straight into the insert fails the whole statement with
+ * 22P02. Keep the real UUID and drop anything else.
+ */
+function uuidOrNull(value: unknown): string | null {
+  return typeof value === "string" && UUID_PATTERN.test(value.trim()) ? value.trim() : null;
+}
+
+/**
+ * `support_tickets.customer_id` is `UUID REFERENCES contacts_ax2024(id)`.
+ * Several intake paths used to insert the caller's email address into it,
+ * which Postgres rejects with "invalid input syntax for type uuid" — so the
+ * insert failed and the ticket was never created. Resolve the address against
+ * the contact table and fall back to NULL (the email is preserved in metadata).
+ */
+async function resolveCustomerId(supabase: any, email: unknown): Promise<string | null> {
+  const normalized = typeof email === "string" ? email.trim() : "";
+  if (!normalized || !normalized.includes("@")) return null;
+  try {
+    const { data } = await supabase
+      .from("contacts_ax2024")
+      .select("id")
+      .eq("email", normalized)
+      .maybeSingle();
+    return data?.id ?? null;
+  } catch (err: any) {
+    return null;
+  }
+}
 
 function validateAttachment(file: any) {
   // Phase 160: this used to `return { valid: true, error: "" }` unconditionally,
@@ -337,8 +388,14 @@ function bytesToBase64(bytes: Uint8Array): string {
  *
  * Phase 160: this was an empty `async function` registered on the 15-minute
  * cron, so four `ctx.waitUntil()` jobs fired 96 times a day and did nothing.
- * It now flags open tickets that have gone past their first-response SLA and
- * have no operator activity, writing one audit event per ticket.
+ *
+ * Phase 162: it flagged stale tickets by inserting a `ticket_stale_sweep`
+ * event — and nothing ever read that event, so a ticket could sit untouched
+ * indefinitely while the sweep reported success. The escalation now happens
+ * inline, once per staleness episode (guarded by `metadata.stale_escalated_at`
+ * so a ticket that stays stale does not accumulate 96 notes a day): priority is
+ * lifted to at least `high`, an internal note is dropped in the thread and the
+ * event is still written for the executive digest.
  */
 async function handleStaleTicketSweep(env: Env): Promise<number> {
   const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
@@ -360,7 +417,7 @@ async function handleStaleTicketSweep(env: Env): Promise<number> {
 
   const { data: staleTickets, error } = await supabase
     .from("support_tickets")
-    .select("id, subject, priority, updated_at")
+    .select("id, subject, priority, updated_at, metadata")
     .eq("status", "open")
     .lt("updated_at", cutoff);
 
@@ -370,20 +427,61 @@ async function handleStaleTicketSweep(env: Env): Promise<number> {
   }
   if (!staleTickets || staleTickets.length === 0) return 0;
 
+  const ESCALATION_PRIORITIES = ["high", "urgent"];
   let flagged = 0;
+
   for (const ticket of staleTickets) {
-    const { error: eventError } = await supabase.from("events_ax2024").insert({
+    const metadata = ticket.metadata && typeof ticket.metadata === "object" ? ticket.metadata : {};
+    // One note per staleness episode. Without this guard the sweep re-noted
+    // every stale ticket on every 15-minute run -- 96 notes a day, which is
+    // what buried the real activity in these threads.
+    if (metadata.stale_escalated_at) continue;
+
+    const escalatedAt = new Date().toISOString();
+    const alreadyEscalated = ESCALATION_PRIORITIES.includes(ticket.priority);
+
+    const { error: updateError } = await supabase
+      .from("support_tickets")
+      .update({
+        priority: alreadyEscalated ? ticket.priority : "high",
+        metadata: {
+          ...metadata,
+          stale_escalated_at: escalatedAt,
+          stale_last_activity: ticket.updated_at,
+          stale_threshold_minutes: thresholdMinutes,
+        },
+      })
+      .eq("id", ticket.id);
+
+    if (updateError) {
+      console.error("[handleStaleTicketSweep] escalation update failed", updateError.message);
+      continue;
+    }
+
+    await supabase.from("ticket_messages").insert({
+      ticket_id: ticket.id,
+      sender_id: "onyx_system",
+      message_body:
+        `⚠️ **[STALE TICKET ESCALATION]** No operator activity for over ${thresholdMinutes} minutes ` +
+        `(last activity ${ticket.updated_at}). Priority is now **${alreadyEscalated ? ticket.priority : "high"}**.`,
+      is_internal_note: true,
+      metadata: { source: "autonomous_stale_cron_sweep" },
+    });
+
+    await supabase.from("events_ax2024").insert({
       type: "ticket_stale_sweep",
       payload: {
         ticket_id: ticket.id,
         subject: ticket.subject,
-        priority: ticket.priority,
+        priority: alreadyEscalated ? ticket.priority : "high",
         last_activity: ticket.updated_at,
         threshold_minutes: thresholdMinutes,
-        timestamp: new Date().toISOString()
+        escalated: true,
+        timestamp: escalatedAt
       }
     });
-    if (!eventError) flagged++;
+
+    flagged++;
   }
 
   return flagged;
@@ -566,106 +664,111 @@ async function handleSLASweep(env: Env, ctx?: any) {
     const now = new Date().toISOString();
     const oneHourFromNow = new Date(Date.now() + 60 * 60 * 1000).toISOString();
 
+    // Phase 162: this used to be two sequential passes over exactly the same
+    // rows. The first pass had no idempotency guard at all, so every 15-minute
+    // run re-noted every breached ticket forever; the second pass carried the
+    // `metadata.sla_breached` guard, but `support_tickets.metadata` was created
+    // by no migration, so the update that set the guard failed silently and the
+    // guard never took either. Net effect: unbounded duplicate internal notes on
+    // breached tickets and a repeat breach email every 15 minutes. One pass, one
+    // guard, one note, one email.
     const { data: breachedTickets, error: fetchError } = await supabase
       .from("support_tickets")
-      .select("id, subject, assigned_department")
+      .select("id, subject, priority, assigned_department, metadata, sla_breach_at")
       .in("status", ["open", "pending"])
       .lt("sla_breach_at", now);
 
-    if (!fetchError && breachedTickets && breachedTickets.length > 0) {
-      for (const ticket of breachedTickets) {
-        // Check ticket assigned_department to route correctly
-        const ticketDept = ticket.assigned_department || "General Support";
-
-        // Find lead/manager in this department
-        const { data: departmentLeads } = await supabase
-          .from("team_profiles")
-          .select("email, role")
-          .eq("department", ticketDept)
-          .in("role", ["lead", "manager", "admin"]);
-
-        let notifyEmails = ["james.ellars@axim.us.com"]; // fallback
-        if (departmentLeads && departmentLeads.length > 0) {
-            notifyEmails = departmentLeads.map(l => l.email);
-        }
-
-        // Autonomous Auto-Reassignment & Escalation
-        await supabase
-          .from("support_tickets")
-          .update({
-            priority: "urgent",
-            updated_at: now
-          })
-          .eq("id", ticket.id);
-
-        await supabase.from("ticket_messages").insert({
-          ticket_id: ticket.id,
-          sender_id: "onyx_system",
-          message_body: "⚠️ **[AUTONOMOUS SLA ESCALATION]** Ticket breached resolution deadline. Priority automatically upgraded to **URGENT** and reassigned to **Urgent Escalations**.",
-          is_internal_note: true,
-          metadata: { source: "autonomous_sla_cron_sweep" }
-        });
-
-        await supabase.from("events_ax2024").insert({
-          type: "sla_breach_auto_escalated",
-          payload: { ticket_id: ticket.id, timestamp: now, notified_leads: notifyEmails }
-        });
-      }
+    if (fetchError) {
+      console.error("[handleSLASweep] breach query failed", fetchError.message);
     }
 
-    // Check for actively breached SLAs
-    const { data: activelyBreachedTickets } = await supabase
-      .from("support_tickets")
-      .select("*")
-      .in("status", ["open", "pending"])
-      .lt("sla_breach_at", now); // Past deadline
+    const dispatchManager = new EmailDispatchManager(
+      env.EMAILIT_API_KEY || (env as any).EMAIL_IT_API_KEY || '',
+      env.RESEND_API_KEY || '',
+      "governance@axim.us.com"
+    );
 
-    if (activelyBreachedTickets && activelyBreachedTickets.length > 0) {
-      for (const ticket of activelyBreachedTickets) {
-        if (ticket.metadata?.sla_breached === true) continue;
+    for (const ticket of breachedTickets || []) {
+      const metadata = ticket.metadata && typeof ticket.metadata === "object" ? ticket.metadata : {};
+      if (metadata.sla_breached === true) continue;
 
-        // 1. Elevate priority to urgent and tag breached
-        await supabase.from("support_tickets").update({
+      // Route to the leads of the ticket's own department. Before this, the
+      // leads were looked up and then only written into the audit event, so the
+      // event claimed `notified_leads` for people who were never emailed.
+      const ticketDept = ticket.assigned_department || "General Support";
+      const { data: departmentLeads } = await supabase
+        .from("team_profiles")
+        .select("email, role")
+        .eq("department", ticketDept)
+        .in("role", ["lead", "manager", "admin"]);
+
+      const leadEmails = (departmentLeads || []).map((l: any) => l.email).filter(Boolean);
+      const escalationRecipients = leadEmails.length > 0 ? leadEmails : ["james.ellars@axim.us.com"];
+
+      const { error: escalateError } = await supabase
+        .from("support_tickets")
+        .update({
           priority: "urgent",
-          metadata: { ...ticket.metadata, sla_breached: true, sla_breached_at: now }
-        }).eq("id", ticket.id);
+          updated_at: now,
+          metadata: {
+            ...metadata,
+            sla_breached: true,
+            sla_breached_at: now,
+            sla_escalated_to: escalationRecipients,
+          },
+        })
+        .eq("id", ticket.id);
 
-        // 2. Audit Event
-        await supabase.from("events_ax2024").insert({
-          type: "sla_breach_escalation",
-          payload: { ticket_id: ticket.id, subject: ticket.subject }
-        });
+      if (escalateError) {
+        // Do not write the note when the flag could not be persisted: that is
+        // what turned a single missed update into an infinite note loop.
+        console.error("[handleSLASweep] escalation update failed", escalateError.message);
+        continue;
+      }
 
-        // 3. Dispatch critical email to Mr. Ellars
-        const dispatchManager = new EmailDispatchManager(
-          env.EMAILIT_API_KEY || (env as any).EMAIL_IT_API_KEY || '',
-          env.RESEND_API_KEY || '',
-          "governance@axim.us.com"
-        );
+      await supabase.from("ticket_messages").insert({
+        ticket_id: ticket.id,
+        sender_id: "onyx_system",
+        message_body:
+          `⚠️ **[AUTONOMOUS SLA ESCALATION]** Ticket breached its resolution deadline. ` +
+          `Priority automatically upgraded to **URGENT** and escalated to **${ticketDept}** leads.`,
+        is_internal_note: true,
+        metadata: { source: "autonomous_sla_cron_sweep" }
+      });
 
-        if (ctx) {
-          ctx.waitUntil(
-            dispatchManager.send({
-              from: "AXiM Support System <support@axim.us.com>",
-              to: "james.ellars@axim.us.com",
-              bcc: "jrellars@gmail.com",
-              subject: `🚨 [SLA BREACH] Ticket #${ticket.id.slice(0, 8)} Escalated to URGENT`,
-              html: `
-                <h2 style="color: #f43f5e;">SLA Breach Auto-Escalation</h2>
-                <p>Ticket <strong>#${ticket.id.slice(0, 8)}</strong> has breached its SLA and has been automatically escalated to <strong>URGENT</strong>.</p>
-                <p><strong>Subject:</strong> ${ticket.subject}</p>
-                <a href="https://support.axim.us.com/tickets/${ticket.id}">Action Required Now</a>
-              `
-            }).catch((err: any) => console.error("SLA Breach Email Failed:", err))
-          );
+      await supabase.from("events_ax2024").insert({
+        type: "sla_breach_auto_escalated",
+        payload: {
+          ticket_id: ticket.id,
+          subject: ticket.subject,
+          department: ticketDept,
+          notified_leads: escalationRecipients,
+          timestamp: now
         }
+      });
+
+      if (ctx) {
+        ctx.waitUntil(
+          dispatchManager.send({
+            from: "AXiM Support System <support@axim.us.com>",
+            to: escalationRecipients,
+            bcc: "jrellars@gmail.com",
+            subject: `🚨 [SLA BREACH] Ticket #${ticket.id.slice(0, 8)} Escalated to URGENT`,
+            html: `
+              <h2 style="color: #f43f5e;">SLA Breach Auto-Escalation</h2>
+              <p>Ticket <strong>#${ticket.id.slice(0, 8)}</strong> has breached its SLA and has been automatically escalated to <strong>URGENT</strong>.</p>
+              <p><strong>Subject:</strong> ${ticket.subject}</p>
+              <p><strong>Department:</strong> ${ticketDept}</p>
+              <a href="https://support.axim.us.com/tickets/${ticket.id}">Action Required Now</a>
+            `
+          }).catch((err: any) => console.error("SLA Breach Email Failed:", err))
+        );
       }
     }
-
     // 1-Hour SLA Warning Radar
     const { data: warningTickets } = await supabase
       .from("support_tickets")
-      .select("*")
+      .select("id, subject, priority, metadata, sla_breach_at")
       .in("status", ["open", "pending"])
       .gt("sla_breach_at", now)
       .lte("sla_breach_at", oneHourFromNow);
@@ -686,8 +789,11 @@ async function handleSLASweep(env: Env, ctx?: any) {
             }
           });
 
-          if (env.EMAILIT_API_KEY && env.RESEND_API_KEY) {
-            const emailManager = new EmailDispatchManager(env.EMAILIT_API_KEY, env.RESEND_API_KEY);
+          // Phase 162: this required BOTH provider keys to be set before any
+          // warning was sent, which inverts the circuit breaker — with only
+          // EmailIt or only Resend configured, no warning ever left the Worker.
+          // EmailDispatchManager already fails over between whichever exist.
+          if (env.EMAILIT_API_KEY || env.RESEND_API_KEY) {
             const remainingMs = new Date(ticket.sla_breach_at).getTime() - new Date().getTime();
             const remainingMins = Math.floor(remainingMs / 60000);
 
@@ -703,7 +809,7 @@ async function handleSLASweep(env: Env, ctx?: any) {
 
             // Non-blocking fire and forget email dispatch
             if (ctx) {
-                ctx.waitUntil(emailManager.send({
+                ctx.waitUntil(dispatchManager.send({
                     from: "AXiM Support System <support@axim.us.com>",
                     to: "james.ellars@axim.us.com",
                     bcc: "jrellars@gmail.com",
@@ -1276,19 +1382,19 @@ async function sendDailySystemProgressReport(env: Env): Promise<boolean> {
   const { count: autoEscalations } = await supabase
     .from("events_ax2024")
     .select("id", { count: "exact", head: true })
-    .gte("timestamp", past24h)
+    .gte("created_at", past24h)
     .eq("type", "sla_breach_auto_escalated");
 
   const { count: autoKbEntries } = await supabase
     .from("events_ax2024")
     .select("id", { count: "exact", head: true })
-    .gte("timestamp", past24h)
+    .gte("created_at", past24h)
     .eq("type", "cron_kb_curation_executed");
 
   const { count: autoResolutions } = await supabase
     .from("events_ax2024")
     .select("id", { count: "exact", head: true })
-    .gte("timestamp", past24h)
+    .gte("created_at", past24h)
     .eq("type", "ticket_autoresolved_inactivity");
 
   const htmlBody = `
@@ -1547,7 +1653,10 @@ async function reprocessIntakePayload(payload: any, env: Env): Promise<any> {
 // Exported for unit tests: these two guards are the only thing standing between
 // an intake POST and an unbounded base64 inline, so they get direct coverage
 // rather than being exercised only through the multipart intake route.
-export { validateAttachment, bytesToBase64, handleStaleTicketSweep };
+// Exported for the autonomy suites: both sweeps are pure cron entry points that
+// were previously untestable, which is how the SLA pass kept re-noting the same
+// breached tickets for phases without anyone noticing.
+export { validateAttachment, bytesToBase64, handleStaleTicketSweep, handleSLASweep };
 
 export default {
 
@@ -1625,7 +1734,7 @@ export default {
       // Malformed percent-encoding is itself a probe signature.
       return new Response(JSON.stringify({ error: "Forbidden: Malformed URL encoding" }), { status: 403, headers: { "Content-Type": "application/json", ...getCorsHeaders(env, request) } });
     }
-    const cgiProbeSources = [searchLower, decodedSearchLower];
+    const cgiProbeSources = [searchLower, decodedSearchLower, pathLower, decodedPathLower];
     const isSuspiciousCgi = cgiProbeSources.some((s) =>
       s.includes('?-d') || s.includes('%3f-d') || s.includes('auto_prepend_file') || s.includes('auto_append_file') || s.includes('allow_url_include') || s.includes('disable_functions') || s.includes('safe_mode')
     );
@@ -1853,16 +1962,16 @@ export default {
         const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
         const past24h = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
 
-        const { data: heartbeat } = await supabase.from("events_ax2024").select("timestamp").eq("type", "cron_heartbeat").order("timestamp", { ascending: false }).limit(1).maybeSingle();
-        const { data: kbCurate } = await supabase.from("events_ax2024").select("timestamp, payload").eq("type", "cron_kb_curation_executed").order("timestamp", { ascending: false }).limit(1).maybeSingle();
+        const { data: heartbeat } = await supabase.from("events_ax2024").select("created_at").eq("type", "cron_heartbeat").order("created_at", { ascending: false }).limit(1).maybeSingle();
+        const { data: kbCurate } = await supabase.from("events_ax2024").select("created_at, payload").eq("type", "cron_kb_curation_executed").order("created_at", { ascending: false }).limit(1).maybeSingle();
 
         return new Response(JSON.stringify({
           success: true,
           automation_engine: {
             status: "active",
             daily_sweeps: 6,
-            last_heartbeat: heartbeat?.timestamp || null,
-            last_kb_curation: kbCurate?.timestamp || null,
+            last_heartbeat: heartbeat?.created_at || null,
+            last_kb_curation: kbCurate?.created_at || null,
             kb_items_curated_last_run: kbCurate?.payload?.curated_count || 0
           },
           timestamp: new Date().toISOString()
@@ -2072,26 +2181,26 @@ export default {
         const { count: rateLimitBlocks } = await supabase
           .from("events_ax2024")
           .select("id", { count: "exact", head: true })
-          .gte("timestamp", past24h)
+          .gte("created_at", past24h)
           .eq("type", "rate_limit_exceeded");
 
         const { count: briefingExports } = await supabase
           .from("events_ax2024")
           .select("id", { count: "exact", head: true })
-          .gte("timestamp", past24h)
+          .gte("created_at", past24h)
           .eq("type", "thread_executive_briefing_exported");
 
         const { count: staleReminders } = await supabase
           .from("events_ax2024")
           .select("id", { count: "exact", head: true })
-          .gte("timestamp", past24h)
+          .gte("created_at", past24h)
           .eq("type", "stale_hitl_reminder_dispatched");
 
         const { data: lastCron } = await supabase
           .from("events_ax2024")
-          .select("payload, timestamp")
+          .select("payload, created_at")
           .eq("type", "cron_heartbeat")
-          .order("timestamp", { ascending: false })
+          .order("created_at", { ascending: false })
           .limit(1)
           .maybeSingle();
 
@@ -2102,11 +2211,11 @@ export default {
             edge_worker: { status: "healthy", runtime: "cloudflare_workers" },
             cron_schedule: {
               schedule: "0 8 * * *",
-              last_executed: lastCron?.timestamp || null,
+              last_executed: lastCron?.created_at || null,
               status: lastCron ? "active" : "pending_initial_run"
             },
             edge_shield: {
-              hmac_verification: !!env.EMAILIT_WEBHOOK_SECRET ? "enforced" : "optional",
+              hmac_verification: !!env.EMAILIT_WEBHOOK_SECRET ? "enforced" : "misconfigured",
               rate_limit_cap: "30_req_min",
               rate_limit_blocks_24h: rateLimitBlocks || 0
             },
@@ -2218,7 +2327,9 @@ export default {
         return new Response(JSON.stringify({
           success: true,
           status: "shield_active",
-          hmac_verification: hmacActive ? "enforced" : "optional",
+          // Phase 160 made the inbound email webhooks fail closed, so a
+          // missing secret is a misconfiguration, not an "optional" shield.
+          hmac_verification: hmacActive ? "enforced" : "misconfigured",
           rate_limiting: kvActive ? "30_req_per_min" : "disabled",
           timestamp: new Date().toISOString()
         }), {
@@ -2236,13 +2347,13 @@ export default {
         const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
         const { data: lastCron } = await supabase
           .from("events_ax2024")
-          .select("timestamp")
+          .select("created_at")
           .eq("type", "cron_heartbeat")
-          .order("timestamp", { ascending: false })
+          .order("created_at", { ascending: false })
           .limit(1)
           .maybeSingle();
 
-        const lastRunISO = lastCron?.timestamp || null;
+        const lastRunISO = lastCron?.created_at || null;
         const isHealthy = lastRunISO ? (Date.now() - new Date(lastRunISO).getTime()) < 26 * 60 * 60 * 1000 : false;
 
         return new Response(JSON.stringify({
@@ -3082,7 +3193,7 @@ export default {
           .from("events_ax2024")
           .select("*")
           .eq("type", "dlq_queue_inserted")
-          .order("timestamp", { ascending: false })
+          .order("created_at", { ascending: false })
           .limit(20);
 
         let count = 0;
@@ -3291,7 +3402,18 @@ ${threadText}`;
            });
 
            // Mark as MERGED (using status 'closed' or custom)
-           await supabase.from("support_tickets").update({ status: "closed", metadata: { merge_target: primary_ticket_id } }).eq("id", secondaryId);
+           // Phase 162: this replaced the whole JSONB document, so merging a
+           // duplicate erased its flight-recorder payload, chatbase id and SLA
+           // flags. Read-modify-write instead.
+           const { data: mergeTargetTicket } = await supabase
+             .from("support_tickets")
+             .select("metadata")
+             .eq("id", secondaryId)
+             .maybeSingle();
+           await supabase.from("support_tickets").update({
+             status: "closed",
+             metadata: { ...((mergeTargetTicket && mergeTargetTicket.metadata) || {}), merge_target: primary_ticket_id }
+           }).eq("id", secondaryId);
         }
 
         return new Response(JSON.stringify({ success: true }), { status: 200, headers: getCorsHeaders(env, request) });
@@ -3755,9 +3877,19 @@ if (url.pathname === "/api/v1/tickets/callback" && request.method === "POST") {
       const { status: ticketStatus, resolutionNotes, completedAt } = payload as any;
       const supabaseAdmin = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
 
+      // Phase 162: `ticketStatus` was destructured and then ignored — every
+      // callback forced `resolved`, so a Coding Lab run that finished the work
+      // and closed the ticket left it sitting in the open queue for an operator
+      // to close again. Honour the reported terminal state, and ignore anything
+      // that is not one of the two terminal enum values (`ticket_status` has no
+      // room for a callback-supplied free-text status).
+      const RESOLUTION_STATUSES = ["resolved", "closed"];
+      const effectiveStatus = RESOLUTION_STATUSES.includes(ticketStatus) ? ticketStatus : "resolved";
+      const resolvedAt = completedAt || new Date().toISOString();
+
       const { error: updateError } = await supabaseAdmin
         .from("support_tickets")
-        .update({ status: 'resolved', resolved_at: completedAt })
+        .update({ status: effectiveStatus, resolved_at: resolvedAt, updated_at: resolvedAt })
         .eq("id", ticketId);
 
       if (updateError) {
@@ -3768,14 +3900,14 @@ if (url.pathname === "/api/v1/tickets/callback" && request.method === "POST") {
         ticket_id: ticketId,
         sender_id: "AXiM Coder Core",
         message_body: resolutionNotes || "Resolved by automated coder core.",
-        created_at: completedAt || new Date().toISOString()
+        created_at: resolvedAt
       });
 
       if (insertError) {
         return new Response(JSON.stringify({ error: "Failed to insert resolution message", details: insertError.message }), { status: 500, headers: { "Content-Type": "application/json", ...getCorsHeaders(env, request) } });
       }
 
-      return new Response(JSON.stringify({ success: true, message: "Ticket marked resolved from Coder Core" }), { status: 200, headers: { "Content-Type": "application/json", ...getCorsHeaders(env, request) } });
+      return new Response(JSON.stringify({ success: true, status: effectiveStatus, message: "Ticket marked resolved from Coder Core" }), { status: 200, headers: { "Content-Type": "application/json", ...getCorsHeaders(env, request) } });
     }
 
     if (url.pathname === "/api/v1/robotics/fault-ingest" && request.method === "POST") {
@@ -5054,12 +5186,16 @@ async function handlePublicWebIngress(request: Request, env: Env, ctx: any): Pro
       const ticketPayload = {
         subject: decryptedPayload.subject,
         description: decryptedPayload.description || "",
-        customer_id: decryptedPayload.customer_email,
+        // Phase 162: this was the customer's email address, inserted into a UUID
+        // column, so every direct-ingest submission failed with 22P02 and threw
+        // "Failed to insert ticket into database".
+        customer_id: await resolveCustomerId(supabase, decryptedPayload.customer_email),
         priority: "medium",
         status: "open",
         metadata: {
            source: decryptedPayload.source || "website_support_form",
            customer_name: decryptedPayload.customer_name,
+           customer_email: decryptedPayload.customer_email,
            workflow_category: decryptedPayload.workflow_category
         },
         sla_breach_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString()
@@ -5071,7 +5207,7 @@ async function handlePublicWebIngress(request: Request, env: Env, ctx: any): Pro
       }
 
       // Send Confirmation Email
-      if (env.EMAILIT_API_KEY && env.RESEND_API_KEY) {
+      if (env.EMAILIT_API_KEY || env.RESEND_API_KEY) {
         const emailManager = new EmailDispatchManager(env.EMAILIT_API_KEY, env.RESEND_API_KEY);
         ctx.waitUntil(emailManager.send({
           from: "AXiM Support <support@axim.us.com>",
@@ -7433,19 +7569,30 @@ async function handleLeaderboardAnalytics(request: Request, env: Env, ctx: any):
       .from("events_ax2024")
       .select("payload")
       .eq("type", "memory_manual_renewed")
-      .gte("timestamp", thirtyDaysAgo);
-
-  // 4. Fetch CSAT scores
-  const { data: feedbacks } = await supabase
-      .from("ticket_feedback")
-      .select("operator_id, rating")
       .gte("created_at", thirtyDaysAgo);
+
+  // 4. Fetch CSAT scores.
+  //    Phase 162: this queried `ticket_feedback`, a table no migration creates,
+  //    so the request errored, `feedbacks` was null and every operator scored
+  //    avg_csat 0 and forfeited the CSAT bonus. Feedback actually lands in
+  //    `product_feedback` keyed by ticket, so attribute it through the ticket's
+  //    assignee.
+  const { data: feedbacks } = await supabase
+      .from("product_feedback")
+      .select("ticket_id, rating")
+      .gte("created_at", thirtyDaysAgo);
+
+  const feedbackTicketIds = [...new Set((feedbacks || []).map((f: any) => f.ticket_id).filter(Boolean))];
+  const { data: feedbackTickets } = feedbackTicketIds.length > 0
+      ? await supabase.from("support_tickets").select("id, assignee_id").in("id", feedbackTicketIds)
+      : { data: [] as any[] };
+  const assigneeByTicket = new Map((feedbackTickets || []).map((t: any) => [t.id, t.assignee_id]));
 
   const opStats = operators.map(op => {
       const opContributes = (contributions || []).filter(c => c.author_id === op.id).length;
       const opRenewals = (renewals || []).filter(r => r.payload?.operator_id === op.id).length;
 
-      const opFeedbacks = (feedbacks || []).filter(f => f.operator_id === op.id);
+      const opFeedbacks = (feedbacks || []).filter((f: any) => assigneeByTicket.get(f.ticket_id) === op.id);
       let avg_csat = 0;
       if (opFeedbacks.length > 0) {
           avg_csat = opFeedbacks.reduce((sum, f) => sum + f.rating, 0) / opFeedbacks.length;
@@ -8280,7 +8427,7 @@ async function handleCSATFeedback(request: Request, env: Env, ctx: any): Promise
     const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
 
     // Check if ticket exists
-    const { data: ticket, error: ticketError } = await supabase.from('support_tickets').select('id, assigned_to').eq('id', ticketId).single();
+    const { data: ticket, error: ticketError } = await supabase.from('support_tickets').select('id, assignee_id').eq('id', ticketId).single();
     if (ticketError || !ticket) {
         return new Response(JSON.stringify({ error: "TICKET_NOT_FOUND" }), { status: 404, headers: { 'Content-Type': 'application/json', ...getCorsHeaders(env, request) } });
     }
@@ -8301,10 +8448,14 @@ async function handleCSATFeedback(request: Request, env: Env, ctx: any): Promise
       }
     }
 
+    // Phase 162: `comment` is not a column on product_feedback (`comments` is),
+    // and `sentiment` / `customer_email` did not exist at all, so every CSAT
+    // submission returned a 500 DATABASE_ERROR. Columns added by
+    // 20261601000000; the field name is fixed here.
     const { error } = await supabase.from('product_feedback').insert({
       ticket_id: ticketId,
       rating: rating,
-      comment: feedback_text || "",
+      comments: feedback_text || "",
       sentiment: sentimentScore,
       customer_email: payload.customer_email || null,
       created_at: new Date().toISOString()
@@ -8424,10 +8575,19 @@ async function handleChatbaseBridge(request: Request, env: Env, ctx: any): Promi
         description: firstMsg,
         status: 'open',
         priority: 'medium',
-        customer_id: customerEmail,
-        organization_id: body.metadata?.tenant_id || "default",
+        // Phase 162: both of these were type errors that made the Chatbase
+        // bridge 500 on the first message of every new conversation —
+        // `customer_id` received an email string (column is UUID) and
+        // `organization_id` received the literal "default" (column is a UUID FK).
+        customer_id: await resolveCustomerId(supabase, body.customer_email),
+        organization_id: uuidOrNull(body.metadata?.tenant_id),
         sla_breach_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
-        metadata: { source: "chatbase_bridge", chatbase_conversation_id: convId, tags: ["live-chat", "chatbase"] }
+        metadata: {
+          source: "chatbase_bridge",
+          chatbase_conversation_id: convId,
+          customer_email: customerEmail,
+          tags: ["live-chat", "chatbase"]
+        }
       }).select().single();
 
       if (error || !newTicket) throw error;
