@@ -514,7 +514,15 @@ async function logTelemetry(supabase: any, ticketId: string, aiResult: any, env:
 
     // We will attempt to insert everything. If the table doesn't have provider/model/latency_ms/tokens_used,
     // Supabase will throw an error, which we will catch and then do a fallback insert with just metadata.
-    const { error } = await supabase.from("ticket_ai_telemetry").insert(payload);
+    //
+    // Phase 163: `20261701000000_phase163_schema_reconciliation.sql` adds those
+    // columns, so the 42703 fallback below should never fire. It is kept as a
+    // guard for an environment that has not applied that migration yet.
+    // `ticket_id` is the primary key, so a second triage of the same ticket used
+    // to fail with 23505 and log nothing; upsert annotates the existing row.
+    const { error } = await supabase
+      .from("ticket_ai_telemetry")
+      .upsert(payload, { onConflict: "ticket_id" });
     if (error && error.code === '42703') { // undefined_column
        console.warn("Schema missing strict telemetry columns, falling back to metadata JSONB object.");
        const fallbackPayload = {
@@ -525,7 +533,7 @@ async function logTelemetry(supabase: any, ticketId: string, aiResult: any, env:
          confidence_score: aiResult.confidence,
          metadata: aiResult.metrics
        };
-       await supabase.from("ticket_ai_telemetry").insert(fallbackPayload);
+       await supabase.from("ticket_ai_telemetry").upsert(fallbackPayload, { onConflict: "ticket_id" });
     } else if (error) {
        console.error("Failed to log telemetry", error);
     }
@@ -1174,10 +1182,13 @@ async function handleAutoKnowledgeCurationSweep(env: Env): Promise<number> {
 
   let curatedCount = 0;
   for (const ticket of resolvedTickets) {
-    // Check if already curated
+    // Check if already curated.
+    // Phase 163: `ticket_ai_telemetry` is keyed on `ticket_id` (it is the primary
+    // key); there is no `id` column, so this select raised 42703 and the
+    // "already curated" guard never fired.
     const { data: existing } = await supabase
       .from("ticket_ai_telemetry")
-      .select("id")
+      .select("ticket_id")
       .eq("ticket_id", ticket.id)
       .eq("is_curated", true)
       .maybeSingle();
@@ -1201,14 +1212,21 @@ async function handleAutoKnowledgeCurationSweep(env: Env): Promise<number> {
       }
     }
 
-    await supabase.from("ticket_ai_telemetry").insert({
+    // Phase 163: the column names here were a mixture that matched nothing —
+    // `category` / `sentiment` / `confidence` against `suggested_category` /
+    // `analyzed_sentiment` / `confidence_score` — plus a `metadata` column the
+    // table did not have, so every curation insert raised 42703 and
+    // `curatedCount` only ever counted attempts. `ticket_id` is also the primary
+    // key, so a ticket that had already been triaged collided on 23505; upsert
+    // is the correct shape for "annotate this ticket's telemetry row".
+    await supabase.from("ticket_ai_telemetry").upsert({
       ticket_id: ticket.id,
-      category: "Auto-Curated KB",
-      sentiment: "positive",
-      confidence: 92,
+      suggested_category: "Auto-Curated KB",
+      analyzed_sentiment: "positive",
+      confidence_score: 92,
       is_curated: true,
       metadata: { auto_kb_summary: resolutionKb, curated_at: new Date().toISOString() }
-    });
+    }, { onConflict: "ticket_id" });
 
     curatedCount++;
   }
@@ -1300,9 +1318,13 @@ async function handleKbIndexHealthSweep(env: Env): Promise<number> {
   const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
   const now = new Date().toISOString();
 
-  // Audit vector KB table
+  // Audit vector KB table.
+  // Phase 163: this queried `vector_kb`, which no migration creates — the table
+  // is `knowledge_base` (20260511000000_vector_kb.sql). The query errored on
+  // every run, so `auditedCount` was always 0 and the health sweep reported an
+  // empty index as "nominal".
   const { data: kbArticles, count } = await supabase
-    .from("vector_kb")
+    .from("knowledge_base")
     .select("id, title", { count: "exact" })
     .limit(50);
 
@@ -1457,7 +1479,11 @@ async function handleGlobalAnalytics(request: Request, env: Env): Promise<Respon
   let isAuthorized = role === 'admin' || role === 'lead';
 
   if (!isAuthorized) {
-    const { data: profile } = await supabase.from('profiles').select('role').eq('id', user.id).single();
+    // Phase 163: this reads `team_profiles`, not `profiles` — no migration ever
+    // created `profiles`, so the query always came back null and the fallback
+    // could never authorize anyone. Operators whose role is lead/admin in
+    // `team_profiles` were rejected by every route that uses this guard.
+    const { data: profile } = await supabase.from('team_profiles').select('role').eq('id', user.id).single();
     if (profile && (profile.role === 'admin' || profile.role === 'lead')) {
       isAuthorized = true;
     }
@@ -1545,11 +1571,15 @@ async function handleGlobalAnalytics(request: Request, env: Env): Promise<Respon
     // Mock average resolution time (minutes) based on ticket resolution events
     // Assuming 45 minutes for now unless calculated
     let avgResolutionTimeMinutes = 45;
+    // Phase 163: `events_ax2024` timestamps are `created_at`; this pair of
+    // `timestamp` references is the migration-side twin of the thirteen worker
+    // sites phase 162 fixed. The query raised 42703 and was ignored, so the
+    // dashboard's mean time to resolution was the hard-coded 45 minutes.
     const { data: resolutionEvents } = await supabase
       .from('events_ax2024')
-      .select('payload, timestamp')
+      .select('payload, created_at')
       .eq('type', 'ticket_resolved')
-      .gte('timestamp', past7Days.toISOString());
+      .gte('created_at', past7Days.toISOString());
 
     if (resolutionEvents && resolutionEvents.length > 0) {
       avgResolutionTimeMinutes = Math.round(1800 / resolutionEvents.length); // arbitrary calculation
@@ -2130,10 +2160,14 @@ export default {
           breach_details: open_breaches.map(t => t.id)
         };
 
-        // Pending HITL logs
+        // Pending HITL logs.
+        // Phase 163: the column is `support_ticket_id` (added by
+        // 20260702000000_hitl_support_link.sql); `ticket_id` raised 42703, so
+        // this select threw and the ops digest aborted before it could report
+        // pending approvals.
         const { data: hitlData, error: hitlErr } = await supabase
           .from('hitl_audit_logs')
-          .select('id, ticket_id, tool_type')
+          .select('id, support_ticket_id, tool_type')
           .eq('status', 'pending');
 
         if (hitlErr) throw hitlErr;
@@ -3008,11 +3042,18 @@ export default {
 
         if (meta && meta.ticket_id) {
           const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
-          await supabase.from("ticket_audit_events").insert({
-            ticket_id: meta.ticket_id,
-            action_type: `email_${event}`,
-            performed_by: 'system',
-            details: { message_id, provider: 'emailit' }
+          // Phase 163: `ticket_audit_events` is a table no migration creates.
+          // Inbound-mail audit events therefore vanished silently (the insert
+          // error was never inspected) — every "we emailed the customer" claim
+          // had no durable record behind it. The event bus is `events_ax2024`.
+          await supabase.from("events_ax2024").insert({
+            type: `ticket_email_${event}`,
+            payload: {
+              ticket_id: meta.ticket_id,
+              action_type: `email_${event}`,
+              performed_by: 'system',
+              details: { message_id, provider: 'emailit' }
+            }
           });
         }
 
@@ -3073,11 +3114,16 @@ export default {
           }
         }
 
-        // Text search fallback if vector search returns empty
+        // Text search fallback if vector search returns empty.
+        // Phase 163: this queried `knowledge_articles` (no such table — it is
+        // `knowledge_base`) and selected `category` / `metadata`, which
+        // `knowledge_base` does not have either, so even a renamed query would
+        // have failed with 42703. The fallback never returned a row, which is
+        // why KB search only ever worked through the vector path.
         if (results.length === 0) {
           const { data } = await supabase
-            .from("knowledge_articles")
-            .select("id, title, content, category, created_at, metadata")
+            .from("knowledge_base")
+            .select("id, title, content, created_at")
             .ilike("title", `%${query}%`)
             .limit(5);
           if (data) results = data;
@@ -3263,11 +3309,105 @@ export default {
       const { data: { user }, error: authError } = await supabaseAuth.auth.getUser();
       if (authError || !user) return new Response(JSON.stringify({ error: "FORBIDDEN" }), { status: 403, headers: getCorsHeaders(env, request) });
 
-      // Re-queue logic here (mark resolved in DLQ, fire corresponding process...)
+      // Re-queue the dead letter.
+      //
+      // Phase 163: this block used to be three lines of theatre. It updated
+      // `dlq_events_ax2024` — a table no migration creates — with a `status` and
+      // `resolved_at` column that do not exist even on the real table, never
+      // inspected the error, and returned `{ success: true }`. An operator
+      // clicking "retry" on a dead letter was told the retry worked while the
+      // row was untouched and nothing was re-dispatched, so the DLQ never
+      // drained.
+      //
+      // Dead letters live in `events_ax2024` as `type = 'dlq_queue_inserted'`
+      // (see `/api/v1/dlq/flush`), and their state lives in `payload.status` —
+      // the same shape `/api/v1/admin/dlq/force-retry` already relies on. Mirror
+      // that: re-dispatch to the recorded destination, then record the outcome
+      // instead of asserting it.
       const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
-      await supabase.from("dlq_events_ax2024").update({ status: "resolved", resolved_at: new Date().toISOString() }).eq("id", dlqId);
 
-      return new Response(JSON.stringify({ success: true, dlq_id: dlqId }), {
+      const { data: dlqEvent, error: dlqLoadError } = await supabase
+        .from("events_ax2024")
+        .select("id, type, payload")
+        .eq("id", dlqId)
+        .maybeSingle();
+
+      if (dlqLoadError) {
+        return new Response(JSON.stringify({ error: "Failed to load dead letter", details: dlqLoadError.message }), { status: 500, headers: getCorsHeaders(env, request) });
+      }
+      if (!dlqEvent) {
+        return new Response(JSON.stringify({ error: "DEAD_LETTER_NOT_FOUND", dlq_id: dlqId }), { status: 404, headers: getCorsHeaders(env, request) });
+      }
+      if (dlqEvent.type !== "dlq_queue_inserted") {
+        return new Response(JSON.stringify({ error: "NOT_A_DEAD_LETTER", dlq_id: dlqId, type: dlqEvent.type }), { status: 409, headers: getCorsHeaders(env, request) });
+      }
+
+      const attemptedAt = new Date().toISOString();
+      const attemptCount = (dlqEvent.payload?.attempt_count || 0) + 1;
+      const destination = dlqEvent.payload?.original_destination;
+
+      // A dead letter with no recorded destination has nothing to replay. Say so
+      // rather than reporting a retry that could not have happened.
+      if (!destination) {
+        return new Response(JSON.stringify({
+          error: "DEAD_LETTER_HAS_NO_DESTINATION",
+          dlq_id: dlqId,
+          message: "This entry records no original_destination, so there is nothing to re-dispatch. Use /api/v1/admin/dlq/force-retry with an updated_payload."
+        }), { status: 422, headers: getCorsHeaders(env, request) });
+      }
+
+      let dispatched = false;
+      let failureReason: string | null = null;
+      try {
+        // The producer of `dlq_queue_inserted` is outside this worker (Coding Lab
+        // / Core), so the body is replayed from `original_payload` when the
+        // producer nested it and from `payload` otherwise. Both are read
+        // defensively; neither is asserted to exist.
+        const replayBody = dlqEvent.payload?.original_payload ?? dlqEvent.payload;
+        await dispatchSecureEgressWebhook(destination, replayBody, env, supabase);
+        dispatched = true;
+      } catch (dispatchError: any) {
+        failureReason = dispatchError?.message || String(dispatchError);
+      }
+
+      const nextStatus = dispatched ? "resolved" : "retry_failed";
+      const { error: markError } = await supabase
+        .from("events_ax2024")
+        .update({
+          payload: {
+            ...(dlqEvent.payload || {}),
+            status: nextStatus,
+            attempt_count: attemptCount,
+            last_attempt_at: attemptedAt,
+            resolved_at: dispatched ? attemptedAt : dlqEvent.payload?.resolved_at ?? null,
+            last_error: failureReason,
+            retried_by: user.id,
+          },
+        })
+        .eq("id", dlqId);
+
+      if (markError) {
+        return new Response(JSON.stringify({ error: "Failed to record retry outcome", details: markError.message }), { status: 500, headers: getCorsHeaders(env, request) });
+      }
+
+      if (!dispatched) {
+        return new Response(JSON.stringify({
+          success: false,
+          dlq_id: dlqId,
+          status: nextStatus,
+          attempt_count: attemptCount,
+          error: "Re-dispatch failed",
+          details: failureReason
+        }), { status: 502, headers: getCorsHeaders(env, request) });
+      }
+
+      return new Response(JSON.stringify({
+        success: true,
+        dlq_id: dlqId,
+        status: nextStatus,
+        attempt_count: attemptCount,
+        message: "Dead letter re-dispatched and marked resolved"
+      }), {
         status: 200, headers: { "Content-Type": "application/json", ...getCorsHeaders(env, request) }
       });
     }
@@ -4209,9 +4349,14 @@ ${messages.map((m: any) => `[${m.sender_id}]:${m.message_body}`).join("\n")}`;
             });
         }
 
+        // Phase 163: `support_tickets` has no `resolution_notes` column, so this
+        // update raised 42703 and the whole undo path 500'd — the revert never
+        // happened. Resolution notes live in `ticket_messages`, not on the
+        // ticket row, so putting the ticket back in progress is the whole
+        // revert; the message history stays intact as the audit trail.
         const { error: updateError } = await supabase
             .from('support_tickets')
-            .update({ status: 'in_progress', resolution_notes: null, updated_at: new Date().toISOString() })
+            .update({ status: 'in_progress', updated_at: new Date().toISOString() })
             .eq('id', ticketId);
 
         if (updateError) throw updateError;
@@ -6936,8 +7081,13 @@ async function handleFeedbackIngress(request: Request, env: Env, ctx: any): Prom
           await supabase.from('hitl_audit_logs').insert({
             support_ticket_id: ticket_id,
             status: 'pending',
-            action_required: 'Review Failure Analysis and update ecosystem memory if valid.',
             tool_type: 'update_memory_bank',
+            // Phase 163: `action_required` is now a real column (added by
+            // 20261701000000_phase163_schema_reconciliation.sql). Before that it
+            // raised 42703 here and the catch below swallowed it, so the
+            // continuous-learning failure analysis was generated, paid for, and
+            // then discarded without ever reaching an operator.
+            action_required: 'Review Failure Analysis and update ecosystem memory if valid.',
             payload: analysisResult
           });
         } catch (err: any) {
@@ -7675,7 +7825,10 @@ async function generateAndSendLeaderboardDigest(env: Env): Promise<void> {
       .from('events_ax2024')
       .select('type, payload')
       .in('type', ['onyx_memory_bank_contributed', 'onyx_memory_renewed'])
-      .gte('timestamp', thirtyDaysAgo);
+      // Phase 163: `events_ax2024` has `created_at`; `.gte('timestamp', ...)`
+      // raised 42703, the throw below skipped the whole leaderboard, and the
+      // weekly leaderboard email went out empty.
+      .gte('created_at', thirtyDaysAgo);
 
     if (fetchError) throw fetchError;
 
@@ -7980,7 +8133,9 @@ async function generateAndSendShiftHandover(env: Env) {
     const { data: recentEvents, error: eventsError } = await supabase
       .from('events_ax2024')
       .select('*')
-      .gte('timestamp', eightHoursAgo);
+      // Phase 163: `created_at`, not `timestamp`. The 8-hourly shift handover
+      // threw on this filter and reported nothing to the incoming shift.
+      .gte('created_at', eightHoursAgo);
 
     if (eventsError) throw eventsError;
 
@@ -8061,12 +8216,26 @@ async function handleChatUploadAuth(request: Request, env: Env): Promise<Respons
     const supabaseAdmin = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
     const path = `${user.id}/${Date.now()}-${filename.replace(/[^a-zA-Z0-9.-]/g, '_')}`;
 
-    // Note: We're using createSignedUploadUrl logic
-    const { data, error } = await supabaseAdmin.storage.from('support-attachments').createSignedUploadUrl(path);
+    // Phase 163: this route signed uploads into `support-attachments`, a bucket
+    // no migration creates. The only bucket migration is
+    // 20260701000000_support_attachments.sql, which creates `ticket_attachments`
+    // — and both other call sites in this worker (`handlePublicIntake` at the
+    // upload, `handleDataRetentionSweep` at the delete) already use it. Every
+    // chat attachment upload therefore failed with "Bucket not found".
+    const BUCKET = 'ticket_attachments';
+
+    const { data, error } = await supabaseAdmin.storage.from(BUCKET).createSignedUploadUrl(path);
 
     if (error) throw error;
 
-    const { data: publicUrlData } = supabaseAdmin.storage.from('support-attachments').getPublicUrl(path);
+    // `ticket_attachments` is a private bucket (`public: false` in the
+    // migration), so `getPublicUrl` returned an `/object/public/...` URL that
+    // 400s no matter what was uploaded. Chat attachments need a signed read URL.
+    const { data: signedRead, error: signedReadError } = await supabaseAdmin.storage
+      .from(BUCKET)
+      .createSignedUrl(path, 60 * 60);
+
+    if (signedReadError) throw signedReadError;
 
     await supabaseAdmin.from("events_ax2024").insert({
       type: "chat_attachment_authorized",
@@ -8083,7 +8252,10 @@ async function handleChatUploadAuth(request: Request, env: Env): Promise<Respons
       success: true,
       uploadUrl: data.signedUrl,
       path: path,
-      publicUrl: publicUrlData.publicUrl
+      // Kept under `publicUrl` because LiveChatPanel.jsx stores this key on the
+      // chat message. It is a 1-hour signed URL, not a permanent public one —
+      // the bucket is private.
+      publicUrl: signedRead.signedUrl
     }), {
       status: 200, headers: { "Content-Type": "application/json", ...getCorsHeaders(env, request) }
     });
@@ -8223,8 +8395,13 @@ function handleChatConnect(request: Request, env: Env): Response {
                if (!error && user && user.user_metadata && (user.user_metadata.role === 'operator' || user.user_metadata.role === 'lead' || user.user_metadata.role === 'admin' || user.user_metadata.role === 'manager')) {
                  senderRole = "operator";
                } else if (!error && user) {
-                  // check profiles table if role not in metadata
-                  const { data: profile } = await supabaseAdmin.from('profiles').select('role').eq('id', user.id).single();
+                  // check team_profiles if role not in metadata.
+                  // Phase 163: `profiles` does not exist (it is `team_profiles`),
+                  // so this fallback raised 42703 inside a catch that only
+                  // logged — an operator authenticating with a bearer token
+                  // whose role lived in the profile row, not in user_metadata,
+                  // was downgraded out of the operator socket path.
+                  const { data: profile } = await supabaseAdmin.from('team_profiles').select('role').eq('id', user.id).single();
                   if (profile && (profile.role === 'operator' || profile.role === 'lead' || profile.role === 'admin' || profile.role === 'manager')) {
                      senderRole = "operator";
                   }
@@ -8465,8 +8642,11 @@ async function handleCSATFeedback(request: Request, env: Env, ctx: any): Promise
       ctx.waitUntil(
         supabase.from("events_ax2024").insert({
           type: "csat_feedback_received",
-          timestamp: new Date().toISOString(),
-          payload: { ticket_id: ticketId, rating, sentiment: sentimentScore }
+          // Phase 163: `events_ax2024` has no top-level `timestamp` column, so
+          // this insert raised 42703 (into an un-awaited promise with no error
+          // handling) and no CSAT event was ever recorded — the leaderboard and
+          // the learning loop both read these events.
+          payload: { ticket_id: ticketId, rating, sentiment: sentimentScore, timestamp: new Date().toISOString() }
         })
       );
     }
