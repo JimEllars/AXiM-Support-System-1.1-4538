@@ -1,5 +1,99 @@
 # Changelog
 
+## 2026-11-06 — Phase 163: schema-drift gate, table/column reconciliation, frontend gate honesty
+
+Full evidence, line ranges and before/after logs: `AGENTS_VERIFICATION.d/2026-11-06-phase-163.md`.
+
+The roadmap items in the runbook (Coding Lab dispatch HMAC, `resolve-from-coder` inbound
+verification, CGI/traversal shielding, `callAIWithFailover` consolidation,
+`robotics/fault-ingest`, SLA sweep + `EmailDispatchManager` failover) were verified as already
+implemented and hardened by phases 159–162. No work was needed. What was left was the item the
+phase-162 notes asked for — a migration-replay gate — and auditing the worker against the
+migrations found **20 live defects** of the same shape as phase 162's.
+
+### The gate
+
+- **`onyx-edge-worker/test/schema-drift.test.js` (new, 5 cases).** Parses `supabase/migrations/*.sql`
+  into a table → column map and asserts that every table and column `src/index.ts` touches exists
+  in it. A real replay needs Postgres plus `pg_cron`/`pgvector`/`uuid-ossp`, none of which exist
+  here; this is the offline subset, and it runs in the `edge-worker` CI job with no new services.
+  It found all 20 defects below on its first green-capable run. 88 distinct (table, column) pairs
+  across ~8.8k lines; comment masking and brace-aware object parsing are what took the finding
+  count from 107 to 20.
+- **The migration chain could not replay from empty.** `contacts_ax2024` and `organizations` are
+  referenced by FK in `20260510000000_support_schema.sql` and `20261201000000`, and no migration
+  creates either. `supabase db reset` dies on migration #1. This is why the replay gate had never
+  been added. New `20260101000000_platform_baseline.sql` creates both with `IF NOT EXISTS`
+  (a no-op on an existing project).
+
+### Schema drift
+
+- **Six queries hit tables no migration creates**: `vector_kb` (is `knowledge_base`), `profiles`
+  (is `team_profiles`, two sites), `ticket_audit_events` (is `events_ax2024`), `knowledge_articles`
+  (is `knowledge_base`, and it also selected `category`/`metadata`, which that table lacks),
+  `dlq_events_ax2024` (is `events_ax2024`). The vector-KB audit reported an empty index as
+  "nominal", the authz fallback could never authorize a lead, inbound-mail audit events were
+  discarded, and KB keyword search never returned a row.
+- **`/api/v1/dlq/retry/:id` returned `{ success: true }` while doing nothing** — wrong table, two
+  columns that do not exist even on the right table, error never inspected, nothing re-dispatched.
+  It now loads the dead letter (404/409/422 on the three ways it can be unretryable), re-dispatches
+  through `dispatchSecureEgressWebhook`, and persists `payload.status = resolved | retry_failed`
+  with attempt count and last error. A 200 now means bytes changed hands.
+- **`20261401000000_ingress_performance_indexes.sql` has never applied.** It indexed
+  `ticket_ai_telemetry(created_at, provider)` against a `provider` column no migration creates, and
+  `events_ax2024(type, timestamp)` against `created_at`. Two failing statements, applied in one
+  transaction: all three indexes in that file have never existed on any database. Fixed in place,
+  because a later migration cannot repair an earlier file's failure.
+- **`hitl_audit_logs.action_required` did not exist** — and line 4592 is the **operator HITL
+  approve/reject path**. The update could not be written, `.single()` returned no row, and
+  approvals 409'd. Added as a real column.
+- **`team_profiles.role` did not exist.** `.in("role", ["lead","manager","admin"])` raised 42703,
+  so the SLA-breach sweep could not resolve department leads and **no lead was ever emailed**.
+  Phase 162 fixed the routing and left the filter broken. Added `role` + `updated_at`.
+- **`memory_banks.author_id` / `tenant_id` did not exist** — leaderboard contribution scores were
+  always 0 and every tenant memory read came back empty. Added both, indexed.
+- **`support_attachments` did not exist.** The upload wrote bytes to storage then bound them to the
+  ticket in a table no migration creates, so every attachment was orphaned: the object existed, the
+  listing row never did, and the 90-day retention sweep had nothing to iterate and deleted nothing.
+  Table created with RLS.
+- **`support_tickets.resolution_notes` did not exist**, so the undo/revert action 500'd. Resolution
+  notes live in `ticket_messages`; the revert just moves status back.
+- **Three more `events_ax2024` queries filtered on `timestamp`** (phase 162 fixed thirteen and
+  missed these) and one inserted a top-level `timestamp` column, so CSAT events were never
+  recorded. All four now use `created_at` / `payload`.
+- **`ticket_ai_telemetry.ticket_id` is the primary key**, so both telemetry writes collided on
+  23505 whenever a ticket was processed twice, and `.select("id")` raised 42703. Both are now
+  `upsert(…, { onConflict: "ticket_id" })`.
+- New `20261701000000_phase163_schema_reconciliation.sql` holds the additive column work, mirroring
+  phase 162's `20261601000000_worker_written_columns.sql`.
+
+### Attachments
+
+- **Chat uploads targeted a bucket that does not exist.** `/api/v1/chat/upload-auth` signed into
+  `support-attachments`; the only bucket migration creates `ticket_attachments`, and both other
+  call sites already use it. Every chat attachment upload failed with "Bucket not found".
+  Phase 162 recorded this as needing a product decision — the codebase is 3-to-1, so it is not one.
+- **`getPublicUrl` on a private bucket** returned an `/object/public/…` URL that 400s. Replaced with
+  `createSignedUrl(path, 3600)`; the response keeps the `publicUrl` key because
+  `LiveChatPanel.jsx` stores it. Chat history outliving the signature is a follow-up.
+
+### Frontend test gate
+
+- **Correction to the phase-162 record.** The gate was not silently green: unhandled pool errors
+  set `process.exitCode = 1`, so CI fails. What phase 162 saw ("4 files / 20 tests passed" with a
+  file missing) was a misleading *count* on a run that did exit non-zero.
+- **Root cause verified in vitest 4.1.11 source**: `START_TIMEOUT = 6e4` is a module constant and
+  `poolOptions` was removed in Vitest 4, so nothing can raise it; a fork reports `started` only
+  after `worker.setup()` → `environment.setup()` → `await import('happy-dom')`. That import is
+  15.5s here (19 MB / 609 files) inside a 60s budget.
+- `maxWorkers: 1` made explicit; `environmentOptions.happyDOM` turns off script/CSS/iframe
+  loading the suites never use. `isolate: false` and a uniform happy-dom environment were both
+  tried and reverted with measurements — the first loses every file when one handshake loses, the
+  second makes that handshake do five Window constructions (`environment 40.16s`).
+  Improved, not eliminated; CI is the authority and the next step is `jsdom`.
+- `test_onyx_panel.test.jsx` assigned `global.fetch` at import time and never restored it; now
+  scoped to `beforeEach` / `afterEach`.
+
 ## 2026-11-05 — Phase 162: worker schema drift, honest cron sweeps, route-level bundle split
 
 Full evidence, line ranges and before/after logs: `AGENTS_VERIFICATION.d/2026-11-05-phase-162.md`.
